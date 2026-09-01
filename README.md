@@ -25,6 +25,22 @@ docker compose down
 
 `docker compose down -v` nicht verwenden, wenn der ESP32 weiterhin derselben CA vertrauen soll: Dadurch wird die lokale MySQL-Datenbank gelöscht. Das TLS-Verzeichnis bleibt zwar bestehen, muss aber ebenfalls nicht gelöscht werden.
 
+## Lokal debuggen
+
+Der Hybrid-Modus lässt Backend und Frontend lokal laufen. Docker stellt nur MySQL und den mTLS-Proxy für den ESP32 bereit.
+
+```bash
+docker compose -f compose.dev.yaml up --build -d
+cd backend && mvn spring-boot:run
+cd frontend && npm run dev
+```
+
+Das Backend ist in IntelliJ über die Klasse `AttendanceApplication` debugbar. Der lokale Vite-Server nutzt das erzeugte Serverzertifikat: `https://<TLS_HOST>:5173/terminal/1`. Für den ESP32 bleibt `https://<TLS_HOST>:8444/api/` das mTLS-Ziel. `compose.dev.yaml` veröffentlicht MySQL ausschließlich für den lokalen Backend-Debugger.
+
+```bash
+docker compose -f compose.dev.yaml down
+```
+
 ## ESP32-Test mit mTLS
 
 Beim ersten Einrichten erzeugt `tls-init` einmalig die feste ESP32-Identität: `esp32-client.crt` und `esp32-client.key`. Diese beiden Dateien gehören ausschließlich in die ESP32-Firmware. Der private Schlüssel darf nicht in Git, Logs oder Screenshots erscheinen.
