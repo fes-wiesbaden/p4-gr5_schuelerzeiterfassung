@@ -29,7 +29,7 @@ services:
       - mysql-data:/var/lib/mysql
 
   backend:
-    build: ./backend
+    image: ghcr.io/fes-wiesbaden/p4-gr5_schuelerzeiterfassung-backend:latest
     environment:
       DB_HOST: mysql
       DB_NAME: ${MYSQL_DATABASE}
@@ -45,7 +45,7 @@ services:
       retries: 20
 
   frontend:
-    build: ./frontend
+    image: ghcr.io/fes-wiesbaden/p4-gr5_schuelerzeiterfassung-frontend:latest
 
   nginx:
     image: nginx:1.28-alpine
