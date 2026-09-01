@@ -12,7 +12,8 @@ Lokale Entwicklungsumgebung für die RFID-basierte Anwesenheitserfassung.
 
 ```bash
 cp .env.example .env
-docker compose up --build
+docker compose pull
+docker compose up -d
 ```
 
 Unter Linux müssen `HOST_UID` und `HOST_GID` in `.env` der Ausgabe von `id -u` und `id -g` entsprechen. Unter Docker Desktop für Windows bleiben die Standardwerte `1000`.
