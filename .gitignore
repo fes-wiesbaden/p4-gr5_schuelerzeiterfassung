@@ -4,3 +4,4 @@ frontend/dist/
 .local/
 .env
 img-screenshots/
+.idea/
