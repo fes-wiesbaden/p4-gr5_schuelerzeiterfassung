@@ -15,7 +15,9 @@ cp .env.example .env
 docker compose up --build
 ```
 
-Die Anwendung ist anschließend unter `https://127.0.0.1:8443/terminal/1` erreichbar. HTTP wird nicht veröffentlicht. Beim ersten Start erzeugt `tls-init` eine lokale CA und ein Serverzertifikat unter `.local/tls/`. Browser zeigen zunächst eine Warnung, bis `ca.crt` als lokale Zertifizierungsstelle importiert wurde.
+Unter Linux müssen `HOST_UID` und `HOST_GID` in `.env` der Ausgabe von `id -u` und `id -g` entsprechen. Unter Docker Desktop für Windows bleiben die Standardwerte `1000`.
+
+Die Anwendung ist anschließend unter `https://127.0.0.1:8443/terminal/1` erreichbar. Der ESP32-Scan-Endpunkt ist getrennt unter Port `8444` und verlangt mTLS. HTTP wird nicht veröffentlicht. Beim ersten Start erzeugt `tls-init` die lokalen Zertifikate unter `.local/tls/`. Browser zeigen zunächst eine Warnung, bis `ca.crt` als lokale Zertifizierungsstelle importiert wurde.
 
 ```bash
 docker compose down
@@ -23,16 +25,17 @@ docker compose down
 
 `docker compose down -v` nicht verwenden, wenn der ESP32 weiterhin derselben CA vertrauen soll: Dadurch wird die lokale MySQL-Datenbank gelöscht. Das TLS-Verzeichnis bleibt zwar bestehen, muss aber ebenfalls nicht gelöscht werden.
 
-## ESP32-Test mit HTTPS
+## ESP32-Test mit mTLS
+
+Beim ersten Einrichten erzeugt `tls-init` einmalig die feste ESP32-Identität: `esp32-client.crt` und `esp32-client.key`. Diese beiden Dateien gehören ausschließlich in die ESP32-Firmware. Der private Schlüssel darf nicht in Git, Logs oder Screenshots erscheinen.
 
 1. Die WLAN-IP des testenden Laptops in `TLS_HOST` in `.env` eintragen.
-2. Bei einer geänderten IP das Zertifikat neu erzeugen und nginx neu laden: `docker compose run --rm tls-init && docker compose restart nginx`.
-3. `./.local/tls/ca.crt` als CA-Zertifikat in die ESP32-Test-Firmware übernehmen.
-4. Die HTTPS-URL des ESP32 auf `https://<TLS_HOST>:8443/api/` setzen.
+2. `./.local/tls/ca.crt` als Server-CA sowie `esp32-client.crt` und `esp32-client.key` in die ESP32-Test-Firmware übernehmen.
+3. Die HTTPS-URL des ESP32 auf `https://<TLS_HOST>:8444/api/` setzen.
 
-`WiFiClientSecure` muss dieses CA-Zertifikat mit `setCACert(...)` erhalten. Es prüft damit, ob das Serverzertifikat von der bekannten CA stammt und für die konfigurierte IP ausgestellt wurde. `setInsecure()` ist verboten.
+`WiFiClientSecure` erhält die Server-CA mit `setCACert(...)`, das feste Client-Zertifikat mit `setCertificate(...)` und den privaten Schlüssel mit `setPrivateKey(...)`. Dadurch prüft der ESP32 den Server und nginx prüft den ESP32. `setInsecure()` ist verboten.
 
-Beim Wechsel auf einen anderen Laptop: dessen WLAN-IP in dessen `.env` setzen, dessen lokale CA in die ESP32-Test-Firmware übernehmen und die Ziel-URL aktualisieren. Der ESP32 sendet immer nur an den gerade konfigurierten Laptop.
+Beim Wechsel auf einen anderen Laptop: Vor dem Start dessen `.local/tls/esp32-client-ca.crt` mit der öffentlichen Client-CA vom ersten Einrichten ersetzen. Dann dessen WLAN-IP in `.env` setzen, `docker compose up --build` starten und dessen neue `ca.crt` sowie die Ziel-URL in der ESP32-Firmware aktualisieren. Das feste ESP32-Client-Zertifikat und sein privater Schlüssel bleiben unverändert.
 
 ## Prüfungen
 
