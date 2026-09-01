@@ -8,6 +8,10 @@ Lokale Entwicklungsumgebung für die RFID-basierte Anwesenheitserfassung.
 - Java 21 und Maven 3.8+
 - Node.js 22.12+ und npm
 
+## IntelliJ IDEA
+
+Das Repository-Root als Projekt öffnen. Die Root-`pom.xml` importiert das Maven-Modul `backend` automatisch. IntelliJ fragt gegebenenfalls nach dem Maven-Import; diesen bestätigen und Java 21 als Project SDK wählen.
+
 ## Lokal starten
 
 ```bash
