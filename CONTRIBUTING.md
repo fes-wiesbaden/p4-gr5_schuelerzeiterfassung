@@ -55,3 +55,24 @@ Vor dem Pull Request:
 Vor dem Merge wird die PR geprüft und bei Qualitätsmängeln überarbeitet oder neu strukturiert. Eine vorhandene PR wird verbessert und anschließend gemergt, statt sie zu schließen und dieselbe Änderung als direkten Commit zu duplizieren.
 
 Für Issue- und PR-Arbeit wird die GitHub CLI verwendet. Pushes erfolgen nur mit ausdrücklicher Freigabe.
+
+## Qualitätsprüfungen
+
+Das Projekt verwendet System-Maven; ein Maven Wrapper ist nicht eingecheckt. Befehle werden aus dem Repository-Hauptverzeichnis ausgeführt:
+
+```sh
+# Backend-Formatierung und Verifikation
+mvn spotless:check
+mvn spotless:apply
+mvn -pl backend test
+mvn -pl backend verify
+
+# Frontend-Abhängigkeiten und Prüfungen
+npm --prefix frontend ci
+npm --prefix frontend run lint
+npm --prefix frontend run format:check
+npm --prefix frontend test
+npm --prefix frontend run build
+```
+
+Die Backend-Integrationstests verwenden MySQL über Testcontainers und benötigen Docker. Nach `spotless:apply` erneut `mvn spotless:check` ausführen. GitHub Actions soll dieselben Befehle verwenden.
