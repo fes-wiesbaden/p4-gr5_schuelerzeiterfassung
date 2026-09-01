@@ -1,0 +1,35 @@
+{
+  "name": "attendance-frontend",
+  "private": true,
+  "version": "0.0.1",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "npm run typecheck && vite build",
+    "typecheck": "vue-tsc --noEmit",
+    "test": "vitest run",
+    "lint": "eslint .",
+    "format:check": "prettier --check ."
+  },
+  "dependencies": {
+    "pinia": "4.0.3",
+    "vue": "3.5.42",
+    "vue-router": "5.3.0"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "6.0.8",
+    "@types/node": "22.19.1",
+    "@vue/test-utils": "2.4.6",
+    "@vue/tsconfig": "0.9.1",
+    "eslint": "9.39.1",
+    "eslint-plugin-vue": "10.10.0",
+    "jsdom": "29.0.1",
+    "prettier": "3.9.6",
+    "typescript": "5.9.3",
+    "typescript-eslint": "8.50.0",
+    "vue-eslint-parser": "10.4.1",
+    "vite": "8.2.2",
+    "vitest": "4.1.11",
+    "vue-tsc": "3.3.11"
+  }
+}

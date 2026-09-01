@@ -1,0 +1,16 @@
+:root {
+  font-family: Inter, system-ui, sans-serif;
+  color: #18202a;
+  background: #f7f8fa;
+}
+
+body {
+  margin: 0;
+}
+
+.terminal {
+  display: grid;
+  min-height: 100vh;
+  place-content: center;
+  text-align: center;
+}
