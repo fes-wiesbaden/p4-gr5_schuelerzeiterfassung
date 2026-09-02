@@ -7,7 +7,7 @@ Dieses Dokument beschreibt das geplante MySQL-8-Schema. Tabellen- und Spaltennam
 - Eine RFID-UID steht direkt in `student.rfid_uid`. Es gibt keine `card`-Tabelle und keine UID-Historie. Eine neue UID überschreibt die alte UID.
 - Eine `teaching_unit` ist ein geplanter Unterrichtstag von Montag bis Freitag für eine Klasse im aktiven Block. Sie entsteht nur, wenn der Stundenplan an diesem Tag mindestens einen Slot enthält, und umfasst alle Doppelstunden sowie Raumwechsel dieses Tages.
 - Der aktive Raum eines Scans wird über `terminal -> room -> timetable_slot -> timetable -> block_assignment` bestimmt. Ein Scan in einem späteren Raum aktualisiert dieselbe Tagesanwesenheit.
-- Rohscans und fachliche Anwesenheiten bleiben getrennt. Rohscans werden nach sieben Tagen gelöscht. Anwesenheiten und Audits werden nur durch die vollständige Administrator-Löschung ihres Blockplans entfernt.
+- Rohscans und fachliche Anwesenheiten bleiben getrennt. Rohscans werden nach 14 Tagen gelöscht. Anwesenheiten und zugehörige Audits werden sechs Monate nach dem Ende ihres `block_plan` automatisch gelöscht.
 
 ## Tables
 
@@ -125,7 +125,9 @@ Ein benannter Blockplan für ein Schuljahr und eine Fachrichtung. Mehrere Klasse
 | `name` | `VARCHAR(150)` | not null | `Blockplan Fachinformatik AE 2026/27` |
 | `school_year` | `VARCHAR(9)` | not null | `2026/2027` |
 | `program_name` | `VARCHAR(150)` | not null | `Fachinformatik Anwendungsentwicklung` |
+| `ends_on` | `DATE` | not null | `2027-07-16` |
 
+`ends_on` ist der verbindliche Löschanker: Sechs Monate danach löscht ein serverseitiger Lauf die Anwesenheiten und Audits aller zugehörigen Blockzuordnungen.
 ### `block_assignment`
 
 Aktiviert eine Klasse in einem Blockplan für einen Zeitraum und ordnet ihr einen Stundenplan zu. Der Raum steht je Doppelstunde in `timetable_slot`.
@@ -183,7 +185,7 @@ Unveränderbares Protokoll jeder manuellen Statusänderung.
 | `new_status` | same enum as `attendance.status` | not null | `ENTSCHULDIGT` |
 | `changed_at` | `DATETIME` | not null | `2026-09-08 10:00:00` |
 
-Die Anwendung erlaubt weder Updates noch einzelne Deletes von Audit-Einträgen. Sie werden nur in einer transaktionalen Administrator-Löschung zusammen mit der zugehörigen Anwesenheit entfernt.
+Die Anwendung erlaubt weder Updates noch einzelne Deletes von Audit-Einträgen. Ein serverseitiger Löschlauf entfernt sie sechs Monate nach `block_plan.ends_on` zusammen mit der zugehörigen Anwesenheit.
 
 ### `raw_scan`
 
@@ -201,7 +203,7 @@ Technische Rohdaten des ersten empfangenen Scans je Scan-ID, auch bei unbekannte
 | `processing_result` | `ENUM('VERARBEITET', 'ABGELEHNT')` | not null | `VERARBEITET` |
 | `rejection_reason` | `VARCHAR(100)` | nullable | `KEINE_UNTERRICHTSEINHEIT` |
 
-Rohscans werden anhand von `received_at` nach sieben Tagen gelöscht. Sie werden nie an die Terminaloberfläche zurückgegeben.
+Rohscans werden anhand von `received_at` nach 14 Tagen gelöscht. Sie werden nie an die Terminaloberfläche zurückgegeben.
 
 ## Required Indexes and Validation
 
@@ -217,7 +219,7 @@ Rohscans werden anhand von `received_at` nach sieben Tagen gelöscht. Sie werden
 | Planning | Backend rejects overlapping slot intervals `[start_time, end_time)` for the same room when the affected `block_assignment` periods overlap. |
 | Class planning | Backend rejects overlapping slot intervals `[start_time, end_time)` for the same class when its `block_assignment` periods overlap. |
 | Teaching unit | `UNIQUE(teaching_unit.block_assignment_id, teaching_unit.unit_date)` |
-| Historical deletion | All historical foreign keys use `ON DELETE RESTRICT`. Only an administrator may delete a block plan; the service locks the block plan and its assignments, then deletes `attendance_audit`, `attendance`, `teaching_unit`, `block_assignment`, and `block_plan` in one transaction. |
+| Historical deletion | All historical foreign keys use `ON DELETE RESTRICT`. A server-side retention job selects expired `block_plan` records, then deletes `attendance_audit` before `attendance` in one transaction. Plans, assignments, and teaching units remain. |
 
 ## Scan Resolution Example
 
