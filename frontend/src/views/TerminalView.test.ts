@@ -31,6 +31,16 @@ class FakeEventSource {
   }
 }
 
+async function scan(result: string) {
+  FakeEventSource.last?.scan(result)
+  await nextTick()
+}
+
+async function wait(seconds: number) {
+  vi.advanceTimersByTime(seconds * 1000)
+  await nextTick()
+}
+
 function openTerminal() {
   return mount(TerminalView, { props: { terminalId: '3' } })
 }
@@ -83,5 +93,47 @@ describe('TerminalView', () => {
     await nextTick()
 
     expect(terminal.get('.terminal__connection').text()).toBe('● verbunden')
+  })
+})
+
+describe('TerminalView scan results', () => {
+  it('reports a processed scan as recorded', async () => {
+    const terminal = openTerminal()
+    await scan('VERARBEITET')
+
+    expect(terminal.get('.terminal__headline').text()).toBe('Erfasst')
+    expect(terminal.get('.terminal__stage').classes()).toContain(
+      'terminal__stage--success'
+    )
+  })
+
+  it('reports a rejected scan as not recorded', async () => {
+    const terminal = openTerminal()
+    await scan('ABGELEHNT')
+
+    expect(terminal.get('.terminal__headline').text()).toBe('Nicht erfasst')
+    expect(terminal.get('.terminal__stage').classes()).toContain(
+      'terminal__stage--error'
+    )
+  })
+
+  it('marks every state by symbol and not by colour alone', async () => {
+    const terminal = openTerminal()
+    expect(terminal.get('.terminal__symbol').text()).toBe('⌾')
+
+    await scan('VERARBEITET')
+    expect(terminal.get('.terminal__symbol').text()).toBe('✓')
+
+    await scan('ABGELEHNT')
+    expect(terminal.get('.terminal__symbol').text()).toBe('✕')
+  })
+
+  it('returns to the ready state after three seconds', async () => {
+    const terminal = openTerminal()
+
+    await scan('VERARBEITET')
+    await wait(3)
+
+    expect(terminal.get('.terminal__headline').text()).toBe('Karte auflegen')
   })
 })
