@@ -43,13 +43,14 @@ Der Klassenlehrer darf Schüler seiner Klasse anlegen und löschen. Administrato
 
 ### `student`
 
-Schüler gehören direkt zu einer Klasse. Die UID ist eindeutig und wird beim Ersatz unmittelbar überschrieben.
+Schüler gehören direkt zu einer Klasse. Das Geburtsdatum dient neben Vor- und Nachnamen zur Unterscheidung gleichnamiger Schüler. Es ist nicht eindeutig; die technische Identität bleibt `student.id`. Die UID ist eindeutig und wird beim Ersatz unmittelbar überschrieben.
 
 | Column | MySQL type | Rules | Example |
 | --- | --- | --- | --- |
 | `id` | `BIGINT` | primary key, auto increment | `101` |
 | `first_name` | `VARCHAR(100)` | not null | `Erika` |
 | `last_name` | `VARCHAR(100)` | not null | `Beispiel` |
+| `birth_date` | `DATE` | not null | `2008-05-14` |
 | `school_class_id` | `BIGINT` | not null, foreign key to `school_class.id` | `13` |
 | `rfid_uid` | `VARCHAR(64)` | nullable, unique, plaintext | `TEST-UID-001` |
 | `created_at` | `DATETIME` | not null | `2026-09-01 08:05:00` |

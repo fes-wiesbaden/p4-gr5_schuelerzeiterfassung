@@ -76,3 +76,28 @@ npm --prefix frontend run build
 ```
 
 Die Backend-Integrationstests verwenden MySQL über Testcontainers und benötigen Docker. Nach `spotless:apply` erneut `mvn spotless:check` ausführen. GitHub Actions soll dieselben Befehle verwenden.
+
+## GitHub Actions
+
+Der Workflow `Quality checks` startet bei Pushes und Pull Requests. Er prüft:
+
+- Backend: Spotless, Checkstyle, Maven-Tests und Build;
+- Frontend: ESLint, Prettier, TypeScript-Typecheck, Vitest und Produktionsbuild.
+
+Security-Scans sind derzeit nicht Bestandteil der Pipeline.
+
+Der Workflow `Publish Docker images` startet bei Pull Requests und Pushes auf `main`. Bei Pull Requests werden Backend- und Frontend-Images nur gebaut. Nach einem erfolgreichen Push auf `main` werden beide Images in die GitHub Container Registry veröffentlicht:
+
+- `ghcr.io/fes-wiesbaden/p4-gr5_schuelerzeiterfassung-backend`;
+- `ghcr.io/fes-wiesbaden/p4-gr5_schuelerzeiterfassung-frontend`.
+
+Jedes Image erhält den Commit-SHA und `latest`. Fehlgeschlagene Builds veröffentlichen keine Images. Die Infrastruktur-Images für MySQL und nginx werden nicht in GHCR veröffentlicht; TLS-Init wird lokal gebaut.
+
+Für den Containerstart werden die veröffentlichten Images verwendet:
+
+```sh
+docker compose pull
+docker compose up -d
+```
+
+Bei privaten GHCR-Paketen vorher mit `docker login ghcr.io` anmelden. Lokale Entwicklung mit laufendem Backend und Frontend erfolgt weiterhin über `compose.dev.yaml`.
