@@ -1,7 +1,7 @@
 :root {
   font-family: Inter, system-ui, sans-serif;
-  color: #18202a;
-  background: #f7f8fa;
+  color: #0f172a;
+  background: #f8fafc;
 }
 
 body {
@@ -10,7 +10,112 @@ body {
 
 .terminal {
   display: grid;
+  grid-template-rows: auto 1fr auto;
   min-height: 100vh;
-  place-content: center;
+}
+
+.terminal__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.9rem 1.5rem;
+  background: #34558b;
+  color: #ffffff;
+  font-size: clamp(0.875rem, 1.6vw, 1rem);
+  font-weight: 600;
+}
+
+.terminal__stage {
+  display: grid;
+  align-content: center;
+  justify-items: center;
+  gap: 0.75rem;
+  width: min(640px, 100%);
+  margin: 0 auto;
+  padding: 2rem 1.5rem;
+  box-sizing: border-box;
   text-align: center;
+}
+
+.terminal__symbol {
+  display: grid;
+  place-content: center;
+  width: clamp(6rem, 18vw, 9rem);
+  aspect-ratio: 1;
+  margin: 0 0 0.5rem;
+  border: 3px solid;
+  border-radius: 50%;
+  font-size: clamp(2.5rem, 8vw, 4rem);
+  line-height: 1;
+}
+
+.terminal__headline {
+  margin: 0;
+  font-size: clamp(1.75rem, 5vw, 2.75rem);
+  font-weight: 700;
+  line-height: 1.15;
+}
+
+.terminal__hint {
+  margin: 0;
+  font-size: clamp(0.9375rem, 1.8vw, 1.0625rem);
+  color: #475569;
+}
+
+.terminal__badge {
+  margin: 0.5rem 0 0;
+  padding: 0.6rem 1.25rem;
+  border: 1px solid;
+  border-radius: 0.5rem;
+  font-size: clamp(0.8125rem, 1.5vw, 0.9375rem);
+}
+
+.terminal__stage--ready .terminal__symbol,
+.terminal__stage--ready .terminal__badge {
+  border-color: #34558b;
+  background: #e4ebf6;
+  color: #34558b;
+}
+
+.terminal__stage--ready .terminal__headline {
+  color: #0f172a;
+}
+
+.terminal__stage--success .terminal__symbol,
+.terminal__stage--success .terminal__badge {
+  border-color: #15803d;
+  background: #dcfce7;
+  color: #15803d;
+}
+
+.terminal__stage--success .terminal__headline {
+  color: #15803d;
+}
+
+.terminal__stage--error .terminal__symbol,
+.terminal__stage--error .terminal__badge {
+  border-color: #b91c1c;
+  background: #fee2e2;
+  color: #b91c1c;
+}
+
+.terminal__stage--error .terminal__headline {
+  color: #b91c1c;
+}
+
+.terminal__footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.75rem 1.5rem;
+  border-top: 1px solid #cbd5e1;
+  background: #ffffff;
+  color: #475569;
+  font-size: clamp(0.6875rem, 1.2vw, 0.8125rem);
+}
+
+.terminal__connection {
+  font-weight: 600;
 }
