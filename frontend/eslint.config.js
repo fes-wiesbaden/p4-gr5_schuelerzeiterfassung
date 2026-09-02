@@ -11,7 +11,11 @@ export default [
       parser: vueParser,
       parserOptions: { parser: tseslint.parser }
     },
-    rules: { 'vue/max-attributes-per-line': 'off' }
+    // Diese Regeln widersprechen Prettier, darum aus.
+    rules: {
+      'vue/max-attributes-per-line': 'off',
+      'vue/singleline-html-element-content-newline': 'off'
+    }
   },
   { ignores: ['dist/', 'node_modules/'] }
 ]
