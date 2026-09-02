@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { onMounted, onUnmounted, ref } from 'vue'
 
-defineProps<{ terminalId: string }>()
+const props = defineProps<{ terminalId: string }>()
 
 type ScanState = 'ready' | 'success' | 'error'
 
@@ -26,6 +26,47 @@ const STATES = {
 }
 
 const state = ref<ScanState>('ready')
+const connected = ref(false)
+
+let events: EventSource | undefined
+
+function showResult(result: ScanState) {
+  state.value = result
+}
+
+// Kaputte Nachrichten einfach ignorieren, sonst bleibt die Anzeige hängen.
+function handleScan(event: MessageEvent<string>) {
+  let result
+
+  try {
+    result = JSON.parse(event.data).result
+  } catch {
+    return
+  }
+
+  if (result === 'VERARBEITET') {
+    showResult('success')
+  }
+
+  if (result === 'ABGELEHNT') {
+    showResult('error')
+  }
+}
+
+onMounted(() => {
+  events = new EventSource(`/api/terminals/${props.terminalId}/events`)
+  events.addEventListener('scan', handleScan)
+  events.addEventListener('open', () => {
+    connected.value = true
+  })
+  events.addEventListener('error', () => {
+    connected.value = false
+  })
+})
+
+onUnmounted(() => {
+  events?.close()
+})
 </script>
 
 <template>
@@ -49,6 +90,9 @@ const state = ref<ScanState>('ready')
 
     <footer class="terminal__footer">
       <span>Terminal {{ terminalId }}</span>
+      <span class="terminal__connection">
+        {{ connected ? '● verbunden' : '● nicht verbunden' }}
+      </span>
     </footer>
   </div>
 </template>
