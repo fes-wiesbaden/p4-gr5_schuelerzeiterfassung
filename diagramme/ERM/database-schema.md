@@ -117,17 +117,19 @@ Beispiel für einen Raumwechsel: `10BE13` nutzt montags `A123` von `07:30` bis `
 
 ### `block_plan`
 
-Ein benannter Blockplan für ein Schuljahr und eine Fachrichtung. Mehrere Klassen können darin parallel mit eigenen Stundenplänen aktiv sein.
+Ein benannter Blockplan für eine Fachrichtung und einen Zeitraum. Mehrere Klassen können darin parallel mit eigenen Stundenplänen aktiv sein.
+
+Das Schuljahr ist kein gespeichertes Feld. Die Anzeige wird aus `starts_on` und `ends_on` als `JJJJ/JJJJ` abgeleitet.
 
 | Column | MySQL type | Rules | Example |
 | --- | --- | --- | --- |
 | `id` | `BIGINT` | primary key, auto increment | `1` |
 | `name` | `VARCHAR(150)` | not null | `Blockplan Fachinformatik AE 2026/27` |
-| `school_year` | `VARCHAR(9)` | not null | `2026/2027` |
 | `program_name` | `VARCHAR(150)` | not null | `Fachinformatik Anwendungsentwicklung` |
+| `starts_on` | `DATE` | not null | `2026-08-17` |
 | `ends_on` | `DATE` | not null | `2027-07-16` |
 
-`ends_on` ist der verbindliche Löschanker: Sechs Monate danach löscht ein serverseitiger Lauf die Anwesenheiten und Audits aller zugehörigen Blockzuordnungen.
+Nur Administratoren erstellen einen `block_plan` und geben dabei `starts_on` und `ends_on` an. `ends_on` muss am oder nach `starts_on` liegen und ist der verbindliche Löschanker: Sechs Monate danach löscht ein serverseitiger Lauf die Anwesenheiten und Audits aller zugehörigen Blockzuordnungen.
 ### `block_assignment`
 
 Aktiviert eine Klasse in einem Blockplan für einen Zeitraum und ordnet ihr einen Stundenplan zu. Der Raum steht je Doppelstunde in `timetable_slot`.
@@ -141,7 +143,7 @@ Aktiviert eine Klasse in einem Blockplan für einen Zeitraum und ordnet ihr eine
 | `starts_on` | `DATE` | not null | `2026-09-07` |
 | `ends_on` | `DATE` | not null, must be on or after `starts_on` | `2026-10-02` |
 
-Eine Klasse kann in einem Plan mehrere Zeiträume besitzen. Sie darf nach einem Zwischenblock erneut eingeplant werden.
+Administratoren und Lehrkräfte erstellen Klassen; eine von einer Lehrkraft erstellte Klasse ordnet sie automatisch als Klassenlehrer zu. Administratoren erstellen Stundenpläne für alle Klassen. Lehrkräfte erstellen und ordnen Stundenpläne nur Klassen zu, in denen sie unterrichten oder Klassenlehrer sind. Über `block_assignment` ordnen sie die Klasse und den Stundenplan einem bestehenden Blockplan zu. Eine Klasse kann in einem Plan mehrere Zeiträume besitzen und nach einem Zwischenblock erneut eingeplant werden.
 
 ### `teaching_unit`
 
@@ -216,6 +218,7 @@ Rohscans werden anhand von `received_at` nach 14 Tagen gelöscht. Sie werden nie
 | Teacher assignment | primary key `(teacher_class.staff_id, teacher_class.school_class_id)` |
 | Class teacher | `school_class.class_teacher_id` references `staff.id`; the referenced staff member has role `LEHRKRAFT` and is protected by `ON DELETE RESTRICT` |
 | Timetable validity | Backend rejects a `block_assignment` outside the date range of its assigned `timetable`. |
+| Block plan validity | Backend rejects a `block_assignment` outside `block_plan.starts_on` and `block_plan.ends_on`. |
 | Planning | Backend rejects overlapping slot intervals `[start_time, end_time)` for the same room when the affected `block_assignment` periods overlap. |
 | Class planning | Backend rejects overlapping slot intervals `[start_time, end_time)` for the same class when its `block_assignment` periods overlap. |
 | Teaching unit | `UNIQUE(teaching_unit.block_assignment_id, teaching_unit.unit_date)` |
