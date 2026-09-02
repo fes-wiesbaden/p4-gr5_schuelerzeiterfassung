@@ -11,7 +11,10 @@ export default [
       parser: vueParser,
       parserOptions: { parser: tseslint.parser }
     },
-    rules: { 'vue/max-attributes-per-line': 'off' }
+    rules: {
+      'vue/max-attributes-per-line': 'off',
+      'vue/singleline-html-element-content-newline': 'off'
+    }
   },
   { ignores: ['dist/', 'node_modules/'] }
 ]
