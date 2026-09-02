@@ -7,7 +7,7 @@ Dieses Dokument beschreibt das geplante MySQL-8-Schema. Tabellen- und Spaltennam
 - Eine RFID-UID steht direkt in `student.rfid_uid`. Es gibt keine `card`-Tabelle und keine UID-Historie. Eine neue UID überschreibt die alte UID.
 - Eine `teaching_unit` ist ein geplanter Unterrichtstag von Montag bis Freitag für eine Klasse im aktiven Block. Sie entsteht nur, wenn der Stundenplan an diesem Tag mindestens einen Slot enthält, und umfasst alle Doppelstunden sowie Raumwechsel dieses Tages.
 - Der aktive Raum eines Scans wird über `terminal -> room -> timetable_slot -> timetable -> block_assignment` bestimmt. Ein Scan in einem späteren Raum aktualisiert dieselbe Tagesanwesenheit.
-- Rohscans und fachliche Anwesenheiten bleiben getrennt. Rohscans werden nach sieben Tagen gelöscht. Anwesenheiten und Audits werden nur durch die vollständige Administrator-Löschung ihres Blockplans entfernt.
+- Rohscans und fachliche Anwesenheiten bleiben getrennt. Rohscans werden nach 14 Tagen gelöscht. Anwesenheiten und zugehörige Audits werden sechs Monate nach dem Ende ihres `block_plan` automatisch gelöscht.
 
 ## Tables
 
@@ -43,13 +43,14 @@ Der Klassenlehrer darf Schüler seiner Klasse anlegen und löschen. Administrato
 
 ### `student`
 
-Schüler gehören direkt zu einer Klasse. Die UID ist eindeutig und wird beim Ersatz unmittelbar überschrieben.
+Schüler gehören direkt zu einer Klasse. Das Geburtsdatum dient neben Vor- und Nachnamen zur Unterscheidung gleichnamiger Schüler. Es ist nicht eindeutig; die technische Identität bleibt `student.id`. Die UID ist eindeutig und wird beim Ersatz unmittelbar überschrieben.
 
 | Column | MySQL type | Rules | Example |
 | --- | --- | --- | --- |
 | `id` | `BIGINT` | primary key, auto increment | `101` |
 | `first_name` | `VARCHAR(100)` | not null | `Erika` |
 | `last_name` | `VARCHAR(100)` | not null | `Beispiel` |
+| `birth_date` | `DATE` | not null | `2008-05-14` |
 | `school_class_id` | `BIGINT` | not null, foreign key to `school_class.id` | `13` |
 | `rfid_uid` | `VARCHAR(64)` | nullable, unique, plaintext | `TEST-UID-001` |
 | `created_at` | `DATETIME` | not null | `2026-09-01 08:05:00` |
@@ -116,15 +117,19 @@ Beispiel für einen Raumwechsel: `10BE13` nutzt montags `A123` von `07:30` bis `
 
 ### `block_plan`
 
-Ein benannter Blockplan für ein Schuljahr und eine Fachrichtung. Mehrere Klassen können darin parallel mit eigenen Stundenplänen aktiv sein.
+Ein benannter Blockplan für eine Fachrichtung und einen Zeitraum. Mehrere Klassen können darin parallel mit eigenen Stundenplänen aktiv sein.
+
+Das Schuljahr ist kein gespeichertes Feld. Die Anzeige wird aus `starts_on` und `ends_on` als `JJJJ/JJJJ` abgeleitet.
 
 | Column | MySQL type | Rules | Example |
 | --- | --- | --- | --- |
 | `id` | `BIGINT` | primary key, auto increment | `1` |
 | `name` | `VARCHAR(150)` | not null | `Blockplan Fachinformatik AE 2026/27` |
-| `school_year` | `VARCHAR(9)` | not null | `2026/2027` |
 | `program_name` | `VARCHAR(150)` | not null | `Fachinformatik Anwendungsentwicklung` |
+| `starts_on` | `DATE` | not null | `2026-08-17` |
+| `ends_on` | `DATE` | not null | `2027-07-16` |
 
+Nur Administratoren erstellen einen `block_plan` und geben dabei `starts_on` und `ends_on` an. `ends_on` muss am oder nach `starts_on` liegen und ist der verbindliche Löschanker: Sechs Monate danach löscht ein serverseitiger Lauf die Anwesenheiten und Audits aller zugehörigen Blockzuordnungen.
 ### `block_assignment`
 
 Aktiviert eine Klasse in einem Blockplan für einen Zeitraum und ordnet ihr einen Stundenplan zu. Der Raum steht je Doppelstunde in `timetable_slot`.
@@ -138,7 +143,7 @@ Aktiviert eine Klasse in einem Blockplan für einen Zeitraum und ordnet ihr eine
 | `starts_on` | `DATE` | not null | `2026-09-07` |
 | `ends_on` | `DATE` | not null, must be on or after `starts_on` | `2026-10-02` |
 
-Eine Klasse kann in einem Plan mehrere Zeiträume besitzen. Sie darf nach einem Zwischenblock erneut eingeplant werden.
+Administratoren und Lehrkräfte erstellen Klassen; eine von einer Lehrkraft erstellte Klasse ordnet sie automatisch als Klassenlehrer zu. Administratoren erstellen Stundenpläne für alle Klassen. Lehrkräfte erstellen und ordnen Stundenpläne nur Klassen zu, in denen sie unterrichten oder Klassenlehrer sind. Über `block_assignment` ordnen sie die Klasse und den Stundenplan einem bestehenden Blockplan zu. Eine Klasse kann in einem Plan mehrere Zeiträume besitzen und nach einem Zwischenblock erneut eingeplant werden.
 
 ### `teaching_unit`
 
@@ -182,7 +187,7 @@ Unveränderbares Protokoll jeder manuellen Statusänderung.
 | `new_status` | same enum as `attendance.status` | not null | `ENTSCHULDIGT` |
 | `changed_at` | `DATETIME` | not null | `2026-09-08 10:00:00` |
 
-Die Anwendung erlaubt weder Updates noch einzelne Deletes von Audit-Einträgen. Sie werden nur in einer transaktionalen Administrator-Löschung zusammen mit der zugehörigen Anwesenheit entfernt.
+Die Anwendung erlaubt weder Updates noch einzelne Deletes von Audit-Einträgen. Ein serverseitiger Löschlauf entfernt sie sechs Monate nach `block_plan.ends_on` zusammen mit der zugehörigen Anwesenheit.
 
 ### `raw_scan`
 
@@ -200,7 +205,7 @@ Technische Rohdaten des ersten empfangenen Scans je Scan-ID, auch bei unbekannte
 | `processing_result` | `ENUM('VERARBEITET', 'ABGELEHNT')` | not null | `VERARBEITET` |
 | `rejection_reason` | `VARCHAR(100)` | nullable | `KEINE_UNTERRICHTSEINHEIT` |
 
-Rohscans werden anhand von `received_at` nach sieben Tagen gelöscht. Sie werden nie an die Terminaloberfläche zurückgegeben.
+Rohscans werden anhand von `received_at` nach 14 Tagen gelöscht. Sie werden nie an die Terminaloberfläche zurückgegeben.
 
 ## Required Indexes and Validation
 
@@ -213,10 +218,11 @@ Rohscans werden anhand von `received_at` nach sieben Tagen gelöscht. Sie werden
 | Teacher assignment | primary key `(teacher_class.staff_id, teacher_class.school_class_id)` |
 | Class teacher | `school_class.class_teacher_id` references `staff.id`; the referenced staff member has role `LEHRKRAFT` and is protected by `ON DELETE RESTRICT` |
 | Timetable validity | Backend rejects a `block_assignment` outside the date range of its assigned `timetable`. |
+| Block plan validity | Backend rejects a `block_assignment` outside `block_plan.starts_on` and `block_plan.ends_on`. |
 | Planning | Backend rejects overlapping slot intervals `[start_time, end_time)` for the same room when the affected `block_assignment` periods overlap. |
 | Class planning | Backend rejects overlapping slot intervals `[start_time, end_time)` for the same class when its `block_assignment` periods overlap. |
 | Teaching unit | `UNIQUE(teaching_unit.block_assignment_id, teaching_unit.unit_date)` |
-| Historical deletion | All historical foreign keys use `ON DELETE RESTRICT`. Only an administrator may delete a block plan; the service locks the block plan and its assignments, then deletes `attendance_audit`, `attendance`, `teaching_unit`, `block_assignment`, and `block_plan` in one transaction. |
+| Historical deletion | All historical foreign keys use `ON DELETE RESTRICT`. A server-side retention job selects expired `block_plan` records, then deletes `attendance_audit` before `attendance` in one transaction. Plans, assignments, and teaching units remain. |
 
 ## Scan Resolution Example
 
