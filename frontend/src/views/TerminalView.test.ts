@@ -178,3 +178,49 @@ describe('TerminalView with scans in quick succession', () => {
     )
   })
 })
+
+describe('TerminalView privacy', () => {
+  it('ignores broken and unknown messages', async () => {
+    const terminal = openTerminal()
+
+    FakeEventSource.last?.handlers.scan(
+      new MessageEvent('scan', { data: 'kein json' })
+    )
+    await scan('UNBEKANNT')
+
+    expect(terminal.get('.terminal__headline').text()).toBe('Karte auflegen')
+  })
+
+  it('shows no field of the message besides the result', async () => {
+    const terminal = openTerminal()
+
+    // Auch wenn das Backend mehr schickt, darf nichts davon angezeigt werden.
+    const data = JSON.stringify({
+      result: 'ABGELEHNT',
+      firstName: 'Erika',
+      lastName: 'Beispiel',
+      schoolClass: '10BE13',
+      rfidUid: 'TEST-UID-001',
+      rejectionReason: 'KEINE_UNTERRICHTSEINHEIT'
+    })
+    FakeEventSource.last?.handlers.scan(new MessageEvent('scan', { data }))
+    await nextTick()
+
+    const shown = terminal.html()
+    expect(shown).not.toContain('Erika')
+    expect(shown).not.toContain('Beispiel')
+    expect(shown).not.toContain('10BE13')
+    expect(shown).not.toContain('TEST-UID-001')
+    expect(shown).not.toContain('KEINE_UNTERRICHTSEINHEIT')
+    expect(terminal.get('.terminal__headline').text()).toBe('Nicht erfasst')
+  })
+
+  it('needs no operation and has no button or input', async () => {
+    const terminal = openTerminal()
+    await scan('VERARBEITET')
+
+    expect(terminal.findAll('a, button, input, select, textarea')).toHaveLength(
+      0
+    )
+  })
+})
