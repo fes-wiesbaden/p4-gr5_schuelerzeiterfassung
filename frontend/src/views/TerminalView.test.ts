@@ -4,9 +4,10 @@ import { describe, expect, it } from 'vitest'
 import TerminalView from './TerminalView.vue'
 
 describe('TerminalView', () => {
-  it('shows neutral feedback without personal data', () => {
-    const wrapper = mount(TerminalView, { props: { terminalId: '1' } })
+  it('starts ready and names its terminal', () => {
+    const terminal = mount(TerminalView, { props: { terminalId: '3' } })
 
-    expect(wrapper.text()).toContain('Bereit für die Erfassung.')
+    expect(terminal.get('.terminal__headline').text()).toBe('Karte auflegen')
+    expect(terminal.text()).toContain('Terminal 3')
   })
 })
