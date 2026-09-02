@@ -67,6 +67,12 @@ describe('TerminalView', () => {
     expect(FakeEventSource.last?.closed).toBe(true)
   })
 
+  it('shows the current time while ready', () => {
+    const terminal = openTerminal()
+
+    expect(terminal.get('.terminal__badge').text()).toBe('Bereit · 07:31 Uhr')
+  })
+
   it('reports the connection state in the footer', async () => {
     const terminal = openTerminal()
     expect(terminal.get('.terminal__connection').text()).toBe(
