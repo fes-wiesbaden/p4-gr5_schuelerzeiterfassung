@@ -137,3 +137,44 @@ describe('TerminalView scan results', () => {
     expect(terminal.get('.terminal__headline').text()).toBe('Karte auflegen')
   })
 })
+
+describe('TerminalView with scans in quick succession', () => {
+  it('shows the result of the most recent scan', async () => {
+    const terminal = openTerminal()
+
+    await scan('VERARBEITET')
+    await wait(1)
+    await scan('ABGELEHNT')
+
+    expect(terminal.get('.terminal__headline').text()).toBe('Nicht erfasst')
+  })
+
+  it('starts the countdown again on every following scan', async () => {
+    const terminal = openTerminal()
+
+    await scan('VERARBEITET')
+    await wait(2)
+    await scan('ABGELEHNT')
+
+    // Ohne Neustart stünde hier schon wieder "Karte auflegen".
+    await wait(2)
+    expect(terminal.get('.terminal__headline').text()).toBe('Nicht erfasst')
+
+    await wait(1)
+    expect(terminal.get('.terminal__headline').text()).toBe('Karte auflegen')
+  })
+
+  it('counts the remaining seconds down', async () => {
+    const terminal = openTerminal()
+
+    await scan('VERARBEITET')
+    expect(terminal.get('.terminal__badge').text()).toBe(
+      'Zurück zu „Bereit“ in 3 s'
+    )
+
+    await wait(1)
+    expect(terminal.get('.terminal__badge').text()).toBe(
+      'Zurück zu „Bereit“ in 2 s'
+    )
+  })
+})
