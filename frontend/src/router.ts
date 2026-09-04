@@ -1,5 +1,6 @@
 import { createRouter, createWebHistory } from 'vue-router'
 
+import { useAuthStore } from '@/stores/auth'
 import AppLayout from './layouts/AppLayout.vue'
 import TerminalView from './views/TerminalView.vue'
 import LiveAttendanceView from './views/LiveAttendanceView.vue'
@@ -11,7 +12,13 @@ import RoomsView from './views/RoomsView.vue'
 import TerminalsAdminView from './views/TerminalsAdminView.vue'
 import StaffView from './views/StaffView.vue'
 
-export default createRouter({
+declare module 'vue-router' {
+  interface RouteMeta {
+    adminOnly?: boolean
+  }
+}
+
+const router = createRouter({
   history: createWebHistory(),
   routes: [
     { path: '/terminal/:terminalId', component: TerminalView },
@@ -29,10 +36,35 @@ export default createRouter({
         { path: 'schueler', name: 'schueler', component: StudentsView },
         { path: 'planung', name: 'planung', component: SchedulePlanningView },
         { path: 'auswertungen', name: 'auswertungen', component: ReportsView },
-        { path: 'raeume', name: 'raeume', component: RoomsView },
-        { path: 'terminals', name: 'terminals', component: TerminalsAdminView },
-        { path: 'personal', name: 'personal', component: StaffView }
+        {
+          path: 'raeume',
+          name: 'raeume',
+          component: RoomsView,
+          meta: { adminOnly: true }
+        },
+        {
+          path: 'terminals',
+          name: 'terminals',
+          component: TerminalsAdminView,
+          meta: { adminOnly: true }
+        },
+        {
+          path: 'personal',
+          name: 'personal',
+          component: StaffView,
+          meta: { adminOnly: true }
+        }
       ]
     }
   ]
 })
+
+router.beforeEach((to) => {
+  const auth = useAuthStore()
+
+  if (to.meta.adminOnly && !auth.isAdmin) {
+    return { name: 'live-anwesenheit' }
+  }
+})
+
+export default router

@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { computed } from 'vue'
-import { useRouter } from 'vue-router'
+import { computed, ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import Button from 'primevue/button'
 
 import { useAuthStore } from '@/stores/auth'
@@ -8,6 +8,9 @@ import { administrationNavItems, mainNavItems } from './navigation'
 
 const auth = useAuthStore()
 const router = useRouter()
+const route = useRoute()
+
+const sidebarOpen = ref(false)
 
 const visibleAdministrationItems = computed(() =>
   auth.isAdmin ? administrationNavItems : []
@@ -24,16 +27,41 @@ const roleLabel = computed(() => {
   }
 })
 
+watch(
+  () => route.fullPath,
+  () => {
+    sidebarOpen.value = false
+  }
+)
+
 function handleLogout() {
   auth.logout()
   router.push({ name: 'live-anwesenheit' })
+}
+
+function handleSidebarKeydown(event: KeyboardEvent) {
+  if (event.key === 'Escape') {
+    sidebarOpen.value = false
+  }
 }
 </script>
 
 <template>
   <div class="app-shell">
     <header class="app-header">
-      <span class="app-header__title">RFID-Anwesenheitserfassung</span>
+      <div class="app-header__start">
+        <button
+          type="button"
+          class="app-header__menu-toggle"
+          aria-label="Navigation öffnen"
+          :aria-expanded="sidebarOpen"
+          aria-controls="app-sidebar"
+          @click="sidebarOpen = !sidebarOpen"
+        >
+          <i class="pi pi-bars" aria-hidden="true" />
+        </button>
+        <span class="app-header__title">RFID-Anwesenheitserfassung</span>
+      </div>
       <div class="app-header__user">
         <span class="app-header__user-info">
           {{ auth.user?.name }}
@@ -44,8 +72,19 @@ function handleLogout() {
     </header>
 
     <div class="app-body">
-      <aside class="app-sidebar">
-        <nav>
+      <div
+        v-if="sidebarOpen"
+        class="app-sidebar__backdrop"
+        @click="sidebarOpen = false"
+      />
+
+      <aside
+        id="app-sidebar"
+        class="app-sidebar"
+        :class="{ 'app-sidebar--open': sidebarOpen }"
+        @keydown="handleSidebarKeydown"
+      >
+        <nav aria-label="Hauptnavigation">
           <ul class="app-nav">
             <li v-for="item in mainNavItems" :key="item.routeName">
               <RouterLink
@@ -53,7 +92,7 @@ function handleLogout() {
                 class="app-nav__link"
                 active-class="app-nav__link--active"
               >
-                <i class="pi" :class="item.icon" />
+                <i class="pi" :class="item.icon" aria-hidden="true" />
                 <span>{{ item.label }}</span>
               </RouterLink>
             </li>
@@ -71,7 +110,7 @@ function handleLogout() {
                   class="app-nav__link"
                   active-class="app-nav__link--active"
                 >
-                  <i class="pi" :class="item.icon" />
+                  <i class="pi" :class="item.icon" aria-hidden="true" />
                   <span>{{ item.label }}</span>
                 </RouterLink>
               </li>
@@ -102,6 +141,26 @@ function handleLogout() {
   padding: 0 24px;
   background: #ffffff;
   border-bottom: 1px solid #e2e5ea;
+}
+
+.app-header__start {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.app-header__menu-toggle {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border: 1px solid #d7dce3;
+  border-radius: 6px;
+  background: #ffffff;
+  color: #1e3a5c;
+  font-size: 1rem;
+  cursor: pointer;
 }
 
 .app-header__title {
@@ -136,6 +195,10 @@ function handleLogout() {
   padding: 16px 0;
 }
 
+.app-sidebar__backdrop {
+  display: none;
+}
+
 .app-nav {
   list-style: none;
   margin: 0;
@@ -158,6 +221,12 @@ function handleLogout() {
   color: #ffffff;
 }
 
+.app-nav__link:focus-visible,
+.app-header__menu-toggle:focus-visible {
+  outline: 2px solid #4f8ef7;
+  outline-offset: -2px;
+}
+
 .app-nav__link--active {
   background: rgba(255, 255, 255, 0.1);
   border-left-color: #4f8ef7;
@@ -178,5 +247,44 @@ function handleLogout() {
 .app-content {
   padding: 32px;
   background: #f5f6f8;
+  min-width: 0;
+}
+
+@media (max-width: 960px) {
+  .app-header__menu-toggle {
+    display: inline-flex;
+  }
+
+  .app-body {
+    grid-template-columns: 1fr;
+  }
+
+  .app-sidebar {
+    position: fixed;
+    inset: 64px 0 0 0;
+    width: 260px;
+    height: calc(100vh - 64px);
+    transform: translateX(-100%);
+    visibility: hidden;
+    transition:
+      transform 0.2s ease,
+      visibility 0s linear 0.2s;
+    z-index: 20;
+    overflow-y: auto;
+  }
+
+  .app-sidebar--open {
+    transform: translateX(0);
+    visibility: visible;
+    transition: transform 0.2s ease;
+  }
+
+  .app-sidebar__backdrop {
+    display: block;
+    position: fixed;
+    inset: 64px 0 0 0;
+    background: rgba(15, 23, 42, 0.4);
+    z-index: 10;
+  }
 }
 </style>
