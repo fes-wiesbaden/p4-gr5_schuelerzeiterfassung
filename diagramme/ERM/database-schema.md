@@ -1,3 +1,4 @@
+[[[
 # Database Schema
 
 Dieses Dokument beschreibt das geplante MySQL-8-Schema. Tabellen- und Spaltennamen sind Englisch. Fachliche Werte und Beispieldaten sind Deutsch. Alle Beispiele sind fiktiv; insbesondere ist keine RFID-UID echt.
@@ -187,7 +188,7 @@ Unveränderbares Protokoll jeder manuellen Statusänderung.
 | `new_status` | same enum as `attendance.status` | not null | `ENTSCHULDIGT` |
 | `changed_at` | `DATETIME` | not null | `2026-09-08 10:00:00` |
 
-Die Anwendung erlaubt weder Updates noch einzelne Deletes von Audit-Einträgen. Ein serverseitiger Löschlauf entfernt sie sechs Monate nach `block_plan.ends_on` zusammen mit der zugehörigen Anwesenheit.
+Die Anwendung erlaubt weder Updates noch einzelne Deletes von Audit-Einträgen. Ein serverseitiger Löschlauf entfernt sie sechs Monate nach Schuljahresende zusammen mit den zugehörigen Anwesenheiten, Unterrichtseinheiten, Stundenplänen und Blockplänen.
 
 ### `raw_scan`
 
@@ -222,7 +223,7 @@ Rohscans werden anhand von `received_at` nach 14 Tagen gelöscht. Sie werden nie
 | Planning | Backend rejects overlapping slot intervals `[start_time, end_time)` for the same room when the affected `block_assignment` periods overlap. |
 | Class planning | Backend rejects overlapping slot intervals `[start_time, end_time)` for the same class when its `block_assignment` periods overlap. |
 | Teaching unit | `UNIQUE(teaching_unit.block_assignment_id, teaching_unit.unit_date)` |
-| Historical deletion | All historical foreign keys use `ON DELETE RESTRICT`. A server-side retention job selects expired `block_plan` records, then deletes `attendance_audit` before `attendance` in one transaction. Plans, assignments, and teaching units remain. |
+| Historical deletion | A server-side retention job deletes expired audit records, attendance records, teaching units, schedules, and block plans six months after the school year's end in one transaction. |
 
 ## Scan Resolution Example
 
@@ -269,4 +270,5 @@ Rohscans werden anhand von `received_at` nach 14 Tagen gelöscht. Sie werden nie
 - Ergebnis:
   - Anwesenheit wird `ANWESEND`.
   - `lateness_minutes` wird `110`.
-  - Ein weiterer Scan am selben Tag erzeugt keinen zweiten Anwesenheitsdatensatz.
+- Ein weiterer Scan am selben Tag erzeugt keinen zweiten Anwesenheitsdatensatz.
+]]]
