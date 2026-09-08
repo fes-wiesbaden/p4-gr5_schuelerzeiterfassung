@@ -36,6 +36,34 @@ jobs:
       - name: Run tests and build
         run: mvn -pl backend verify
 
+  terminal:
+    name: Terminal quality
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+
+      # JavaFX braucht eine Anzeige. Der Runner hat keine, deshalb Xvfb.
+      - name: Install Xvfb
+        run: sudo apt-get update && sudo apt-get install -y xvfb
+
+      - name: Check formatting
+        run: mvn -pl terminal spotless:check
+
+      - name: Run Checkstyle
+        run: mvn -pl terminal org.apache.maven.plugins:maven-checkstyle-plugin:3.6.0:check -Dcheckstyle.config.location=$PWD/backend/config/checkstyle/checkstyle.xml
+
+      - name: Run tests and build
+        run: xvfb-run -a mvn -pl terminal verify
+
   frontend:
     name: Frontend quality
     runs-on: ubuntu-latest
