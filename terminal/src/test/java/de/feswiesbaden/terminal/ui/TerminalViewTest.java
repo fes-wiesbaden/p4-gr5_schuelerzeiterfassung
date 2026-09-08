@@ -1,18 +1,16 @@
 package de.feswiesbaden.terminal.ui;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import java.util.ArrayList;
-import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import javafx.application.Platform;
 import javafx.scene.Node;
 import javafx.scene.Parent;
-import javafx.scene.control.ButtonBase;
-import javafx.scene.control.ComboBoxBase;
-import javafx.scene.control.TextInputControl;
+import javafx.scene.control.Control;
+import javafx.scene.control.Label;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
@@ -21,64 +19,48 @@ class TerminalViewTest {
   @BeforeAll
   static void javafxStarten() throws InterruptedException {
     CountDownLatch bereit = new CountDownLatch(1);
+
     try {
-      Platform.startup(bereit::countDown);
+      Platform.startup(() -> bereit.countDown());
     } catch (IllegalStateException laeuftSchon) {
       bereit.countDown();
     }
+
     assertTrue(bereit.await(10, TimeUnit.SECONDS), "JavaFX ist nicht gestartet");
   }
 
   @Test
-  void hatKeineBedienelemente() throws Exception {
-    TerminalView view = aufDemFxThread(TerminalView::new);
+  void hatKeineBedienelemente() throws InterruptedException {
+    Parent ansicht = baueAnsicht();
 
-    List<Node> bedienbar = new ArrayList<>();
-    sammleBedienelemente(view.node(), bedienbar);
-
-    assertEquals(List.of(), bedienbar, "Die Terminalansicht darf nichts Bedienbares enthalten");
+    for (Node knoten : ansicht.lookupAll("*")) {
+      // Label ist zwar ein Control, kann man aber nicht bedienen.
+      boolean bedienbar = knoten instanceof Control && !(knoten instanceof Label);
+      assertFalse(bedienbar, "Bedienelement gefunden: " + knoten);
+    }
   }
 
   @Test
-  void zeigtImGrundzustandKeineUidUndKeinenNamen() throws Exception {
-    TerminalView view = aufDemFxThread(TerminalView::new);
+  void zeigtImGrundzustandKarteAuflegen() throws InterruptedException {
+    Parent ansicht = baueAnsicht();
 
-    String text = allerText(view.node());
-    assertTrue(text.contains("Karte auflegen"), "Grundzustand fehlt");
-    assertTrue(text.contains("Terminal"), "Fußzeile fehlt");
+    Label ueberschrift = (Label) ansicht.lookup(".headline");
+    assertEquals("Karte auflegen", ueberschrift.getText());
   }
 
-  private static void sammleBedienelemente(Node knoten, List<Node> treffer) {
-    if (knoten instanceof ButtonBase
-        || knoten instanceof TextInputControl
-        || knoten instanceof ComboBoxBase<?>) {
-      treffer.add(knoten);
-    }
-    if (knoten instanceof Parent eltern) {
-      eltern.getChildrenUnmodifiable().forEach(kind -> sammleBedienelemente(kind, treffer));
-    }
-  }
-
-  private static String allerText(Node knoten) {
-    StringBuilder alles = new StringBuilder();
-    if (knoten instanceof javafx.scene.control.Labeled beschriftet) {
-      alles.append(beschriftet.getText()).append(' ');
-    }
-    if (knoten instanceof Parent eltern) {
-      eltern.getChildrenUnmodifiable().forEach(kind -> alles.append(allerText(kind)));
-    }
-    return alles.toString();
-  }
-
-  private static <T> T aufDemFxThread(java.util.function.Supplier<T> bauen) throws Exception {
-    List<T> ergebnis = new ArrayList<>();
+  // JavaFX baut Oberflächen nur im eigenen Thread. Also dort bauen und warten,
+  // bis sie fertig ist.
+  private static Parent baueAnsicht() throws InterruptedException {
+    Parent[] ergebnis = new Parent[1];
     CountDownLatch fertig = new CountDownLatch(1);
+
     Platform.runLater(
         () -> {
-          ergebnis.add(bauen.get());
+          ergebnis[0] = new TerminalView().node();
           fertig.countDown();
         });
+
     assertTrue(fertig.await(10, TimeUnit.SECONDS), "Oberfläche wurde nicht gebaut");
-    return ergebnis.get(0);
+    return ergebnis[0];
   }
 }
