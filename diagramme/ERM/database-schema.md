@@ -15,29 +15,29 @@ Dieses Dokument beschreibt das geplante MySQL-8-Schema. Tabellen- und Spaltennam
 
 Personal mit Anmeldung. `role` unterscheidet Lehrkräfte und Administratoren.
 
-| Column | MySQL type | Rules | Example |
-| --- | --- | --- | --- |
-| `id` | `BIGINT` | primary key, auto increment | `1` |
-| `first_name` | `VARCHAR(100)` | not null | `Anna` |
-| `last_name` | `VARCHAR(100)` | not null | `Muster` |
-| `username` | `VARCHAR(120)` | not null, unique | `anna.muster` |
-| `password_hash` | `VARCHAR(60)` | not null, BCrypt hash | `<bcrypt-hash>` |
-| `role` | `ENUM('LEHRKRAFT', 'ADMINISTRATOR')` | not null | `LEHRKRAFT` |
-| `created_at` | `DATETIME` | not null | `2026-09-01 08:00:00` |
+| Column          | MySQL type                           | Rules | Example |
+|-----------------|--------------------------------------| --- | --- |
+| `staff_id`      | `BIGINT`                             | primary key, auto increment | `1` |
+| `first_name`    | `VARCHAR(30)`                        | not null | `Anna` |
+| `last_name`     | `VARCHAR(30)`                        | not null | `Muster` |
+| `username`      | `VARCHAR(40)`                        | not null, unique | `anna.muster` |
+| `password_hash` | `VARCHAR(60)`                        | not null, BCrypt hash | `<bcrypt-hash>` |
+| `role`          | `ENUM('LEHRKRAFT', 'ADMINISTRATOR')` | not null | `LEHRKRAFT` |
+| `created_at`    | `DATETIME`                           | not null | `2026-09-01 08:00:00` |
 
 Der Benutzername wird aus `vorname.nachname` gebildet. Bei einer Kollision erhält er einen numerischen Suffix, zum Beispiel `anna.muster2`.
 
-### `school_class`
+### `class`
 
 Stammdaten einer Schulklasse. Jede Klasse hat genau einen Klassenlehrer. Der Stundenplan wird über die aktive Blockzuordnung bestimmt, nicht direkt an der Klasse gespeichert.
 
-| Column | MySQL type | Rules | Example |
-| --- | --- | --- | --- |
-| `id` | `BIGINT` | primary key, auto increment | `13` |
-| `class_code` | `VARCHAR(30)` | not null, unique | `10BE13` |
-| `display_name` | `VARCHAR(120)` | not null | `Fachinformatik AE 10BE13` |
+| Column             | MySQL type | Rules | Example |
+|--------------------| --- | --- | --- |
+| `class_id`         | `BIGINT` | primary key, auto increment | `13` |
+| `class_code`       | `VARCHAR(30)` | not null, unique | `10BE13` |
+| `display_name`     | `VARCHAR(120)` | not null | `Fachinformatik AE 10BE13` |
 | `class_teacher_id` | `BIGINT` | not null, foreign key to `staff.id`; referenced staff member must have role `LEHRKRAFT` | `1` |
-| `created_at` | `DATETIME` | not null | `2026-09-01 08:00:00` |
+| `created_at`       | `DATETIME` | not null | `2026-09-01 08:00:00` |
 
 Der Klassenlehrer darf Schüler seiner Klasse anlegen und löschen. Administratoren dürfen dies für alle Klassen. Die Rollenprüfung erfolgt serverseitig.
 
@@ -45,15 +45,15 @@ Der Klassenlehrer darf Schüler seiner Klasse anlegen und löschen. Administrato
 
 Schüler gehören direkt zu einer Klasse. Das Geburtsdatum dient neben Vor- und Nachnamen zur Unterscheidung gleichnamiger Schüler. Es ist nicht eindeutig; die technische Identität bleibt `student.id`. Die UID ist eindeutig und wird beim Ersatz unmittelbar überschrieben.
 
-| Column | MySQL type | Rules | Example |
-| --- | --- | --- | --- |
-| `id` | `BIGINT` | primary key, auto increment | `101` |
-| `first_name` | `VARCHAR(100)` | not null | `Erika` |
-| `last_name` | `VARCHAR(100)` | not null | `Beispiel` |
-| `birth_date` | `DATE` | not null | `2008-05-14` |
-| `school_class_id` | `BIGINT` | not null, foreign key to `school_class.id` | `13` |
-| `rfid_uid` | `VARCHAR(64)` | nullable, unique, plaintext | `TEST-UID-001` |
-| `created_at` | `DATETIME` | not null | `2026-09-01 08:05:00` |
+| Column            | MySQL type    | Rules | Example |
+|-------------------|---------------| --- | --- |
+| `student_id`       | `BIGINT`      | primary key, auto increment | `101` |
+| `first_name`      | `VARCHAR(30)` | not null | `Erika` |
+| `last_name`       | `VARCHAR(30)` | not null | `Beispiel` |
+| `birth_date`      | `DATE`        | not null | `2008-05-14` |
+| `school_class_id` | `BIGINT`      | not null, foreign key to `school_class.id` | `13` |
+| `rfid_uid`        | `VARCHAR(64)` | nullable, unique, plaintext | `TEST-UID-001` |
+| `created_at`      | `DATETIME`    | not null | `2026-09-01 08:05:00` |
 
 ### `teacher_class`
 
@@ -70,22 +70,22 @@ Der zusammengesetzte Primärschlüssel ist `(staff_id, school_class_id)`.
 
 Stammdaten der Unterrichtsräume.
 
-| Column | MySQL type | Rules | Example |
-| --- | --- | --- | --- |
-| `id` | `BIGINT` | primary key, auto increment | `2` |
-| `room_number` | `VARCHAR(30)` | not null, unique | `A123` |
+| Column        | MySQL type     | Rules | Example |
+|---------------|----------------| --- | --- |
+| `room_id`     | `BIGINT`       | primary key, auto increment | `2` |
+| `room_number` | `VARCHAR(10)`  | not null, unique | `A123` |
 | `description` | `VARCHAR(255)` | nullable | `Informatikraum` |
 
 ### `terminal`
 
 Ein RFID-Terminal ist dauerhaft genau einem Raum zugeordnet. Die gemeldete Terminalnummer ist kein Geheimnis, aber eindeutig.
 
-| Column | MySQL type | Rules | Example |
-| --- | --- | --- | --- |
-| `id` | `BIGINT` | primary key, auto increment | `3` |
+| Column            | MySQL type | Rules | Example |
+|-------------------| --- | --- | --- |
+| `terminal_id`     | `BIGINT` | primary key, auto increment | `3` |
 | `terminal_number` | `INT` | not null, unique | `3` |
-| `room_id` | `BIGINT` | not null, foreign key to `room.id` | `2` |
-| `created_at` | `DATETIME` | not null | `2026-09-01 08:10:00` |
+| `room_id`         | `BIGINT` | not null, foreign key to `room.id` | `2` |
+| `created_at`      | `DATETIME` | not null | `2026-09-01 08:10:00` |
 
 ### `timetable`
 
@@ -182,7 +182,7 @@ Unveränderbares Protokoll jeder manuellen Statusänderung.
 | --- | --- | --- | --- |
 | `id` | `BIGINT` | primary key, auto increment | `77` |
 | `attendance_id` | `BIGINT` | not null, foreign key to `attendance.id` | `900` |
-| `changed_by_staff_id` | `BIGINT` | not null, foreign key to `staff.id` | `1` |
+| `staff_id` | `BIGINT` | not null, foreign key to `staff.id` | `1` |
 | `old_status` | same enum as `attendance.status` | not null | `ABWESEND` |
 | `new_status` | same enum as `attendance.status` | not null | `ENTSCHULDIGT` |
 | `changed_at` | `DATETIME` | not null | `2026-09-08 10:00:00` |
