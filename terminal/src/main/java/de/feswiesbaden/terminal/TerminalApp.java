@@ -1,37 +1,58 @@
 package de.feswiesbaden.terminal;
 
 import de.feswiesbaden.terminal.config.TerminalConfig;
+import de.feswiesbaden.terminal.model.Scan;
 import de.feswiesbaden.terminal.model.ScanState;
+import de.feswiesbaden.terminal.queue.ScanQueue;
 import de.feswiesbaden.terminal.scanner.ConsoleScanSource;
 import de.feswiesbaden.terminal.scanner.ScanSource;
 import de.feswiesbaden.terminal.scanner.SerialLine.Reading;
 import de.feswiesbaden.terminal.scanner.SerialScanSource;
+import de.feswiesbaden.terminal.transport.DeliveryWorker;
+import de.feswiesbaden.terminal.transport.ScanSender;
+import de.feswiesbaden.terminal.transport.SendResult;
+import de.feswiesbaden.terminal.transport.TerminalSslContext;
 import de.feswiesbaden.terminal.ui.TerminalView;
+import java.io.IOException;
 import java.nio.file.Path;
 import javafx.application.Application;
 import javafx.scene.Scene;
 import javafx.stage.Stage;
 
 public final class TerminalApp extends Application {
-
   // Absoluter Pfad, sonst sucht JavaFX im Paket der aufrufenden Klasse.
   private static final String STYLESHEET =
       TerminalApp.class.getResource("/de/feswiesbaden/terminal/terminal.css").toExternalForm();
 
+  private ScanQueue queue;
+
   private ScanSource scanner;
+
+  private DeliveryWorker worker;
 
   private TerminalView view;
 
   @Override
   public void start(Stage fenster) {
     TerminalConfig config = TerminalConfig.load(Path.of("terminal.properties"));
+    queue = new ScanQueue(config.queueFile());
     view = new TerminalView();
+
+    ScanSender sender =
+        new ScanSender(
+            config.serverUrl(),
+            TerminalSslContext.loadOrNull(config.clientKeystore(), config.keystorePassword()));
+
+    worker = new DeliveryWorker(queue, sender, this::onResult);
+    worker.start();
 
     scanner =
         config.usesConsole()
             ? new ConsoleScanSource()
             : new SerialScanSource(config.serialPort(), config.baudRate());
     scanner.start(this::onScan);
+
+    updateQueueInfo();
 
     fenster.setTitle("RFID-Terminal");
     Scene szene = new Scene(view.node(), 900, 640);
@@ -40,15 +61,46 @@ public final class TerminalApp extends Application {
     fenster.show();
   }
 
+  // Erst vormerken, dann senden. Stürzt das Programm direkt nach dem Auflegen
+  // der Karte ab, ist der Scan trotzdem da.
   private void onScan(Reading gelesen) {
-    view.showTerminalNumber(gelesen.terminalNumber());
-    view.showState(ScanState.PROCESSING);
+    Scan scan = Scan.of(gelesen.rfidUid(), gelesen.terminalNumber());
+    try {
+      queue.add(scan);
+      view.showTerminalNumber(gelesen.terminalNumber());
+      view.showState(ScanState.PROCESSING);
+      updateQueueInfo();
+      worker.deliverNow();
+    } catch (IOException nichtSpeicherbar) {
+      System.err.println("Scan nicht speicherbar: " + nichtSpeicherbar.getMessage());
+      view.showError("LOCAL_STORAGE_FAILED");
+    }
+  }
+
+  private void onResult(Scan scan, SendResult ergebnis) {
+    switch (ergebnis.status()) {
+      case ACCEPTED -> view.showState(ScanState.SUCCESS);
+      case REJECTED -> view.showError(ergebnis.code());
+      case RETRY -> view.showState(ScanState.QUEUED);
+    }
+    updateQueueInfo();
+  }
+
+  private void updateQueueInfo() {
+    try {
+      view.showQueueSize(queue.size());
+    } catch (IOException nichtLesbar) {
+      System.err.println("Größe der Warteschlange unbekannt: " + nichtLesbar.getMessage());
+    }
   }
 
   @Override
   public void stop() {
     if (scanner != null) {
       scanner.close();
+    }
+    if (worker != null) {
+      worker.close();
     }
   }
 
