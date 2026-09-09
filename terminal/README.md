@@ -34,14 +34,28 @@ keine Bedienelemente enthalten.
 
 ## Mit echtem ESP32
 
-1. `firmware/esp32-rfid-reader/esp32-rfid-reader.ino` auf den ESP32 spielen
-   (Bibliothek `MFRC522` von GithubCommunity).
-2. Einmalig Zugriff auf den seriellen Port freischalten:
+1. Einmalig die Werkzeuge zum Flashen einrichten (Arch/CachyOS):
+   ```bash
+   sudo pacman -S --needed arduino-cli
+   arduino-cli config init
+   arduino-cli config add board_manager.additional_urls \
+     https://espressif.github.io/arduino-esp32/package_esp32_index.json
+   arduino-cli core update-index
+   arduino-cli core install esp32:esp32
+   arduino-cli lib install MFRC522
+   ```
+   Der ESP32-Core belegt rund 1 GB unter `~/.arduino15`.
+2. Firmware bauen und aufspielen:
+   ```bash
+   arduino-cli compile --fqbn esp32:esp32:esp32 firmware/esp32-rfid-reader
+   arduino-cli upload -p /dev/ttyUSB0 --fqbn esp32:esp32:esp32 firmware/esp32-rfid-reader
+   ```
+3. Einmalig Zugriff auf den seriellen Port freischalten:
    ```bash
    sudo usermod -aG uucp $USER   # unter Arch/CachyOS; anderswo: dialout
    ```
    Danach ab- und wieder anmelden.
-3. Port herausfinden und eintragen:
+4. Port herausfinden und eintragen:
    ```bash
    ls /dev/ttyUSB* /dev/ttyACM*
    ```
@@ -61,6 +75,44 @@ so geht die Startmeldung `# RFID-Leser bereit` nicht als Scan durch.
 
 Ein ACK über das Kabel gibt es nicht: läuft die Anwendung beim Scan nicht, ist
 dieser Scan weg. So ist es in #29 festgelegt.
+
+## Selbsttest beim Start
+
+Direkt nach dem Einschalten meldet die Firmware zwei Kommentarzeilen:
+
+```
+# RC522 VersionReg 0x92
+# RFID-Leser bereit
+```
+
+`VersionReg` sagt, ob der Leser überhaupt antwortet:
+
+| Wert | Bedeutung |
+|---|---|
+| `0x91` | MFRC522 Version 1.0, alles in Ordnung |
+| `0x92` | MFRC522 Version 2.0, alles in Ordnung |
+| `0x00` oder `0xFF` | Leser antwortet nicht, Verkabelung prüfen |
+
+Bei `0x00` oder `0xFF` steht statt „bereit" die Zeile
+`# RFID-Leser antwortet nicht, Verkabelung pruefen`. Ohne diese Meldung sieht
+ein falsch verdrahteter Leser genauso aus wie eine Karte, die nicht erkannt
+wird — das kostet beim Aufbau viel Sucherei.
+
+## Stolperfallen beim Aufbau
+
+**Nach dem Flashen startet das Board nicht von allein.** `arduino-cli upload`
+meldet zwar `Hard resetting via RTS pin`, danach hängt der ESP32 aber oft in
+einem Zustand, in dem er nichts sendet. Die Sendeleitung liegt dann dauerhaft
+auf Low, was am Rechner als endloser Strom aus `0x00` und `0x80` ankommt. Abhilfe:
+`EN`-Taste am Board drücken oder das USB-Kabel kurz abziehen.
+
+**Die Startmeldung kommt nur ein einziges Mal.** Wer den seriellen Port erst
+nach dem Boot öffnet, sieht sie nicht mehr, weil danach nur noch Scans
+gesendet werden. Der Port muss also schon offen sein, wenn der ESP32 startet.
+
+**Getestet mit:** ESP32-D0WD-V3 (Revision 3.1, 40 MHz Quarz, 4 MB Flash) am
+CP210x-USB-Adapter, RC522 Version 2.0, arduino-cli 1.4.1, Core `esp32:esp32`
+3.3.11, Bibliothek `MFRC522` 1.4.12.
 
 ## Was passiert bei einem Scan
 
