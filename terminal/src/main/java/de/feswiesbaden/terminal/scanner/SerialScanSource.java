@@ -10,11 +10,8 @@ import java.nio.charset.StandardCharsets;
 import java.util.function.Consumer;
 
 public final class SerialScanSource implements ScanSource {
-  // So lange haelt die Anwendung den ESP32 im Reset, bevor sie ihn starten laesst.
   private static final long RESET_PULSE_MS = 150;
 
-  // Wartezeit einer einzelnen Leseoperation. Laeuft sie ab, wird einfach
-  // weitergelesen; sie begrenzt nur, wie lange ein Lesevorgang haengt.
   private static final int READ_TIMEOUT_MS = 1000;
 
   private final String portName;
@@ -35,7 +32,7 @@ public final class SerialScanSource implements ScanSource {
     port = SerialPort.getCommPort(portName);
     port.setBaudRate(baudRate);
     // Ohne Timeout meldet der Datenstrom sein Ende, sobald einmal nichts
-    // anliegt. Deshalb eine Wartezeit setzen und den Ablauf unten abfangen.
+    // anliegt. Der Ablauf wird unten abgefangen.
     port.setComPortTimeouts(SerialPort.TIMEOUT_READ_BLOCKING, READ_TIMEOUT_MS, 0);
 
     if (!port.openPort()) {
@@ -54,9 +51,8 @@ public final class SerialScanSource implements ScanSource {
     leser.start();
   }
 
-  // Das Oeffnen des Ports laesst den ESP32 im Reset haengen, er sendet dann
-  // nichts mehr. DTR liegt am Bootmodus-Pin, RTS am Reset. Erst beide definiert
-  // setzen, dann faehrt das Board hoch und meldet sich.
+  // Das Öffnen des Ports lässt den ESP32 im Reset hängen, er sendet dann nichts
+  // mehr. DTR liegt am Bootmodus-Pin, RTS am Reset.
   private void starteBoard() {
     port.clearDTR();
     port.setRTS();
@@ -79,9 +75,8 @@ public final class SerialScanSource implements ScanSource {
             break;
           }
           SerialLine.parse(zeile).ifPresent(onScan);
-        } catch (SerialPortTimeoutException wartezeitAbgelaufen) {
-          // Zwischen zwei Karten liegt fast immer eine Pause. Das ist der
-          // Normalfall und kein Grund, das Lesen aufzugeben.
+        } catch (SerialPortTimeoutException pause) {
+          // Pause zwischen zwei Karten, kein Grund aufzugeben.
           continue;
         }
       }
