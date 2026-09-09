@@ -15,6 +15,7 @@ import de.feswiesbaden.terminal.transport.TerminalSslContext;
 import de.feswiesbaden.terminal.ui.TerminalView;
 import java.io.IOException;
 import java.nio.file.Path;
+import java.util.concurrent.atomic.AtomicReference;
 import javafx.application.Application;
 import javafx.scene.Scene;
 import javafx.stage.Stage;
@@ -31,6 +32,11 @@ public final class TerminalApp extends Application {
   private DeliveryWorker worker;
 
   private TerminalView view;
+
+  // Der Scan, dessen Rückmeldung gerade angezeigt werden darf. Zustellversuche
+  // älterer Scans laufen im Hintergrund weiter und dürfen die Anzeige nicht
+  // umschalten, sonst wechselt sie im Takt des Zustellversuchs hin und her.
+  private final AtomicReference<String> angezeigterScan = new AtomicReference<>();
 
   @Override
   public void start(Stage fenster) {
@@ -67,6 +73,7 @@ public final class TerminalApp extends Application {
     Scan scan = Scan.of(gelesen.rfidUid(), gelesen.terminalNumber());
     try {
       queue.add(scan);
+      angezeigterScan.set(scan.scanId());
       view.showTerminalNumber(gelesen.terminalNumber());
       view.showState(ScanState.PROCESSING);
       updateQueueInfo();
@@ -77,11 +84,28 @@ public final class TerminalApp extends Application {
     }
   }
 
+  // Jeder aufgelegte Chip bekommt genau eine sichtbare Rückmeldung. Danach ist
+  // die Anzeige wieder frei für den nächsten Schüler.
   private void onResult(Scan scan, SendResult ergebnis) {
     switch (ergebnis.status()) {
-      case ACCEPTED -> view.showState(ScanState.SUCCESS);
-      case REJECTED -> view.showError(ergebnis.code());
-      case RETRY -> view.showState(ScanState.QUEUED);
+      // Eine fehlende Verbindung betrifft jeden wartenden Scan. Die
+      // Warteschlange arbeitet der Reihe nach, der eigene Scan kommt also
+      // vielleicht gar nicht dran. Die Vormerkung gilt trotzdem für ihn.
+      case RETRY -> {
+        if (angezeigterScan.getAndSet(null) != null) {
+          view.showState(ScanState.QUEUED);
+        }
+      }
+      case ACCEPTED -> {
+        if (angezeigterScan.compareAndSet(scan.scanId(), null)) {
+          view.showState(ScanState.SUCCESS);
+        }
+      }
+      case REJECTED -> {
+        if (angezeigterScan.compareAndSet(scan.scanId(), null)) {
+          view.showError(ergebnis.code());
+        }
+      }
     }
     updateQueueInfo();
   }
