@@ -9,3 +9,9 @@ img-screenshots/
 .idea/
 *.iml
 diagramme/*/*.drawio
+
+# Lokale Terminalkonfiguration mit Keystore-Passwort
+terminal/terminal.properties
+# Lokale Warteschlange, enthaelt RFID-UIDs im Klartext
+terminal/scan-puffer.jsonl
+*.p12
