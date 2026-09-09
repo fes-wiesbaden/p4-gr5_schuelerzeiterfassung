@@ -8,4 +8,4 @@ img-screenshots/
 .idea/
 *.iml
 diagramme/**/*.drawio
-diagramme/**/*
+diagramme/**/backup/*
