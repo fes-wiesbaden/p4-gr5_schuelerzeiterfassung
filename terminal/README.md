@@ -98,6 +98,26 @@ Bei `0x00` oder `0xFF` steht statt „bereit" die Zeile
 ein falsch verdrahteter Leser genauso aus wie eine Karte, die nicht erkannt
 wird — das kostet beim Aufbau viel Sucherei.
 
+## Kartenverhalten
+
+Am Versuchsaufbau gemessen, mit einer MIFARE-Classic-Karte:
+
+| | |
+|---|---|
+| UID-Format | 8 Zeichen, reines Hex in Grossbuchstaben (4 Byte) |
+| Felder je Zeile | genau `rfidUid` und `terminalNumber`, sonst nichts |
+| Terminalnummer | Zahl, fest in der Firmware hinterlegt |
+
+Karten mit 7 Byte langer UID, etwa NTAG, liefern entsprechend 14 Zeichen. Die
+Anwendung rechnet deshalb nirgends mit einer festen Laenge.
+
+**Eine liegengebliebene Karte meldet sich wiederholt.** Die Firmware blockt
+dieselbe UID nur `REPEAT_BLOCK_MS` lang, also 1,5 Sekunden. Wer eine Karte auf
+dem Leser vergisst, erzeugt einen Schwall Meldungen: bei einem Versuch ueber
+45 Sekunden waren es 13 Stueck. Jede davon wird eine eigene Scan-ID und damit
+ein eigener Rohscan. Fachlich ist das gedeckt, weil nur der erste gueltige Scan
+eine Anwesenheit erzeugt, es faellt aber unnoetig Verkehr an.
+
 ## Stolperfallen beim Aufbau
 
 **Nach dem Flashen startet das Board nicht von allein.** `arduino-cli upload`
