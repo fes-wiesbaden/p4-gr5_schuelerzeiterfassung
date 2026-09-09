@@ -88,11 +88,12 @@ er liegen und wird alle 5 Sekunden erneut versucht.
 | ✓ Buchung erfolgreich | Server hat mit HTTP 200 geantwortet |
 | ✕ Nicht gebucht | endgültig abgelehnt, mit öffentlichem Fehlercode |
 
-Erfolg, Fehler und Vormerkung stehen 3 Sekunden, dann springt die Anzeige zurück
-auf bereit. So sieht der nächste Schüler am eigenen Scan, dass etwas passiert,
-statt auf die Rückmeldung seines Vorgängers zu schauen. Nur die Verarbeitung
-bleibt stehen, weil dort die Antwort noch aussteht. Wie viele Scans wirklich
-offen sind, steht dauerhaft unten rechts.
+„Wird verarbeitet" steht mindestens 1 Sekunde, sonst blitzt es nur auf: eine
+Absage des Servers kommt oft schon nach gut hundert Millisekunden zurück. Jede
+Rückmeldung danach steht 2 Sekunden und die Anzeige springt zurück auf bereit,
+damit der nächste Schüler am eigenen Scan sieht, dass etwas passiert, statt auf
+die Rückmeldung seines Vorgängers zu schauen. Wie viele Scans wirklich offen
+sind, steht dauerhaft unten rechts.
 
 Beim Fehler steht der öffentliche Code dabei, etwa `SCAN_REJECTED`. Der Grund
 selbst wird nie angezeigt — unbekannte UID und falsche Klasse sehen für den
