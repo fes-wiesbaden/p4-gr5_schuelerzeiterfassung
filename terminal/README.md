@@ -126,6 +126,12 @@ einem Zustand, in dem er nichts sendet. Die Sendeleitung liegt dann dauerhaft
 auf Low, was am Rechner als endloser Strom aus `0x00` und `0x80` ankommt. Abhilfe:
 `EN`-Taste am Board drücken oder das USB-Kabel kurz abziehen.
 
+**Beim Oeffnen des Ports startet die Anwendung das Board neu.** Das Oeffnen
+allein wuerde den ESP32 im Reset haengen lassen, er sendet dann gar nichts. Die
+Anwendung schickt deshalb selbst einen Resetpuls ueber DTR und RTS. Wer mit
+eigenen Werkzeugen am Port mitliest, muss dasselbe tun, sonst wirkt der ESP32
+tot, obwohl er in Ordnung ist.
+
 **Die Startmeldung kommt nur ein einziges Mal.** Wer den seriellen Port erst
 nach dem Boot öffnet, sieht sie nicht mehr, weil danach nur noch Scans
 gesendet werden. Der Port muss also schon offen sein, wenn der ESP32 startet.
