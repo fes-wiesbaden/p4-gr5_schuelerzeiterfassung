@@ -31,8 +31,11 @@ const uint8_t PIN_SS = 5;
 const uint8_t PIN_RST = 22;
 const long BAUD = 115200;
 
-// Dieselbe Karte soll nicht dauernd melden, solange sie aufliegt.
-const unsigned long REPEAT_BLOCK_MS = 1500;
+// Dieselbe Karte soll nicht dauernd melden, solange sie aufliegt. Eine
+// vergessene Karte erzeugte bei 1,5 Sekunden rund 13 Meldungen in 45
+// Sekunden und damit ebenso viele Rohscans. 30 Sekunden reichen, weil
+// Anwesenheit ohnehin nur beim ersten gueltigen Scan gebucht wird.
+const unsigned long REPEAT_BLOCK_MS = 30000;
 
 MFRC522 reader(PIN_SS, PIN_RST);
 

@@ -112,11 +112,11 @@ Karten mit 7 Byte langer UID, etwa NTAG, liefern entsprechend 14 Zeichen. Die
 Anwendung rechnet deshalb nirgends mit einer festen Laenge.
 
 **Eine liegengebliebene Karte meldet sich wiederholt.** Die Firmware blockt
-dieselbe UID nur `REPEAT_BLOCK_MS` lang, also 1,5 Sekunden. Wer eine Karte auf
-dem Leser vergisst, erzeugt einen Schwall Meldungen: bei einem Versuch ueber
-45 Sekunden waren es 13 Stueck. Jede davon wird eine eigene Scan-ID und damit
-ein eigener Rohscan. Fachlich ist das gedeckt, weil nur der erste gueltige Scan
-eine Anwesenheit erzeugt, es faellt aber unnoetig Verkehr an.
+dieselbe UID `REPEAT_BLOCK_MS` lang, aktuell 30 Sekunden. Mit den urspruenglichen
+1,5 Sekunden erzeugte eine vergessene Karte im Versuch 13 Meldungen in 45
+Sekunden, und jede davon wird eine eigene Scan-ID und damit ein eigener Rohscan.
+Fachlich waere auch das gedeckt, weil nur der erste gueltige Scan eine
+Anwesenheit erzeugt, es fiel aber unnoetig Verkehr an.
 
 ## Stolperfallen beim Aufbau
 
