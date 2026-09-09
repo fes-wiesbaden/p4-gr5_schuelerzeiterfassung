@@ -26,7 +26,10 @@ public final class SerialScanSource implements ScanSource {
   public void start(Consumer<Reading> onScan) {
     port = SerialPort.getCommPort(portName);
     port.setBaudRate(baudRate);
-    port.setComPortTimeouts(SerialPort.TIMEOUT_READ_BLOCKING, 1000, 0);
+    // Timeout 0 heisst: warten, bis wirklich etwas kommt. Mit einem echten
+    // Timeout wirft jSerialComm nach jeder ruhigen Sekunde eine IOException,
+    // die den Lesethread beendet, und danach kommt kein Scan mehr an.
+    port.setComPortTimeouts(SerialPort.TIMEOUT_READ_BLOCKING, 0, 0);
 
     if (!port.openPort()) {
       throw new IllegalStateException(
