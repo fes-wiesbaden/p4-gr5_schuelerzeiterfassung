@@ -9,3 +9,4 @@ img-screenshots/
 *.iml
 diagramme/**/*.drawio
 diagramme/**/backup/*
+diagramme/**/old/*
