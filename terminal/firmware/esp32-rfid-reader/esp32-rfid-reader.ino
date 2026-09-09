@@ -48,7 +48,20 @@ void setup() {
   SPI.begin();
   reader.PCD_Init();
 
-  Serial.println("# RFID-Leser bereit");
+  // Selbsttest: Ein angeschlossener RC522 meldet in VersionReg 0x91 oder 0x92.
+  // Steht dort 0x00 oder 0xFF, antwortet der Leser nicht und die Verkabelung
+  // stimmt nicht. Ohne diese Meldung sieht ein toter Leser aus wie eine Karte,
+  // die einfach nicht erkannt wird.
+  byte version = reader.PCD_ReadRegister(MFRC522::VersionReg);
+
+  Serial.print("# RC522 VersionReg 0x");
+  Serial.println(version, HEX);
+
+  if (version == 0x00 || version == 0xFF) {
+    Serial.println("# RFID-Leser antwortet nicht, Verkabelung pruefen");
+  } else {
+    Serial.println("# RFID-Leser bereit");
+  }
 }
 
 String uidToHex(MFRC522::Uid uid) {
