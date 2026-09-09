@@ -18,6 +18,8 @@ import javafx.util.Duration;
 public final class TerminalView {
   private static final DateTimeFormatter UHRZEIT = DateTimeFormatter.ofPattern("HH:mm");
 
+  private static final Duration RUECKKEHR_NACH_BEREIT = Duration.seconds(3);
+
   private final BorderPane root = new BorderPane();
 
   private final VBox stage = new VBox();
@@ -34,9 +36,15 @@ public final class TerminalView {
 
   private final Label terminalInfo = new Label();
 
-  private final PauseTransition zurueckAufBereit = new PauseTransition(Duration.seconds(3));
+  private final PauseTransition zurueckAufBereit;
 
   public TerminalView() {
+    this(RUECKKEHR_NACH_BEREIT);
+  }
+
+  // Nur für Tests, damit die nicht drei Sekunden lang warten muessen.
+  TerminalView(Duration rueckkehr) {
+    zurueckAufBereit = new PauseTransition(rueckkehr);
     root.getStyleClass().add("root");
     root.setTop(header());
     root.setCenter(stageBox());
@@ -50,14 +58,17 @@ public final class TerminalView {
     return root;
   }
 
-  // Nur Erfolg läuft nach 3 Sekunden ab. Verarbeitung und Vormerkung bleiben
-  // stehen, sonst stünde "bereit" da, obwohl der Scan noch offen ist.
+  // Erfolg und Vormerkung laufen nach 3 Sekunden ab, damit die Anzeige wieder
+  // "bereit" zeigt. Sonst klebte die Rückmeldung des Vorgängers am Schirm und
+  // der nächste Schüler sähe nicht, ob seine eigene Karte gelesen wurde. Wie
+  // viele Scans noch offen sind, steht dauerhaft in der Fußzeile. Nur die
+  // Verarbeitung bleibt stehen, denn dort steht die Antwort noch aus.
   public void showState(ScanState state) {
     Platform.runLater(
         () -> {
           show(state);
           zurueckAufBereit.stop();
-          if (state == ScanState.SUCCESS) {
+          if (state == ScanState.SUCCESS || state == ScanState.QUEUED) {
             zurueckAufBereit.playFromStart();
           }
         });
