@@ -39,11 +39,9 @@ class ScanSenderTest {
 
   @Test
   void ohneCodeGiltDerSammelcode() {
-    ScanSender sender = new ScanSender("https://127.0.0.1:8444/api/scans", null);
-
-    assertEquals("SCAN_REJECTED", sender.readCode(""));
-    assertEquals("SCAN_REJECTED", sender.readCode("kein json"));
-    assertEquals("SCAN_REJECTED", sender.readCode("{}"));
-    assertEquals("SCAN_ID_CONFLICT", sender.readCode("{\"code\":\"SCAN_ID_CONFLICT\"}"));
+    assertEquals("SCAN_REJECTED", ScanSender.readCode(""));
+    assertEquals("SCAN_REJECTED", ScanSender.readCode("kein json"));
+    assertEquals("SCAN_REJECTED", ScanSender.readCode("{}"));
+    assertEquals("SCAN_ID_CONFLICT", ScanSender.readCode("{\"code\":\"SCAN_ID_CONFLICT\"}"));
   }
 }

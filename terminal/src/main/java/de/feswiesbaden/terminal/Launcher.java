@@ -1,11 +1,8 @@
 package de.feswiesbaden.terminal;
 
-// Startpunkt zum Ausprobieren aus der Entwicklungsumgebung heraus.
-//
-// Erbt bewusst NICHT von javafx.application.Application: sonst verlangt Java
-// beim Start einen --module-path mit den JavaFX-Modulen und bricht sonst mit
-// "JavaFX-Runtime-Komponenten fehlen" ab. Über diesen Umweg genügt der normale
-// Klassenpfad, den VS Code und IntelliJ von selbst aus Maven zusammenbauen.
+// Erbt bewusst nicht von javafx.application.Application. Sonst verlangt Java
+// beim Start einen --module-path und bricht mit "JavaFX-Runtime-Komponenten
+// fehlen" ab; über diesen Umweg genügt der normale Klassenpfad.
 public final class Launcher {
 
   private Launcher() {}

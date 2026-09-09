@@ -10,16 +10,14 @@ import javax.net.ssl.KeyManagerFactory;
 import javax.net.ssl.SSLContext;
 
 // Clientzertifikat für mTLS aus einer PKCS12-Datei; nginx prüft es gegen die
-// Terminal-Client-CA (#26).
-//
-// Das Serverzertifikat wird bewusst NICHT gesondert behandelt: dafür gilt die
+// Terminal-Client-CA. Für das Serverzertifikat gilt bewusst die
 // JVM-Standardprüfung gegen den installierten Truststore (#26, #29).
 public final class TerminalSslContext {
 
   private TerminalSslContext() {}
 
-  // Ohne eingetragenen Schlüsselspeicher gibt es kein Clientzertifikat. Dann
-  // läuft die Anwendung ohne mTLS weiter, das Backend wird sie aber abweisen.
+  // Ohne Schlüsselspeicher läuft die Anwendung ohne mTLS weiter, das Backend
+  // weist sie dann ab.
   public static SSLContext loadOrNull(Path keystore, String password) {
     if (keystore == null || !Files.isReadable(keystore)) {
       return null;
