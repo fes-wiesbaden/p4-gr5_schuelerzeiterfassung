@@ -18,7 +18,9 @@ docker compose up -d
 
 Unter Linux müssen `HOST_UID` und `HOST_GID` in `.env` der Ausgabe von `id -u` und `id -g` entsprechen. Unter Docker Desktop für Windows bleiben die Standardwerte `1000`.
 
-Die Anwendung ist anschließend unter `https://127.0.0.1:8443/terminal/1` erreichbar. Der ESP32-Scan-Endpunkt ist getrennt unter Port `8444` und verlangt mTLS. HTTP wird nicht veröffentlicht.
+Die Anwendung ist anschließend unter `https://127.0.0.1:8443/` erreichbar. Der
+für JavaFX reservierte mTLS-Zugang liegt getrennt auf Port `8444`. HTTP wird
+nicht veröffentlicht.
 
 ```bash
 docker compose down
@@ -32,7 +34,8 @@ docker compose down
 
 Das Repository-Root als Projekt öffnen. Die Root-`pom.xml` importiert das Maven-Modul `backend` automatisch. IntelliJ fragt gegebenenfalls nach dem Maven-Import; diesen bestätigen und Java 21 als Project SDK wählen.
 
-Der Hybrid-Modus lässt Backend und Frontend lokal laufen. Docker stellt nur MySQL und den mTLS-Proxy für den ESP32 bereit.
+Der Hybrid-Modus lässt Backend und Frontend lokal laufen. Docker stellt nur
+MySQL und den mTLS-Proxy für JavaFX bereit.
 
 ```bash
 docker compose -f compose.dev.yaml up --build -d
@@ -40,7 +43,11 @@ cd backend && mvn spring-boot:run
 cd frontend && npm run dev
 ```
 
-Das Backend ist in IntelliJ über die Klasse `AttendanceApplication` debugbar. Der lokale Vite-Server nutzt das erzeugte Serverzertifikat: `https://<TLS_HOST>:5173/terminal/1`. Für den ESP32 bleibt `https://<TLS_HOST>:8444/api/` das mTLS-Ziel. `compose.dev.yaml` veröffentlicht MySQL ausschließlich für den lokalen Backend-Debugger.
+Das Backend ist in IntelliJ über die Klasse `AttendanceApplication` debugbar.
+Der lokale Vite-Server nutzt das erzeugte Serverzertifikat unter
+`https://<TLS_HOST>:5173/`. Port `8444` bleibt für JavaFX reserviert.
+`compose.dev.yaml` veröffentlicht MySQL ausschließlich für den lokalen
+Backend-Debugger.
 
 ```bash
 docker compose -f compose.dev.yaml down
@@ -52,24 +59,33 @@ Beim ersten Start erzeugt `tls-init` die lokale Server-CA unter `.local/tls/ca.c
 
 Der Browser vertraut dieser privaten CA nicht automatisch. `ca.crt` deshalb einmal als vertrauenswürdige Stammzertifizierungsstelle für Websites importieren und den Browser neu starten. Anschließend immer exakt den in `TLS_HOST` eingetragenen Host öffnen, zum Beispiel `https://127.0.0.1:8443/terminal/1` oder `https://127.0.0.1:5173/terminal/1`. `localhost` ist bei TLS ein anderer Name als `127.0.0.1`.
 
-Port `8444` ist ausschließlich der mTLS-Endpunkt des ESP32 und keine Browser-Oberfläche.
+Port `8444` ist ausschließlich der mTLS-Endpunkt des JavaFX-Terminals und keine
+Browser-Oberfläche.
 
-## ESP32-Test mit mTLS
+## JavaFX-Terminal mit mTLS
 
-Beim ersten Einrichten erzeugt `tls-init` einmalig die feste ESP32-Identität: `esp32-client.crt` und `esp32-client.key`. Diese beiden Dateien gehören ausschließlich in die ESP32-Firmware. Der private Schlüssel darf nicht in Git, Logs oder Screenshots erscheinen.
+Beim ersten Einrichten erzeugt `tls-init` die lokale Terminalidentität
+`terminal-23102003`: Client-Zertifikat, privater Schlüssel, Client-PKCS#12 und
+einen Java-Truststore mit der Server-CA. Private Schlüssel und Speicher dürfen
+nicht in Git, Logs oder Screenshots erscheinen.
 
-1. Die WLAN-IP des testenden Laptops in `TLS_HOST` in `.env` eintragen.
-2. `./.local/tls/ca.crt` als Server-CA sowie `esp32-client.crt` und `esp32-client.key` in die ESP32-Test-Firmware übernehmen.
-3. Die HTTPS-URL des ESP32 auf `https://<TLS_HOST>:8444/api/` setzen.
+1. `TLS_HOST` in `.env` auf den Host oder die IP des nginx-Proxys setzen.
+2. `docker compose up tls-init` ausführen.
+3. In `terminal/` die Beispiel-Properties kopieren und den Host in `server.url`
+   auf exakt `TLS_HOST` setzen.
+4. Das Terminal mit `mvn javafx:run` starten.
 
-`WiFiClientSecure` erhält die Server-CA mit `setCACert(...)`, das feste Client-Zertifikat mit `setCertificate(...)` und den privaten Schlüssel mit `setPrivateKey(...)`. Dadurch prüft der ESP32 den Server und nginx prüft den ESP32. `setInsecure()` ist verboten.
-
-Beim Wechsel auf einen anderen Laptop: Vor dem Start dessen `.local/tls/esp32-client-ca.crt` mit der öffentlichen Client-CA vom ersten Einrichten ersetzen. Dann dessen WLAN-IP in `.env` setzen, `docker compose up --build` starten und dessen neue `ca.crt` sowie die Ziel-URL in der ESP32-Firmware aktualisieren. Das feste ESP32-Client-Zertifikat und sein privater Schlüssel bleiben unverändert.
+JavaFX prüft den Server mit dem lokalen Truststore. nginx prüft das
+Clientzertifikat gegen die Terminal-Client-CA. Trust-all und deaktivierte
+Hostname-Prüfung sind verboten. Der echte Scan-Endpunkt folgt in Issue #26;
+der aktuelle nginx-Testpfad dient nur dem mTLS-Nachweis.
 
 ## Prüfungen
 
 ```bash
-cd backend && mvn spotless:check test
+docker compose up tls-init
+mvn -pl backend spotless:check test
+mvn -pl terminal spotless:check test
 cd frontend && npm ci && npm run lint && npm run format:check && npm test && npm run build
 docker compose config
 docker compose --profile test build tls-test

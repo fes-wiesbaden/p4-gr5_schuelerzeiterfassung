@@ -12,7 +12,9 @@ public record TerminalConfig(
     int baudRate,
     Path queueFile,
     Path clientKeystore,
-    String keystorePassword) {
+    String keystorePassword,
+    Path serverTruststore,
+    String truststorePassword) {
 
   private static final String DEFAULT_URL = "https://127.0.0.1:8444/api/scans";
 
@@ -28,6 +30,7 @@ public record TerminalConfig(
     }
 
     String keystore = werte.getProperty("client.keystore", "").trim();
+    String truststore = werte.getProperty("server.truststore", "").trim();
 
     return new TerminalConfig(
         werte.getProperty("server.url", DEFAULT_URL),
@@ -36,7 +39,9 @@ public record TerminalConfig(
         Integer.parseInt(werte.getProperty("serial.baud", "115200")),
         Path.of(werte.getProperty("queue.file", "scan-puffer.jsonl")),
         keystore.isEmpty() ? null : Path.of(keystore),
-        werte.getProperty("client.keystore.password", ""));
+        werte.getProperty("client.keystore.password", ""),
+        truststore.isEmpty() ? null : Path.of(truststore),
+        werte.getProperty("server.truststore.password", ""));
   }
 
   private static String umgebungOderDatei(String variable, String ausDatei) {

@@ -46,7 +46,11 @@ public final class TerminalApp extends Application {
     ScanSender sender =
         new ScanSender(
             config.serverUrl(),
-            TerminalSslContext.loadOrNull(config.clientKeystore(), config.keystorePassword()));
+            TerminalSslContext.load(
+                config.clientKeystore(),
+                config.keystorePassword(),
+                config.serverTruststore(),
+                config.truststorePassword()));
 
     worker = new DeliveryWorker(queue, sender, this::onResult);
     worker.start();

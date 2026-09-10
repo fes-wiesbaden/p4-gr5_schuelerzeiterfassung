@@ -8,7 +8,7 @@ Lokaler Versuchsaufbau, gehört nicht ins GitHub-Projekt.
 ## Starten
 
 **In VS Code:** `src/main/java/de/feswiesbaden/terminal/Launcher.java` öffnen und
-oben auf *Run* klicken — oder einfach `F5`. Die passende Startkonfiguration liegt
+oben auf *Run* klicken oder einfach `F5`. Die passende Startkonfiguration liegt
 in `.vscode/launch.json`.
 
 > Nicht `TerminalApp.java` starten. Die erbt von `javafx.application.Application`
@@ -26,10 +26,10 @@ Ohne Eintrag bei `serial.port` liest die Anwendung Scans **von der Konsole**
 statt vom ESP32. Einfach eine Zeile eintippen und Enter:
 
 ```
-{"rfidUid":"04A3B2C1","terminalNumber":3}
+{"rfidUid":"04A3B2C1","terminalNumber":23102003}
 ```
 
-Die Oberfläche hat bewusst **keinen Knopf** dafür — laut Issue #37 darf sie gar
+Die Oberfläche hat bewusst **keinen Knopf** dafür laut Issue #37 darf sie gar
 keine Bedienelemente enthalten.
 
 ## Mit echtem ESP32
@@ -52,11 +52,12 @@ keine Bedienelemente enthalten.
 Die Firmware gibt je Karte genau eine JSON-Zeile in UTF-8 aus:
 
 ```json
-{"rfidUid":"04A3B2C1","terminalNumber":3}
+{"rfidUid":"04A3B2C1","terminalNumber":23102003}
 ```
 
-Die Terminalnummer steckt fest in der Firmware (`TERMINAL_NUMBER` im Sketch).
-Zeilen, die sich nicht als solches JSON lesen lassen, verwirft die Anwendung —
+Die Terminalnummer `23102003` steckt fest in der Firmware (`TERMINAL_NUMBER`
+im Sketch).
+Zeilen, die sich nicht als solches JSON lesen lassen, verwirft die Anwendung
 so geht die Startmeldung `# RFID-Leser bereit` nicht als Scan durch.
 
 Ein ACK über das Kabel gibt es nicht: läuft die Anwendung beim Scan nicht, ist
@@ -74,7 +75,7 @@ ESP32 ──USB──> ScanSource ──> Puffer (Platte) ──> DeliveryWorker
 Ein Scan wird **zuerst gepuffert und dann erst gesendet**. Stürzt die Anwendung
 direkt nach dem Auflegen der Karte ab, ist der Scan trotzdem sicher.
 
-Aus dem Puffer verschwindet er erst, wenn der Server geantwortet hat — egal ob
+Aus dem Puffer verschwindet er erst, wenn der Server geantwortet hat egal ob
 angenommen oder abgelehnt. Nur wenn der Server gar nicht erreichbar ist, bleibt
 er liegen und wird alle 5 Sekunden erneut versucht.
 
@@ -96,12 +97,28 @@ die Rückmeldung seines Vorgängers zu schauen. Wie viele Scans wirklich offen
 sind, steht dauerhaft unten rechts.
 
 Beim Fehler steht der öffentliche Code dabei, etwa `SCAN_REJECTED`. Der Grund
-selbst wird nie angezeigt — unbekannte UID und falsche Klasse sehen für den
+selbst wird nie angezeigt unbekannte UID und falsche Klasse sehen für den
 Schüler gleich aus.
 
 Unten rechts steht, wie viele Scans noch auf Zustellung warten.
 
 Wie im Web-Terminal steht dort nie ein Name, eine Klasse oder ein Ablehnungsgrund.
+
+## Lokales mTLS
+
+Im Repository-Root einmal `docker compose up tls-init` ausführen. Das erzeugt
+unter `.local/tls/` die lokale Server-CA, das Client-PKCS#12 für
+`terminal-23102003` und den Server-Truststore. Diese Dateien bleiben lokal und
+dürfen nie in Git, Logs oder Screenshots erscheinen.
+
+Die Beispielkonfiguration enthält die passenden relativen Pfade und das lokale
+Testpasswort. Für den Start muss der Host in `server.url` exakt dem `TLS_HOST`
+entsprechen, weil die JVM den Namen beziehungsweise die IP im Serverzertifikat
+prüft. Ohne Client-PKCS#12 oder Truststore startet keine Zustellung.
+
+Der echte Pfad `/api/scans` wird erst mit Issue #26 bereitgestellt. Bis dahin
+kann nur nginx-mTLS über den separaten TLS-Test aus dem Repository-Root geprüft
+werden.
 
 ## Tests
 

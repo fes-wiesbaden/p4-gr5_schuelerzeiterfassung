@@ -4,7 +4,7 @@ import de.feswiesbaden.terminal.model.Json;
 import java.util.Optional;
 
 // Erwartet genau eine JSON-Zeile vom ESP32 (#29):
-//     {"rfidUid":"04A3B2C1","terminalNumber":3}
+//     {"rfidUid":"04A3B2C1","terminalNumber":23102003}
 // Alles andere wird verworfen, sonst ginge die Startmeldung als Scan durch.
 public final class SerialLine {
 

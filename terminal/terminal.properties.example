@@ -13,10 +13,15 @@ serial.port=
 serial.baud=115200
 
 # Clientzertifikat dieser Installation als PKCS12-Datei. nginx prueft es gegen
-# die Terminal-Client-CA. Ohne Eintrag laeuft die Anwendung OHNE mTLS und wird
-# vom Backend abgewiesen.
-client.keystore=
-client.keystore.password=
+# die Terminal-Client-CA. Beide Speicher sind Pflicht; ohne sie startet keine
+# Zustellung.
+client.keystore=../.local/tls/terminal-23102003-client.p12
+client.keystore.password=changeit
+
+# PKCS12-Truststore mit der Server-CA. Die JVM prueft damit Zertifikat und
+# Hostname/IP des Servers; Trust-all ist nicht erlaubt.
+server.truststore=../.local/tls/terminal-server-truststore.p12
+server.truststore.password=changeit
 
 # Datei fuer die lokale Warteschlange.
 queue.file=scan-puffer.jsonl
