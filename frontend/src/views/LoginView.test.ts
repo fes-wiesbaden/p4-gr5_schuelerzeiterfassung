@@ -82,7 +82,7 @@ describe('Anmeldemaske', () => {
     expect((feld.element as HTMLInputElement).value).toBe('')
   })
 
-  it('führt Administratoren nach der Anmeldung in die Verwaltung', async () => {
+  it('führt auch Administratoren zunächst zur Live-Anwesenheit', async () => {
     const auth = useAuthStore()
     vi.spyOn(auth, 'login').mockImplementation(async () => {
       auth.user = { name: 'A. Muster', role: 'admin' }
@@ -93,7 +93,7 @@ describe('Anmeldemaske', () => {
     await ansicht.find('form').trigger('submit')
     await ansicht.vm.$nextTick()
 
-    expect(replace).toHaveBeenCalledWith({ name: 'raeume' })
+    expect(replace).toHaveBeenCalledWith({ name: 'live-anwesenheit' })
   })
 
   it('führt Lehrkräfte nach der Anmeldung zur Live-Anwesenheit', async () => {

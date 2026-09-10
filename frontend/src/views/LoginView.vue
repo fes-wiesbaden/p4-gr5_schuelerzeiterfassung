@@ -28,7 +28,7 @@ async function handleSubmit() {
     return
   }
 
-  router.replace({ name: auth.isAdmin ? 'raeume' : 'live-anwesenheit' })
+  router.replace({ name: 'live-anwesenheit' })
 }
 </script>
 
