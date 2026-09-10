@@ -1,7 +1,4 @@
 backend/target/
-terminal/target/
-terminal/terminal.properties
-terminal/scan-puffer.jsonl
 /target/
 frontend/node_modules/
 frontend/dist/

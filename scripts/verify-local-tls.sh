@@ -6,15 +6,11 @@ tls_host=$(awk -F= '$1 == "TLS_HOST" { print $2; exit }' "$env_file")
 ca_file=.local/tls/ca.crt
 server_certificate=.local/tls/server.crt
 client_ca_file=.local/tls/terminal-client-ca.crt
-client_certificate=.local/tls/terminal-23102003-client.crt
-client_key=.local/tls/terminal-23102003-client.key
+client_certificate=.local/tls/terminal-client.crt
+client_key=.local/tls/terminal-client.key
 
 openssl verify -CAfile "$ca_file" "$server_certificate"
-if printf '%s' "$tls_host" | grep -Eq '^[0-9]{1,3}(\.[0-9]{1,3}){3}$'; then
-  openssl verify -verify_ip "$tls_host" -CAfile "$ca_file" "$server_certificate"
-else
-  openssl verify -verify_hostname "$tls_host" -CAfile "$ca_file" "$server_certificate"
-fi
+openssl verify -verify_ip "$tls_host" -CAfile "$ca_file" "$server_certificate"
 openssl verify -CAfile "$client_ca_file" "$client_certificate"
 curl --fail --silent --show-error --cacert "$ca_file" "https://$tls_host:8443/" \
   | grep -Fq 'id="app"'
@@ -28,9 +24,10 @@ fi
 curl --fail --silent --show-error --cacert "$ca_file" --cert "$client_certificate" --key "$client_key" \
   "https://$tls_host:8444/api/__scan-endpoint-todo__"
 
-if curl --fail --silent --show-error --cacert "$ca_file" --cert "$client_certificate" --key "$client_key" \
-  "https://$tls_host:8444/api/scans" >/dev/null; then
-  echo 'Scan endpoint unexpectedly available before Issue #26' >&2
+if curl --fail --silent --show-error --cacert "$ca_file" \
+  --cert "$client_certificate" --key "$client_key" \
+  "https://$tls_host:8444/api/actuator/health" >/dev/null; then
+  echo 'mTLS endpoint unexpectedly exposed another API path' >&2
   exit 1
 fi
 
