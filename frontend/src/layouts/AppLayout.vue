@@ -34,9 +34,9 @@ watch(
   }
 )
 
-function handleLogout() {
-  auth.logout()
-  router.push({ name: 'live-anwesenheit' })
+async function handleLogout() {
+  await auth.logout()
+  router.push({ name: 'login' })
 }
 
 function handleSidebarKeydown(event: KeyboardEvent) {
