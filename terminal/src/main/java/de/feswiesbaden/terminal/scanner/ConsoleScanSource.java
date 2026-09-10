@@ -19,8 +19,9 @@ public final class ConsoleScanSource implements ScanSource {
     leser.setDaemon(true);
     leser.start();
 
-    System.out.println("Kein serieller Port eingetragen. Scans hier eintippen, zum Beispiel:");
-    System.out.println("{\"rfidUid\":\"04A3B2C1\",\"terminalNumber\":3}");
+    System.out.println(
+        "[TODO] Kein serieller Port eingetragen. Scans hier eintippen, zum Beispiel:");
+    System.out.println("[TEST] {\"rfidUid\":\"04A3B2C1\",\"terminalNumber\":23102003}");
   }
 
   private void read(Consumer<Reading> onScan) {

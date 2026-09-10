@@ -1,10 +1,7 @@
 package de.feswiesbaden.terminal.transport;
 
 import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.json.JsonMapper;
-import com.fasterxml.jackson.databind.node.ObjectNode;
-import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
+import de.feswiesbaden.terminal.model.Json;
 import de.feswiesbaden.terminal.model.Scan;
 import java.io.IOException;
 import java.net.URI;
@@ -21,8 +18,6 @@ public final class ScanSender {
   // Der Scan wurde schon einmal angenommen. Gebucht ist gebucht, also zeigen
   // wir das dem Schüler als Erfolg (Issue #26).
   private static final String ALREADY_RECEIVED = "SCAN_ALREADY_RECEIVED";
-
-  private final ObjectMapper json = JsonMapper.builder().addModule(new JavaTimeModule()).build();
 
   private final HttpClient client;
 
@@ -44,7 +39,7 @@ public final class ScanSender {
           HttpRequest.newBuilder(endpoint)
               .timeout(Duration.ofSeconds(10))
               .header("Content-Type", "application/json")
-              .POST(HttpRequest.BodyPublishers.ofString(body(scan)))
+              .POST(HttpRequest.BodyPublishers.ofString(Json.mapper().writeValueAsString(scan)))
               .build();
 
       HttpResponse<String> antwort = client.send(anfrage, HttpResponse.BodyHandlers.ofString());
@@ -58,22 +53,12 @@ public final class ScanSender {
     }
   }
 
-  private String body(Scan scan) throws IOException {
-    ObjectNode k = json.createObjectNode();
-    k.put("scanId", scan.scanId());
-    k.put("rfidUid", scan.rfidUid());
-    k.put("terminalNumber", scan.terminalNumber());
-    k.put("capturedAt", scan.capturedAt().toString());
-    return json.writeValueAsString(k);
-  }
-
-  String readCode(String antwortkoerper) {
+  static String readCode(String antwortkoerper) {
     if (antwortkoerper == null || antwortkoerper.isBlank()) {
       return FALLBACK_CODE;
     }
     try {
-      JsonNode k = json.readTree(antwortkoerper);
-      JsonNode code = k.get("code");
+      JsonNode code = Json.mapper().readTree(antwortkoerper).get("code");
       return code == null || code.asText().isBlank() ? FALLBACK_CODE : code.asText();
     } catch (IOException kaputt) {
       return FALLBACK_CODE;

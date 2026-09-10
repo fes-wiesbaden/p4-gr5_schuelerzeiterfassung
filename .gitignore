@@ -1,5 +1,7 @@
 backend/target/
 terminal/target/
+terminal/terminal.properties
+terminal/scan-puffer.jsonl
 /target/
 frontend/node_modules/
 frontend/dist/
@@ -15,3 +17,6 @@ terminal/terminal.properties
 # Lokale Warteschlange, enthaelt RFID-UIDs im Klartext
 terminal/scan-puffer.jsonl
 *.p12
+diagramme/**/*.drawio
+diagramme/**/backup/*
+diagramme/**/old/*

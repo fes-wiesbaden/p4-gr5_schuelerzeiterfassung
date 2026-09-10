@@ -3,6 +3,7 @@ package de.feswiesbaden.terminal.ui;
 import de.feswiesbaden.terminal.model.ScanState;
 import java.time.LocalTime;
 import java.time.format.DateTimeFormatter;
+import javafx.animation.Animation;
 import javafx.animation.PauseTransition;
 import javafx.application.Platform;
 import javafx.geometry.Pos;
@@ -17,6 +18,12 @@ import javafx.util.Duration;
 // Die Oberfläche zeigt nur an. Entschieden wird alles auf dem Server.
 public final class TerminalView {
   private static final DateTimeFormatter UHRZEIT = DateTimeFormatter.ofPattern("HH:mm");
+
+  private static final Duration RUECKKEHR_NACH_BEREIT = Duration.seconds(2);
+
+  // "Wird verarbeitet" würde sonst nur aufblitzen: die Antwort kommt oft schon
+  // nach gut hundert Millisekunden.
+  private static final Duration MINDESTENS_VERARBEITEN = Duration.seconds(1);
 
   private final BorderPane root = new BorderPane();
 
@@ -34,15 +41,28 @@ public final class TerminalView {
 
   private final Label terminalInfo = new Label();
 
-  private final PauseTransition zurueckAufBereit = new PauseTransition(Duration.seconds(3));
+  private final PauseTransition zurueckAufBereit;
+
+  private final PauseTransition verarbeitenLaeuft = new PauseTransition(MINDESTENS_VERARBEITEN);
+
+  private ScanState naechsterZustand;
+
+  private String naechsterCode;
 
   public TerminalView() {
+    this(RUECKKEHR_NACH_BEREIT);
+  }
+
+  // Kürzere Dauer für Tests.
+  TerminalView(Duration rueckkehr) {
+    zurueckAufBereit = new PauseTransition(rueckkehr);
     root.getStyleClass().add("root");
     root.setTop(header());
     root.setCenter(stageBox());
     root.setBottom(footer());
 
     zurueckAufBereit.setOnFinished(fertig -> show(ScanState.READY));
+    verarbeitenLaeuft.setOnFinished(fertig -> zeigeGemerkten());
     show(ScanState.READY);
   }
 
@@ -50,28 +70,55 @@ public final class TerminalView {
     return root;
   }
 
-  // Nur Erfolg läuft nach 3 Sekunden ab. Verarbeitung und Vormerkung bleiben
-  // stehen, sonst stünde "bereit" da, obwohl der Scan noch offen ist.
+  // Jede Rückmeldung läuft ab, damit der nächste Schüler nicht die Anzeige
+  // seines Vorgängers sieht. Offene Scans stehen in der Fußzeile.
   public void showState(ScanState state) {
-    Platform.runLater(
-        () -> {
-          show(state);
-          zurueckAufBereit.stop();
-          if (state == ScanState.SUCCESS) {
-            zurueckAufBereit.playFromStart();
-          }
-        });
+    Platform.runLater(() -> zeige(state, null));
   }
 
   // Der öffentliche Code darf angezeigt werden, der wirkliche Grund nie (#37).
   public void showError(String code) {
-    Platform.runLater(
-        () -> {
-          show(ScanState.ERROR);
-          hint.setText(ScanState.ERROR.hint() + "  (" + code + ")");
-          zurueckAufBereit.stop();
-          zurueckAufBereit.playFromStart();
-        });
+    Platform.runLater(() -> zeige(ScanState.ERROR, code));
+  }
+
+  // Das Ergebnis wartet, bis "wird verarbeitet" lange genug zu sehen war.
+  private void zeige(ScanState state, String code) {
+    if (state == ScanState.PROCESSING) {
+      naechsterZustand = null;
+      anzeigen(state, code);
+      verarbeitenLaeuft.playFromStart();
+      return;
+    }
+
+    if (verarbeitenLaeuft.getStatus() == Animation.Status.RUNNING) {
+      naechsterZustand = state;
+      naechsterCode = code;
+      return;
+    }
+
+    anzeigen(state, code);
+  }
+
+  private void zeigeGemerkten() {
+    if (naechsterZustand == null) {
+      return;
+    }
+    ScanState state = naechsterZustand;
+    String code = naechsterCode;
+    naechsterZustand = null;
+    anzeigen(state, code);
+  }
+
+  private void anzeigen(ScanState state, String code) {
+    show(state);
+    if (code != null) {
+      hint.setText(state.hint() + "  (" + code + ")");
+    }
+
+    zurueckAufBereit.stop();
+    if (state != ScanState.READY) {
+      zurueckAufBereit.playFromStart();
+    }
   }
 
   public void showTerminalNumber(int nummer) {
@@ -94,15 +141,14 @@ public final class TerminalView {
     symbol.setText(state.symbol());
     headline.setText(state.headline());
     hint.setText(state.hint());
-    if (state == ScanState.READY) {
-      badge.setText("Bereit · " + LocalTime.now().format(UHRZEIT) + " Uhr");
-    } else if (state == ScanState.PROCESSING) {
-      badge.setText("Bitte warten");
-    } else if (state == ScanState.QUEUED) {
-      badge.setText("Wird nachgereicht");
-    } else {
-      badge.setText("Zurück zu „Bereit“ in 3 s");
-    }
+    badge.setText(
+        switch (state) {
+          case READY -> "Bereit · " + LocalTime.now().format(UHRZEIT) + " Uhr";
+          case PROCESSING -> "Bitte warten";
+          case QUEUED -> "Wird nachgereicht";
+          case SUCCESS, ERROR ->
+              "Zurück zu „Bereit“ in " + (int) RUECKKEHR_NACH_BEREIT.toSeconds() + " s";
+        });
 
     stage.getStyleClass().removeIf(klasse -> klasse.startsWith("state-"));
     stage.getStyleClass().add("state-" + state.name().toLowerCase());

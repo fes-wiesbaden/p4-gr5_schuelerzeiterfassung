@@ -32,6 +32,11 @@ public final class TerminalApp extends Application {
 
   private TerminalView view;
 
+  // Nur dieser Scan darf die Anzeige ändern. Sonst schaltet sie im Takt der
+  // Zustellversuche älterer Scans hin und her. Der Scan wird im Lesethread
+  // gesetzt und im Zustellthread gelesen, deshalb volatile.
+  private volatile String angezeigterScan;
+
   @Override
   public void start(Stage fenster) {
     TerminalConfig config = TerminalConfig.load(Path.of("terminal.properties"));
@@ -41,7 +46,11 @@ public final class TerminalApp extends Application {
     ScanSender sender =
         new ScanSender(
             config.serverUrl(),
-            TerminalSslContext.loadOrNull(config.clientKeystore(), config.keystorePassword()));
+            TerminalSslContext.load(
+                config.clientKeystore(),
+                config.keystorePassword(),
+                config.serverTruststore(),
+                config.truststorePassword()));
 
     worker = new DeliveryWorker(queue, sender, this::onResult);
     worker.start();
@@ -67,6 +76,7 @@ public final class TerminalApp extends Application {
     Scan scan = Scan.of(gelesen.rfidUid(), gelesen.terminalNumber());
     try {
       queue.add(scan);
+      angezeigterScan = scan.scanId();
       view.showTerminalNumber(gelesen.terminalNumber());
       view.showState(ScanState.PROCESSING);
       updateQueueInfo();
@@ -77,11 +87,29 @@ public final class TerminalApp extends Application {
     }
   }
 
+  // Jeder Chip bekommt genau eine sichtbare Rückmeldung.
   private void onResult(Scan scan, SendResult ergebnis) {
     switch (ergebnis.status()) {
-      case ACCEPTED -> view.showState(ScanState.SUCCESS);
-      case REJECTED -> view.showError(ergebnis.code());
-      case RETRY -> view.showState(ScanState.QUEUED);
+      // Die Warteschlange arbeitet der Reihe nach, der eigene Scan kommt also
+      // vielleicht nicht dran. Fehlende Verbindung gilt trotzdem für ihn.
+      case RETRY -> {
+        if (angezeigterScan != null) {
+          angezeigterScan = null;
+          view.showState(ScanState.QUEUED);
+        }
+      }
+      case ACCEPTED -> {
+        if (scan.scanId().equals(angezeigterScan)) {
+          angezeigterScan = null;
+          view.showState(ScanState.SUCCESS);
+        }
+      }
+      case REJECTED -> {
+        if (scan.scanId().equals(angezeigterScan)) {
+          angezeigterScan = null;
+          view.showError(ergebnis.code());
+        }
+      }
     }
     updateQueueInfo();
   }

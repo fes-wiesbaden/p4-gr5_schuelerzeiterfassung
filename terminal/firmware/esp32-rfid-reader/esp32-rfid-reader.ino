@@ -3,7 +3,7 @@
 // Der ESP32 liest eine Karte und schickt pro Scan GENAU EINE JSON-Zeile in
 // UTF-8 über USB-Seriell an die JavaFX-Anwendung:
 //
-//     {"rfidUid":"04A3B2C1","terminalNumber":3}
+//     {"rfidUid":"04A3B2C1","terminalNumber":23102003}
 //
 // Kein WLAN, kein NTP, kein TLS. Die gesicherte Verbindung baut allein JavaFX
 // zum Server auf. Der ESP32 hängt nur am Kabel.
@@ -25,7 +25,7 @@
 #include <MFRC522.h>
 
 // Fest eingebaute Nummer dieses Terminals. Beim Aufspielen anpassen.
-const int TERMINAL_NUMBER = 3;
+const int TERMINAL_NUMBER = 23102003;
 
 const uint8_t PIN_SS = 5;
 const uint8_t PIN_RST = 22;

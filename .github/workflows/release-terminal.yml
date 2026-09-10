@@ -1,0 +1,38 @@
+name: Release terminal Maven project
+
+on:
+  push:
+    tags:
+      - 'terminal-v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+
+      - name: Install Xvfb
+        run: sudo apt-get update && sudo apt-get install -y xvfb
+
+      - name: Verify terminal Maven project
+        run: |
+          mvn -pl terminal spotless:check
+          mvn -pl terminal org.apache.maven.plugins:maven-checkstyle-plugin:3.6.0:check "-Dcheckstyle.config.location=${GITHUB_WORKSPACE}/backend/config/checkstyle/checkstyle.xml"
+          xvfb-run -a mvn -pl terminal verify
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" --generate-notes
