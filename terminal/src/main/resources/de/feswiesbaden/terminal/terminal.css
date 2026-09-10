@@ -1,0 +1,96 @@
+/* Farben und Abstände wie im Web-Terminal des Schulprojekts. */
+
+.root {
+  -fx-font-family: "Inter", "Cantarell", sans-serif;
+  -fx-background-color: #f8fafc;
+}
+
+.header {
+  -fx-background-color: #34558b;
+  -fx-padding: 14 24 14 24;
+}
+
+.header-title {
+  -fx-text-fill: white;
+  -fx-font-size: 16px;
+  -fx-font-weight: bold;
+}
+
+.stage-box {
+  -fx-alignment: center;
+  -fx-spacing: 12;
+  -fx-padding: 24;
+}
+
+.symbol {
+  -fx-font-size: 64px;
+  -fx-min-width: 150;
+  -fx-min-height: 150;
+  -fx-max-width: 150;
+  -fx-max-height: 150;
+  -fx-alignment: center;
+  -fx-background-radius: 75;
+  -fx-border-radius: 75;
+  -fx-border-width: 3;
+}
+
+.headline {
+  -fx-font-size: 40px;
+  -fx-font-weight: bold;
+}
+
+.hint {
+  -fx-font-size: 15px;
+  -fx-text-fill: #475569;
+}
+
+.badge {
+  -fx-padding: 8 18 8 18;
+  -fx-background-radius: 8;
+  -fx-border-radius: 8;
+  -fx-border-width: 1;
+  -fx-font-size: 13px;
+}
+
+/* Bereit */
+.state-ready .symbol   { -fx-background-color: #e4ebf6; -fx-border-color: #34558b; -fx-text-fill: #34558b; }
+.state-ready .headline { -fx-text-fill: #0f172a; }
+.state-ready .badge    { -fx-background-color: #e4ebf6; -fx-border-color: #34558b; -fx-text-fill: #34558b; }
+
+/* Erfasst */
+.state-success .symbol   { -fx-background-color: #dcfce7; -fx-border-color: #15803d; -fx-text-fill: #15803d; }
+.state-success .headline { -fx-text-fill: #15803d; }
+.state-success .badge    { -fx-background-color: #dcfce7; -fx-border-color: #15803d; -fx-text-fill: #15803d; }
+
+/* Nicht erfasst */
+.state-error .symbol   { -fx-background-color: #fee2e2; -fx-border-color: #b91c1c; -fx-text-fill: #b91c1c; }
+.state-error .headline { -fx-text-fill: #b91c1c; }
+.state-error .badge    { -fx-background-color: #fee2e2; -fx-border-color: #b91c1c; -fx-text-fill: #b91c1c; }
+
+/* Lokal vorgemerkt, Server war nicht erreichbar */
+.state-queued .symbol   { -fx-background-color: #fef3c7; -fx-border-color: #b45309; -fx-text-fill: #b45309; }
+.state-queued .headline { -fx-text-fill: #b45309; }
+.state-queued .badge    { -fx-background-color: #fef3c7; -fx-border-color: #b45309; -fx-text-fill: #b45309; }
+
+/* Wird gerade verarbeitet */
+.state-processing .symbol   { -fx-background-color: #e2e8f0; -fx-border-color: #475569; -fx-text-fill: #475569; }
+.state-processing .headline { -fx-text-fill: #475569; }
+.state-processing .badge    { -fx-background-color: #e2e8f0; -fx-border-color: #475569; -fx-text-fill: #475569; }
+
+.footer {
+  -fx-background-color: white;
+  -fx-border-color: #cbd5e1 transparent transparent transparent;
+  -fx-border-width: 1 0 0 0;
+  -fx-padding: 10 24 10 24;
+}
+
+.footer-text {
+  -fx-font-size: 12px;
+  -fx-text-fill: #475569;
+}
+
+.footer-strong {
+  -fx-font-size: 12px;
+  -fx-font-weight: bold;
+  -fx-text-fill: #475569;
+}

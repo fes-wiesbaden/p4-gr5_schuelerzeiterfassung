@@ -18,7 +18,9 @@ docker compose up -d
 
 Unter Linux müssen `HOST_UID` und `HOST_GID` in `.env` der Ausgabe von `id -u` und `id -g` entsprechen. Unter Docker Desktop für Windows bleiben die Standardwerte `1000`.
 
-Die Vue-Anwendung für Lehrkräfte und Administratoren ist anschließend unter `https://127.0.0.1:8443/` erreichbar. Der für die geplante JavaFX-Anwendung vorgesehene mTLS-Zugang liegt getrennt auf Port `8444`. HTTP wird nicht veröffentlicht.
+Die Anwendung ist anschließend unter `https://127.0.0.1:8443/` erreichbar. Der
+für JavaFX reservierte mTLS-Zugang liegt getrennt auf Port `8444`. HTTP wird
+nicht veröffentlicht.
 
 ```bash
 docker compose down
@@ -52,26 +54,33 @@ Beim ersten Start erzeugt `tls-init` die lokale Server-CA unter `.local/tls/ca.c
 
 Der Browser vertraut dieser privaten CA nicht automatisch. `ca.crt` deshalb einmal als vertrauenswürdige Stammzertifizierungsstelle für Websites importieren und den Browser neu starten. Anschließend immer exakt den in `TLS_HOST` eingetragenen Host öffnen, zum Beispiel `https://127.0.0.1:8443/` oder `https://127.0.0.1:5173/`. `localhost` ist bei TLS ein anderer Name als `127.0.0.1`.
 
-Port `8444` ist ausschließlich für den mTLS-geschützten JavaFX-Zugang vorgesehen und keine Browser-Oberfläche.
+Port `8444` ist ausschließlich der mTLS-Endpunkt des JavaFX-Terminals und keine
+Browser-Oberfläche.
 
-## Geplantes JavaFX-Terminal
+## JavaFX-Terminal mit mTLS
 
-Die geplante Erfassungskette lautet:
+Beim ersten Einrichten erzeugt `tls-init` die lokale Terminalidentität
+`terminal-23102003`: Client-Zertifikat, privater Schlüssel, Client-PKCS#12 und
+einen Java-Truststore mit der Server-CA. Private Schlüssel und Speicher dürfen
+nicht in Git, Logs oder Screenshots erscheinen.
 
-`RFID-Leser → ESP32 → USB-Serial → JavaFX → HTTPS/mTLS → nginx → Spring Boot`
+1. `TLS_HOST` in `.env` auf den Host oder die IP des nginx-Proxys setzen.
+2. `docker compose up tls-init` ausführen.
+3. In `terminal/` die Beispiel-Properties kopieren und den Host in `server.url`
+   auf exakt `TLS_HOST` setzen.
+4. Das Terminal mit `mvn javafx:run` starten.
 
-- Der ESP32 sendet RFID-UID und Terminal-ID über USB-Serial an JavaFX. Er benötigt dafür kein WLAN, NTP oder TLS.
-- JavaFX erzeugt Scan-ID und UTC-Scanzeit, hält nicht zugestellte Scans in einer lokalen Warteschlange und sendet sie an den Scan-Endpunkt.
-- Die JVM prüft Serverzertifikat und IP beziehungsweise Hostnamen gegen die installierte Server-CA.
-- nginx prüft ein eigenes Clientzertifikat der jeweiligen JavaFX-Terminalinstallation.
-- Private Schlüssel, Zertifikate und echte RFID-UIDs dürfen nicht in Git, Logs oder Screenshots gelangen.
-
-Eine Startanleitung folgt mit der JavaFX-Implementierung.
+JavaFX prüft den Server mit dem lokalen Truststore. nginx prüft das
+Clientzertifikat gegen die Terminal-Client-CA. Trust-all und deaktivierte
+Hostname-Prüfung sind verboten. Der echte Scan-Endpunkt folgt in Issue #26;
+der aktuelle nginx-Testpfad dient nur dem mTLS-Nachweis.
 
 ## Prüfungen
 
 ```bash
-cd backend && mvn spotless:check test
+docker compose up tls-init
+mvn -pl backend spotless:check test
+mvn -pl terminal spotless:check test
 cd frontend && npm ci && npm run lint && npm run format:check && npm test && npm run build
 docker compose config
 docker compose --profile test build tls-test
