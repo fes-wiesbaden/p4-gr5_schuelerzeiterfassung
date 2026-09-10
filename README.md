@@ -26,7 +26,7 @@ nicht veröffentlicht.
 docker compose down
 ```
 
-`docker compose down -v` nicht verwenden, wenn der ESP32 weiterhin derselben CA vertrauen soll: Dadurch wird die lokale MySQL-Datenbank gelöscht. Das TLS-Verzeichnis bleibt zwar bestehen, muss aber ebenfalls nicht gelöscht werden.
+`docker compose down -v` löscht die lokale MySQL-Datenbank. Das lokale TLS-Verzeichnis bleibt bestehen und muss für einen normalen Neustart nicht gelöscht werden.
 
 ## Lokal debuggen
 
@@ -34,8 +34,7 @@ docker compose down
 
 Das Repository-Root als Projekt öffnen. Die Root-`pom.xml` importiert das Maven-Modul `backend` automatisch. IntelliJ fragt gegebenenfalls nach dem Maven-Import; diesen bestätigen und Java 21 als Project SDK wählen.
 
-Der Hybrid-Modus lässt Backend und Frontend lokal laufen. Docker stellt nur
-MySQL und den mTLS-Proxy für JavaFX bereit.
+Der Hybrid-Modus lässt Backend und Vue-Frontend lokal laufen. Docker stellt MySQL und den für JavaFX vorgesehenen mTLS-Proxy bereit.
 
 ```bash
 docker compose -f compose.dev.yaml up --build -d
@@ -43,11 +42,7 @@ cd backend && mvn spring-boot:run
 cd frontend && npm run dev
 ```
 
-Das Backend ist in IntelliJ über die Klasse `AttendanceApplication` debugbar.
-Der lokale Vite-Server nutzt das erzeugte Serverzertifikat unter
-`https://<TLS_HOST>:5173/`. Port `8444` bleibt für JavaFX reserviert.
-`compose.dev.yaml` veröffentlicht MySQL ausschließlich für den lokalen
-Backend-Debugger.
+Das Backend ist in IntelliJ über die Klasse `AttendanceApplication` debugbar. Der lokale Vite-Server nutzt das erzeugte Serverzertifikat unter `https://<TLS_HOST>:5173/`. Port `8444` ist für die spätere JavaFX-Kommunikation reserviert. `compose.dev.yaml` veröffentlicht MySQL ausschließlich für den lokalen Backend-Debugger.
 
 ```bash
 docker compose -f compose.dev.yaml down
@@ -57,7 +52,7 @@ docker compose -f compose.dev.yaml down
 
 Beim ersten Start erzeugt `tls-init` die lokale Server-CA unter `.local/tls/ca.crt`. Sie gilt sowohl für den vollständigen Container-Start auf Port `8443` als auch für den lokalen Vite-Debugger auf Port `5173`.
 
-Der Browser vertraut dieser privaten CA nicht automatisch. `ca.crt` deshalb einmal als vertrauenswürdige Stammzertifizierungsstelle für Websites importieren und den Browser neu starten. Anschließend immer exakt den in `TLS_HOST` eingetragenen Host öffnen, zum Beispiel `https://127.0.0.1:8443/terminal/1` oder `https://127.0.0.1:5173/terminal/1`. `localhost` ist bei TLS ein anderer Name als `127.0.0.1`.
+Der Browser vertraut dieser privaten CA nicht automatisch. `ca.crt` deshalb einmal als vertrauenswürdige Stammzertifizierungsstelle für Websites importieren und den Browser neu starten. Anschließend immer exakt den in `TLS_HOST` eingetragenen Host öffnen, zum Beispiel `https://127.0.0.1:8443/` oder `https://127.0.0.1:5173/`. `localhost` ist bei TLS ein anderer Name als `127.0.0.1`.
 
 Port `8444` ist ausschließlich der mTLS-Endpunkt des JavaFX-Terminals und keine
 Browser-Oberfläche.

@@ -16,7 +16,7 @@ else
   openssl verify -verify_hostname "$tls_host" -CAfile "$ca_file" "$server_certificate"
 fi
 openssl verify -CAfile "$client_ca_file" "$client_certificate"
-curl --fail --silent --show-error --cacert "$ca_file" "https://$tls_host:8443/terminal/1" \
+curl --fail --silent --show-error --cacert "$ca_file" "https://$tls_host:8443/" \
   | grep -Fq 'id="app"'
 
 if curl --fail --silent --show-error --cacert "$ca_file" \
@@ -34,7 +34,7 @@ if curl --fail --silent --show-error --cacert "$ca_file" --cert "$client_certifi
   exit 1
 fi
 
-if curl --connect-timeout 2 --fail --silent "http://$tls_host:8443/terminal/1" >/dev/null; then
+if curl --connect-timeout 2 --fail --silent "http://$tls_host:8443/" >/dev/null; then
   echo 'HTTP unexpectedly reachable' >&2
   exit 1
 fi

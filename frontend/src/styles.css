@@ -7,10 +7,3 @@
 body {
   margin: 0;
 }
-
-.terminal {
-  display: grid;
-  min-height: 100vh;
-  place-content: center;
-  text-align: center;
-}
