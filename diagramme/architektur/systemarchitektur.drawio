@@ -1,0 +1,89 @@
+<mxfile host="app.diagrams.net">
+  <diagram id="systemarchitektur-v3" name="Systemarchitektur">
+    <mxGraphModel dx="1984" dy="945" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="2000" pageHeight="900" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="title" parent="1" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;fontSize=28;fontStyle=1;fontColor=#1A3A8F;" value="Systemarchitektur – RFID-Anwesenheitserfassung" vertex="1">
+          <mxGeometry height="42" width="1920" x="40" y="20" as="geometry" />
+        </mxCell>
+        <mxCell id="subtitle" parent="1" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;fontSize=15;fontColor=#5A5A5A;" value="JavaFX erfasst und wiederholt Scans; Spring Boot validiert Tagesanwesenheit. Das Terminal erhält nur neutrale Antworten." vertex="1">
+          <mxGeometry height="28" width="1920" x="40" y="62" as="geometry" />
+        </mxCell>
+        <mxCell id="terminal-zone" parent="1" style="swimlane;html=1;rounded=1;startSize=32;horizontal=1;fillColor=#F8F9FA;swimlaneFillColor=#F8F9FA;strokeColor=#9AA0A6;fontSize=15;fontStyle=1;fontColor=#3C4043;" value="Klassenraum / Terminalinstallation" vertex="1">
+          <mxGeometry height="270" width="820" x="35" y="115" as="geometry" />
+        </mxCell>
+        <mxCell id="server-zone" parent="1" style="swimlane;html=1;rounded=1;startSize=32;horizontal=1;fillColor=#F8F9FA;swimlaneFillColor=#F8F9FA;strokeColor=#9AA0A6;fontSize=15;fontStyle=1;fontColor=#3C4043;" value="Server" vertex="1">
+          <mxGeometry height="270" width="1040" x="925" y="115" as="geometry" />
+        </mxCell>
+        <mxCell id="rfid" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F5F5F5;strokeColor=#6D6D6D;fontSize=18;fontStyle=1;fontColor=#22242A;" value="RFID-Leser&lt;br&gt;&lt;font style=&quot;font-size:12px&quot;&gt;Karten-UID&lt;/font&gt;" vertex="1">
+          <mxGeometry height="80" width="140" x="60" y="210" as="geometry" />
+        </mxCell>
+        <mxCell id="esp32" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F5F5F5;strokeColor=#6D6D6D;fontSize=18;fontStyle=1;fontColor=#22242A;" value="ESP32&lt;br&gt;&lt;font style=&quot;font-size:12px&quot;&gt;UID + feste Terminal-ID&lt;/font&gt;" vertex="1">
+          <mxGeometry height="80" width="180" x="300" y="210" as="geometry" />
+        </mxCell>
+        <mxCell id="javafx" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#DAE8FC;strokeColor=#6C8EBF;fontSize=18;fontStyle=1;fontColor=#22242A;" value="JavaFX-Terminal&lt;br&gt;&lt;font style=&quot;font-size:12px&quot;&gt;UUIDv4 · UTC-Scanzeit&lt;br&gt;lokale Retry-Queue&lt;/font&gt;" vertex="1">
+          <mxGeometry height="110" width="200" x="620" y="195" as="geometry" />
+        </mxCell>
+        <mxCell id="nginx" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FCE4EC;strokeColor=#D81B60;fontSize=18;fontStyle=1;fontColor=#22242A;" value="nginx&lt;br&gt;&lt;font style=&quot;font-size:12px&quot;&gt;TLS · JavaFX-mTLS&lt;br&gt;Clientzertifikat prüfen&lt;/font&gt;" vertex="1">
+          <mxGeometry height="110" width="180" x="970" y="195" as="geometry" />
+        </mxCell>
+        <mxCell id="spring" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#D5E8D4;strokeColor=#82B366;fontSize=18;fontStyle=1;fontColor=#22242A;" value="Spring-Boot-Backend&lt;br&gt;&lt;font style=&quot;font-size:12px&quot;&gt;Autorisierung · Planung&lt;br&gt;Anwesenheit · Minuten · Audit&lt;/font&gt;" vertex="1">
+          <mxGeometry height="120" width="240" x="1300" y="190" as="geometry" />
+        </mxCell>
+        <mxCell id="mysql" parent="1" style="shape=cylinder;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;fillColor=#E1D5E7;strokeColor=#9673A6;fontSize=18;fontStyle=1;fontColor=#22242A;" value="MySQL 8&lt;br&gt;&lt;font style=&quot;font-size:12px&quot;&gt;RawScan · Tages-Attendance&lt;br&gt;Audit · Minutenkonten&lt;/font&gt;" vertex="1">
+          <mxGeometry height="120" width="200" x="1740" y="190" as="geometry" />
+        </mxCell>
+        <mxCell id="staff" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F5F5F5;strokeColor=#6D6D6D;fontSize=17;fontStyle=1;fontColor=#22242A;" value="Lehrkraft-/Admin-Browser&lt;br&gt;&lt;font style=&quot;font-size:12px&quot;&gt;geschützte Bereiche&lt;/font&gt;" vertex="1">
+          <mxGeometry height="85" width="230" x="400" y="460" as="geometry" />
+        </mxCell>
+        <mxCell id="vue" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#DAE8FC;strokeColor=#6C8EBF;fontSize=18;fontStyle=1;fontColor=#22242A;" value="Vue 3 SPA&lt;br&gt;&lt;font style=&quot;font-size:12px&quot;&gt;nur Lehrkraft + Admin&lt;br&gt;keine Terminalroute · kein SSE&lt;/font&gt;" vertex="1">
+          <mxGeometry height="105" width="230" x="740" y="450" as="geometry" />
+        </mxCell>
+        <mxCell id="edge-rfid" edge="1" parent="1" source="rfid" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;fontSize=13;labelBackgroundColor=#FFFFFF;" target="esp32" value="RFID-UID">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="edge-usb" edge="1" parent="1" source="esp32" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;fontSize=13;labelBackgroundColor=#FFFFFF;strokeColor=#1A73E8;strokeWidth=2;" target="javafx" value="USB-Serial · JSON">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="edge-mtls" edge="1" parent="1" source="javafx" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;fontSize=13;labelBackgroundColor=#FFFFFF;strokeColor=#D81B60;strokeWidth=2;" target="nginx" value="HTTPS/mTLS">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="edge-backend" edge="1" parent="1" source="nginx" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;fontSize=13;labelBackgroundColor=#FFFFFF;strokeColor=#D81B60;strokeWidth=2;" target="spring" value="REST · geprüfte Identität">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="edge-db" edge="1" parent="1" source="spring" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;fontSize=13;labelBackgroundColor=#FFFFFF;" target="mysql" value="JPA / SQL">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="edge-response" edge="1" parent="1" source="spring" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;fontSize=13;labelBackgroundColor=#FFFFFF;dashed=1;strokeColor=#5F6368;" target="javafx" value="neutrale synchrone Antwort">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="1420" y="165" />
+              <mxPoint x="720" y="165" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="edge-staff" edge="1" parent="1" source="staff" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;fontSize=13;labelBackgroundColor=#FFFFFF;" target="vue" value="Bedienung">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="edge-vue" edge="1" parent="1" source="vue" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;fontSize=13;labelBackgroundColor=#FFFFFF;strokeColor=#1A73E8;" target="nginx" value="HTTPS · REST · Session · CSRF">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="1060" y="503" />
+              <mxPoint x="1060" y="350" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="scan-note" parent="1" style="rounded=1;whiteSpace=wrap;html=1;align=left;verticalAlign=top;spacing=14;fillColor=#E8F0FE;strokeColor=#6C8EBF;fontSize=14;fontColor=#22242A;" value="&lt;b&gt;Scanverarbeitung&lt;/b&gt;&lt;br&gt;&lt;br&gt;• RawScan und Fachänderung transaktional&lt;br&gt;• gleiche Scan-ID: SCAN_ALREADY_RECEIVED&lt;br&gt;• JavaFX-Scanzeit bleibt maßgeblich&lt;br&gt;• ANWESEND: SCAN_REJECTED" vertex="1">
+          <mxGeometry height="135" width="590" x="40" y="625" as="geometry" />
+        </mxCell>
+        <mxCell id="domain-note" parent="1" style="rounded=1;whiteSpace=wrap;html=1;align=left;verticalAlign=top;spacing=14;fillColor=#E6F4EA;strokeColor=#82B366;fontSize=14;fontColor=#22242A;" value="&lt;b&gt;Tagesanwesenheit&lt;/b&gt;&lt;br&gt;&lt;br&gt;• eine Attendance je Schüler und Schultag&lt;br&gt;• Slot + aktive Blockzuordnung liefern Zeit&lt;br&gt;• Tagesabschluss ohne Scan: alle Slot-Minuten unentschuldigt" vertex="1">
+          <mxGeometry height="135" width="590" x="705" y="625" as="geometry" />
+        </mxCell>
+        <mxCell id="retention-note" parent="1" style="rounded=1;whiteSpace=wrap;html=1;align=left;verticalAlign=top;spacing=14;fillColor=#FEF7E0;strokeColor=#D6B656;fontSize=14;fontColor=#22242A;" value="&lt;b&gt;Zuordnung und Aufbewahrung&lt;/b&gt;&lt;br&gt;&lt;br&gt;• Terminal gehört genau einem Raum&lt;br&gt;• Raum hat höchstens ein Terminal&lt;br&gt;• RawScans: 14 Tage ab created_at&lt;br&gt;• Historie: 00:00 Berlin, 6 Monate nach Planende" vertex="1">
+          <mxGeometry height="135" width="590" x="1370" y="625" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>
