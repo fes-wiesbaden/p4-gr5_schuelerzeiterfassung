@@ -13,20 +13,21 @@ if [ ! -f "$cert_dir/ca.key" ]; then
     -subj "/CN=Attendance Local Development CA" -out "$cert_dir/ca.crt"
 fi
 
-if [ ! -f "$cert_dir/esp32-client-ca.crt" ]; then
-  openssl genrsa -out "$cert_dir/esp32-client-ca.key" 4096
-  openssl req -x509 -new -key "$cert_dir/esp32-client-ca.key" -sha256 -days 3650 \
-    -subj "/CN=Attendance ESP32 Client CA" -out "$cert_dir/esp32-client-ca.crt"
-  openssl req -new -newkey rsa:2048 -nodes -keyout "$cert_dir/esp32-client.key" \
-    -subj "/CN=Attendance ESP32" -out "$cert_dir/esp32-client.csr"
+if [ ! -f "$cert_dir/terminal-client-ca.crt" ]; then
+  openssl genrsa -out "$cert_dir/terminal-client-ca.key" 4096
+  openssl req -x509 -new -key "$cert_dir/terminal-client-ca.key" -sha256 -days 3650 \
+    -subj "/CN=Attendance Terminal Client CA" -out "$cert_dir/terminal-client-ca.crt"
+  openssl req -new -newkey rsa:2048 -nodes -keyout "$cert_dir/terminal-client.key" \
+    -subj "/CN=terminal-1" -out "$cert_dir/terminal-client.csr"
   printf '%s\n' \
     'basicConstraints = critical,CA:FALSE' \
     'keyUsage = critical,digitalSignature,keyEncipherment' \
-    'extendedKeyUsage = clientAuth' > "$cert_dir/esp32-client.ext"
-  openssl x509 -req -in "$cert_dir/esp32-client.csr" -CA "$cert_dir/esp32-client-ca.crt" \
-    -CAkey "$cert_dir/esp32-client-ca.key" -CAcreateserial -out "$cert_dir/esp32-client.crt" \
-    -days 3650 -sha256 -extfile "$cert_dir/esp32-client.ext"
-  rm "$cert_dir/esp32-client.csr" "$cert_dir/esp32-client.ext"
+    'extendedKeyUsage = clientAuth' > "$cert_dir/terminal-client.ext"
+  openssl x509 -req -in "$cert_dir/terminal-client.csr" -CA "$cert_dir/terminal-client-ca.crt" \
+    -CAkey "$cert_dir/terminal-client-ca.key" -CAcreateserial \
+    -out "$cert_dir/terminal-client.crt" -days 3650 -sha256 \
+    -extfile "$cert_dir/terminal-client.ext"
+  rm "$cert_dir/terminal-client.csr" "$cert_dir/terminal-client.ext"
 fi
 
 if printf '%s' "$host" | grep -Eq '^[0-9]{1,3}(\.[0-9]{1,3}){3}$'; then

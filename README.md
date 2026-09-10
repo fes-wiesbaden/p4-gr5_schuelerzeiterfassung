@@ -18,13 +18,13 @@ docker compose up -d
 
 Unter Linux müssen `HOST_UID` und `HOST_GID` in `.env` der Ausgabe von `id -u` und `id -g` entsprechen. Unter Docker Desktop für Windows bleiben die Standardwerte `1000`.
 
-Die Anwendung ist anschließend unter `https://127.0.0.1:8443/terminal/1` erreichbar. Der ESP32-Scan-Endpunkt ist getrennt unter Port `8444` und verlangt mTLS. HTTP wird nicht veröffentlicht.
+Die Vue-Anwendung für Lehrkräfte und Administratoren ist anschließend unter `https://127.0.0.1:8443/` erreichbar. Der für die geplante JavaFX-Anwendung vorgesehene mTLS-Zugang liegt getrennt auf Port `8444`. HTTP wird nicht veröffentlicht.
 
 ```bash
 docker compose down
 ```
 
-`docker compose down -v` nicht verwenden, wenn der ESP32 weiterhin derselben CA vertrauen soll: Dadurch wird die lokale MySQL-Datenbank gelöscht. Das TLS-Verzeichnis bleibt zwar bestehen, muss aber ebenfalls nicht gelöscht werden.
+`docker compose down -v` löscht die lokale MySQL-Datenbank. Das lokale TLS-Verzeichnis bleibt bestehen und muss für einen normalen Neustart nicht gelöscht werden.
 
 ## Lokal debuggen
 
@@ -32,7 +32,7 @@ docker compose down
 
 Das Repository-Root als Projekt öffnen. Die Root-`pom.xml` importiert das Maven-Modul `backend` automatisch. IntelliJ fragt gegebenenfalls nach dem Maven-Import; diesen bestätigen und Java 21 als Project SDK wählen.
 
-Der Hybrid-Modus lässt Backend und Frontend lokal laufen. Docker stellt nur MySQL und den mTLS-Proxy für den ESP32 bereit.
+Der Hybrid-Modus lässt Backend und Vue-Frontend lokal laufen. Docker stellt MySQL und den für JavaFX vorgesehenen mTLS-Proxy bereit.
 
 ```bash
 docker compose -f compose.dev.yaml up --build -d
@@ -40,7 +40,7 @@ cd backend && mvn spring-boot:run
 cd frontend && npm run dev
 ```
 
-Das Backend ist in IntelliJ über die Klasse `AttendanceApplication` debugbar. Der lokale Vite-Server nutzt das erzeugte Serverzertifikat: `https://<TLS_HOST>:5173/terminal/1`. Für den ESP32 bleibt `https://<TLS_HOST>:8444/api/` das mTLS-Ziel. `compose.dev.yaml` veröffentlicht MySQL ausschließlich für den lokalen Backend-Debugger.
+Das Backend ist in IntelliJ über die Klasse `AttendanceApplication` debugbar. Der lokale Vite-Server nutzt das erzeugte Serverzertifikat unter `https://<TLS_HOST>:5173/`. Port `8444` ist für die spätere JavaFX-Kommunikation reserviert. `compose.dev.yaml` veröffentlicht MySQL ausschließlich für den lokalen Backend-Debugger.
 
 ```bash
 docker compose -f compose.dev.yaml down
@@ -50,21 +50,23 @@ docker compose -f compose.dev.yaml down
 
 Beim ersten Start erzeugt `tls-init` die lokale Server-CA unter `.local/tls/ca.crt`. Sie gilt sowohl für den vollständigen Container-Start auf Port `8443` als auch für den lokalen Vite-Debugger auf Port `5173`.
 
-Der Browser vertraut dieser privaten CA nicht automatisch. `ca.crt` deshalb einmal als vertrauenswürdige Stammzertifizierungsstelle für Websites importieren und den Browser neu starten. Anschließend immer exakt den in `TLS_HOST` eingetragenen Host öffnen, zum Beispiel `https://127.0.0.1:8443/terminal/1` oder `https://127.0.0.1:5173/terminal/1`. `localhost` ist bei TLS ein anderer Name als `127.0.0.1`.
+Der Browser vertraut dieser privaten CA nicht automatisch. `ca.crt` deshalb einmal als vertrauenswürdige Stammzertifizierungsstelle für Websites importieren und den Browser neu starten. Anschließend immer exakt den in `TLS_HOST` eingetragenen Host öffnen, zum Beispiel `https://127.0.0.1:8443/` oder `https://127.0.0.1:5173/`. `localhost` ist bei TLS ein anderer Name als `127.0.0.1`.
 
-Port `8444` ist ausschließlich der mTLS-Endpunkt des ESP32 und keine Browser-Oberfläche.
+Port `8444` ist ausschließlich für den mTLS-geschützten JavaFX-Zugang vorgesehen und keine Browser-Oberfläche.
 
-## ESP32-Test mit mTLS
+## Geplantes JavaFX-Terminal
 
-Beim ersten Einrichten erzeugt `tls-init` einmalig die feste ESP32-Identität: `esp32-client.crt` und `esp32-client.key`. Diese beiden Dateien gehören ausschließlich in die ESP32-Firmware. Der private Schlüssel darf nicht in Git, Logs oder Screenshots erscheinen.
+Die geplante Erfassungskette lautet:
 
-1. Die WLAN-IP des testenden Laptops in `TLS_HOST` in `.env` eintragen.
-2. `./.local/tls/ca.crt` als Server-CA sowie `esp32-client.crt` und `esp32-client.key` in die ESP32-Test-Firmware übernehmen.
-3. Die HTTPS-URL des ESP32 auf `https://<TLS_HOST>:8444/api/` setzen.
+`RFID-Leser → ESP32 → USB-Serial → JavaFX → HTTPS/mTLS → nginx → Spring Boot`
 
-`WiFiClientSecure` erhält die Server-CA mit `setCACert(...)`, das feste Client-Zertifikat mit `setCertificate(...)` und den privaten Schlüssel mit `setPrivateKey(...)`. Dadurch prüft der ESP32 den Server und nginx prüft den ESP32. `setInsecure()` ist verboten.
+- Der ESP32 sendet RFID-UID und Terminal-ID über USB-Serial an JavaFX. Er benötigt dafür kein WLAN, NTP oder TLS.
+- JavaFX erzeugt Scan-ID und UTC-Scanzeit, hält nicht zugestellte Scans in einer lokalen Warteschlange und sendet sie an den Scan-Endpunkt.
+- Die JVM prüft Serverzertifikat und IP beziehungsweise Hostnamen gegen die installierte Server-CA.
+- nginx prüft ein eigenes Clientzertifikat der jeweiligen JavaFX-Terminalinstallation.
+- Private Schlüssel, Zertifikate und echte RFID-UIDs dürfen nicht in Git, Logs oder Screenshots gelangen.
 
-Beim Wechsel auf einen anderen Laptop: Vor dem Start dessen `.local/tls/esp32-client-ca.crt` mit der öffentlichen Client-CA vom ersten Einrichten ersetzen. Dann dessen WLAN-IP in `.env` setzen, `docker compose up --build` starten und dessen neue `ca.crt` sowie die Ziel-URL in der ESP32-Firmware aktualisieren. Das feste ESP32-Client-Zertifikat und sein privater Schlüssel bleiben unverändert.
+Eine Startanleitung folgt mit der JavaFX-Implementierung.
 
 ## Prüfungen
 

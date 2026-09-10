@@ -7,4 +7,6 @@ frontend/dist/
 img-screenshots/
 .idea/
 *.iml
-diagramme/*/*.drawio
+diagramme/**/*.drawio
+diagramme/**/backup/*
+diagramme/**/old/*
