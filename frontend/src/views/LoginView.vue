@@ -22,9 +22,8 @@ async function handleSubmit() {
   }
 
   // Wer vorher auf eine geschuetzte Seite wollte, kommt dorthin zurueck.
-  const ziel =
-    typeof route.query.weiter === 'string' ? route.query.weiter : null
-  if (ziel) {
+  const ziel = route.query.weiter
+  if (typeof ziel === 'string') {
     router.replace(ziel)
     return
   }
