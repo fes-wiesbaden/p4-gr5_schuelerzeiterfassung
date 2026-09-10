@@ -82,6 +82,20 @@ describe('Anmeldemaske', () => {
     expect((feld.element as HTMLInputElement).value).toBe('')
   })
 
+  it('führt Administratoren nach der Anmeldung in die Verwaltung', async () => {
+    const auth = useAuthStore()
+    vi.spyOn(auth, 'login').mockImplementation(async () => {
+      auth.user = { name: 'A. Muster', role: 'admin' }
+      return true
+    })
+    const ansicht = baueAnsicht()
+
+    await ansicht.find('form').trigger('submit')
+    await ansicht.vm.$nextTick()
+
+    expect(replace).toHaveBeenCalledWith({ name: 'raeume' })
+  })
+
   it('führt Lehrkräfte nach der Anmeldung zur Live-Anwesenheit', async () => {
     const auth = useAuthStore()
     vi.spyOn(auth, 'login').mockImplementation(async () => {
