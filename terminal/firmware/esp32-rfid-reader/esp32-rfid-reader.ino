@@ -31,8 +31,11 @@ const uint8_t PIN_SS = 5;
 const uint8_t PIN_RST = 22;
 const long BAUD = 115200;
 
-// Dieselbe Karte soll nicht dauernd melden, solange sie aufliegt.
-const unsigned long REPEAT_BLOCK_MS = 1500;
+// Dieselbe Karte soll nicht dauernd melden, solange sie aufliegt. Eine
+// vergessene Karte erzeugte bei 1,5 Sekunden rund 13 Meldungen in 45
+// Sekunden und damit ebenso viele Rohscans. 30 Sekunden reichen, weil
+// Anwesenheit ohnehin nur beim ersten gueltigen Scan gebucht wird.
+const unsigned long REPEAT_BLOCK_MS = 30000;
 
 MFRC522 reader(PIN_SS, PIN_RST);
 
@@ -48,7 +51,20 @@ void setup() {
   SPI.begin();
   reader.PCD_Init();
 
-  Serial.println("# RFID-Leser bereit");
+  // Selbsttest: Ein angeschlossener RC522 meldet in VersionReg 0x91 oder 0x92.
+  // Steht dort 0x00 oder 0xFF, antwortet der Leser nicht und die Verkabelung
+  // stimmt nicht. Ohne diese Meldung sieht ein toter Leser aus wie eine Karte,
+  // die einfach nicht erkannt wird.
+  byte version = reader.PCD_ReadRegister(MFRC522::VersionReg);
+
+  Serial.print("# RC522 VersionReg 0x");
+  Serial.println(version, HEX);
+
+  if (version == 0x00 || version == 0xFF) {
+    Serial.println("# RFID-Leser antwortet nicht, Verkabelung pruefen");
+  } else {
+    Serial.println("# RFID-Leser bereit");
+  }
 }
 
 String uidToHex(MFRC522::Uid uid) {
