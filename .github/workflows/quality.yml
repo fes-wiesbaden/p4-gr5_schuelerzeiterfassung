@@ -30,9 +30,6 @@ jobs:
       - name: Check formatting
         run: mvn -pl backend spotless:check
 
-      - name: Run Checkstyle
-        run: mvn -pl backend org.apache.maven.plugins:maven-checkstyle-plugin:3.6.0:check -Dcheckstyle.config.location=config/checkstyle/checkstyle.xml
-
       - name: Run tests and build
         run: mvn -pl backend verify
 

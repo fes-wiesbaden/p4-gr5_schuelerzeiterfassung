@@ -81,7 +81,7 @@ Die Backend-Integrationstests verwenden MySQL über Testcontainers und benötige
 
 Der Workflow `Quality checks` startet bei Pushes und Pull Requests. Er prüft:
 
-- Backend: Spotless, Checkstyle, Maven-Tests und Build;
+- Backend: Spotless, Maven-Tests und Build;
 - Frontend: ESLint, Prettier, TypeScript-Typecheck, Vitest und Produktionsbuild.
 
 Security-Scans sind derzeit nicht Bestandteil der Pipeline.
