@@ -3,10 +3,13 @@ package de.feswiesbaden.attendance.entities;
 import jakarta.persistence.*;
 import jakarta.validation.constraints.NotNull;
 import java.time.LocalDateTime;
+import java.util.UUID;
 import lombok.AllArgsConstructor;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 
 @Entity
 @Table(name = "raw_scan")
@@ -17,8 +20,9 @@ import lombok.Setter;
 public class RawScan {
 
   @Id
+  @JdbcTypeCode(SqlTypes.CHAR)
   @Column(name = "scan_id", length = 36, nullable = false)
-  private String scanId;
+  private UUID scanId;
 
   @NotNull
   @Column(name = "rfid_uid", length = 64, nullable = false)
