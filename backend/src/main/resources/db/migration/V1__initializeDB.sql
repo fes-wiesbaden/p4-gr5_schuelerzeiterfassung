@@ -10,6 +10,25 @@ CREATE TABLE teacher (
 );
 
 
+CREATE TABLE timetable (
+                           timetable_id BIGINT AUTO_INCREMENT PRIMARY KEY,
+                           name VARCHAR(150) NOT NULL,
+                           created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                           changed_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+);
+
+
+CREATE TABLE block_plan (
+                            block_plan_id BIGINT AUTO_INCREMENT PRIMARY KEY,
+                            name VARCHAR(150) NOT NULL,
+                            starts_on DATE NOT NULL,
+                            ends_on DATE NOT NULL,
+                            created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                            changed_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                            CONSTRAINT chk_block_plan_dates CHECK (ends_on >= starts_on)
+);
+
+
 CREATE TABLE school_class (
                               school_class_id BIGINT AUTO_INCREMENT PRIMARY KEY,
                               class_code VARCHAR(30) NOT NULL,
@@ -71,14 +90,6 @@ CREATE TABLE terminal (
 );
 
 
-CREATE TABLE timetable (
-                           timetable_id BIGINT AUTO_INCREMENT PRIMARY KEY,
-                           name VARCHAR(150) NOT NULL,
-                           created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                           changed_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-);
-
-
 CREATE TABLE timetable_slot (
                                 timetable_slot_id BIGINT AUTO_INCREMENT PRIMARY KEY,
                                 timetable_id BIGINT NOT NULL,
@@ -92,17 +103,6 @@ CREATE TABLE timetable_slot (
                                 CONSTRAINT fk_timetable_slot_timetable FOREIGN KEY (timetable_id) REFERENCES timetable(timetable_id),
                                 CONSTRAINT fk_timetable_slot_room FOREIGN KEY (room_id) REFERENCES room(room_id),
                                 INDEX idx_timetable_slot_timetable_weekday_time (timetable_id, weekday, start_time, end_time)
-);
-
-
-CREATE TABLE block_plan (
-                            block_plan_id BIGINT AUTO_INCREMENT PRIMARY KEY,
-                            name VARCHAR(150) NOT NULL,
-                            starts_on DATE NOT NULL,
-                            ends_on DATE NOT NULL,
-                            created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                            changed_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-                            CONSTRAINT chk_block_plan_dates CHECK (ends_on >= starts_on)
 );
 
 
