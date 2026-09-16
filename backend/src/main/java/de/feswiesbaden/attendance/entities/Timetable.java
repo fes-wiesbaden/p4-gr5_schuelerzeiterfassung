@@ -2,12 +2,11 @@ package de.feswiesbaden.attendance.entities;
 
 import jakarta.persistence.*;
 import jakarta.validation.constraints.NotNull;
+import java.time.LocalDateTime;
 import lombok.AllArgsConstructor;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
-
-import java.time.LocalDateTime;
 
 @Entity
 @Table(name = "timetable")
@@ -17,28 +16,18 @@ import java.time.LocalDateTime;
 @AllArgsConstructor
 public class Timetable {
 
-    @Id
-    @GeneratedValue(strategy = GenerationType.IDENTITY)
-    @Column(name = "timetable_id")
-    private Long timetableId;
+  @Id
+  @GeneratedValue(strategy = GenerationType.IDENTITY)
+  @Column(name = "timetable_id")
+  private Long timetableId;
 
-    @NotNull
-    @Column(name = "name", length = 150, nullable = false)
-    private String name;
+  @NotNull
+  @Column(name = "name", length = 150, nullable = false)
+  private String name;
 
-    @Column(
-            name = "created_at",
-            insertable = false,
-            updatable = false,
-            nullable = false
-    )
-    private LocalDateTime createdAt;
+  @Column(name = "created_at", insertable = false, updatable = false, nullable = false)
+  private LocalDateTime createdAt;
 
-    @Column(
-            name = "changed_at",
-            insertable = false,
-            updatable = false,
-            nullable = false
-    )
-    private LocalDateTime changedAt;
+  @Column(name = "changed_at", insertable = false, updatable = false, nullable = false)
+  private LocalDateTime changedAt;
 }
