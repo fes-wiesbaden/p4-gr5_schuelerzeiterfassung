@@ -2,14 +2,17 @@
 
 Dieses Dokument beschreibt das geplante MySQL-8-Schema des
 Tagesanwesenheitsmodells. Tabellen- und Spaltennamen sind Englisch,
-fachliche Statuswerte Deutsch. Es konkretisiert
-`tagesanwesenheit-modell.md`; bei Widersprüchen gilt dieses Schema nicht als
+fachliche Statuswerte Deutsch. Es konkretisiert das
+[Tagesanwesenheitsmodell](../../docs/architekturumbau/tagesanwesenheit-modell.md);
+bei Widersprüchen gilt dieses Schema nicht als
 eigenständige abweichende Regelquelle.
 
 ## Grundregeln
 
-- Eine `attendance` gilt für einen Schüler und Kalendertag. Die Unterrichtsintervalle stammen aus `timetable_slot` und
-  der aktiven `block_assignment`. So wird nur ein Tageszustand geführt.
+- Eine `attendance` gilt für einen Schüler und Kalendertag. Die
+  Unterrichtsintervalle stammen aus den `timetable_slot`-Einträgen ihrer
+  Klasse. Die aktive `block_assignment` bestätigt, dass an diesem Datum ein
+  Block des Klassen-`block_plan` läuft. So wird nur ein Tageszustand geführt.
 - Ein Schüler beginnt seinen Schultag implizit als `ABWESEND`. Statuswechsel
   stehen unveränderlich in `attendance_audit`.
 - Planungsdatum und Anzeige verwenden `Europe/Berlin`. Ereigniszeitpunkte
@@ -53,24 +56,26 @@ numerischen Suffix. Diese Regel verhindert manuelle uneinheitliche Namen.
 
 ### `school_class`
 
-Eine konkrete Klasse in genau einem Schuljahr. Eine neue Jahrgangsklasse
-erhält einen neuen Datensatz; dadurch bleiben alte Planungsbezüge korrekt.
+Eine Klasse bleibt vom Eintrittsjahr bis zum Abschluss drei Jahre bestehen.
+Der Klassencode enthält das Eintrittsjahr und die Fachrichtung, zum Beispiel
+`24BE13`. Die Klasse wird nicht jährlich neu angelegt.
 
 | Column | MySQL type | Rules | Example |
 | --- | --- | --- | --- |
 | `id` | `BIGINT` | primary key, auto increment | `13` |
-| `class_code` | `VARCHAR(30)` | not null | `10BE13` |
-| `school_year` | `VARCHAR(9)` | not null, format `YYYY/YYYY` | `2026/2027` |
+| `class_code` | `VARCHAR(30)` | not null, unique | `24BE13` |
 | `class_teacher_id` | `BIGINT` | not null, foreign key to `staff.id`; staff role must be `LEHRKRAFT` | `1` |
+| `block_plan_id` | `BIGINT` | not null, foreign key to `block_plan.id` | `1` |
+| `timetable_id` | `BIGINT` | not null, foreign key to `timetable.id` | `1` |
 | `created_at` | `DATETIME` | not null, UTC | `2026-09-01 06:00:00` |
 | `changed_at` | `DATETIME` | not null, UTC | `2026-09-01 06:00:00` |
 
-`UNIQUE(class_code, school_year)` erlaubt denselben Klassencode in späteren
-Schuljahren, aber keine Dublette innerhalb eines Schuljahres. Beim Wechsel
-wird `student.school_class_id` auf die neue Klasse gesetzt. Eine alte Klasse
-darf erst gelöscht werden, wenn weder Schüler, `teacher_class` noch eine
-aufzubewahrende `block_assignment` auf sie verweisen; sonst ginge Historie
-verloren.
+`class_code` ist global eindeutig. Jede Klasse verweist auf genau einen
+aktuellen `block_plan` und genau einen `timetable`. Mehrere Klassen dürfen
+denselben Blockplan verwenden. Nach Ende aller Blöcke und einem abschließenden
+Kontenreset wird der Blockplan für das nächste Schuljahr ersetzt; die Klasse
+und ihre Schülerzuordnungen bleiben bestehen. Eine Klasse wird nur manuell und erst
+ohne Schüler, `teacher_class` oder aufzubewahrende `attendance` gelöscht.
 
 Nur Administratoren oder der eingetragene Klassenlehrer dürfen Schüler der
 Klasse anlegen oder löschen. `teacher_class` allein reicht nicht, weil eine
@@ -78,8 +83,9 @@ Unterrichtszuordnung keine Verwaltungsberechtigung ist.
 
 ### `student`
 
-Schüler bleiben über Schuljahre erhalten. Die aktuelle Klasse wird direkt
-referenziert; alte Planungsbezüge bleiben an den damaligen Klassen.
+Schüler bleiben während ihrer dreijährigen Ausbildung derselben Klasse
+zugeordnet. Ein Klassenwechsel ist nicht vorgesehen. Die Klasse einer
+Attendance ergibt sich über `student.school_class_id`.
 
 | Column | MySQL type | Rules | Example |
 | --- | --- | --- | --- |
@@ -139,7 +145,7 @@ aus Raum, Scanzeit und Planung folgt.
 ### `timetable`
 
 Wiederverwendbare Wochenvorlage. Unterschiedliche Klassen können denselben
-Stundenplan nacheinander über eigene Blockzuordnungen nutzen.
+Stundenplan nur nacheinander nutzen.
 
 | Column | MySQL type | Rules | Example |
 | --- | --- | --- | --- |
@@ -148,11 +154,9 @@ Stundenplan nacheinander über eigene Blockzuordnungen nutzen.
 | `created_at` | `DATETIME` | not null, UTC | `2026-09-01 06:00:00` |
 | `changed_at` | `DATETIME` | not null, UTC | `2026-09-01 06:00:00` |
 
-Ab Beginn der ersten `block_assignment` sind der Stundenplan und seine Slots
-unveränderlich. Fehler müssen vor Betriebsbeginn korrigiert werden; spätere
-Änderungen würden bereits berechnete Tage rückwirkend verändern. Eine
-zukünftige Änderung verwendet einen neuen Stundenplan und eine neue,
-nichtüberlappende Blockzuordnung.
+Ab Beginn des ersten Blocks einer Klasse, die den Stundenplan verwendet, sind
+der Stundenplan und seine Slots unveränderlich. Eine spätere Planänderung
+verwendet einen neuen Stundenplan; bestehende Attendances bleiben unverändert.
 
 ### `timetable_slot`
 
@@ -173,14 +177,15 @@ Start-/Endfelder wären redundant.
 
 Slots desselben Stundenplans dürfen sich am selben Wochentag nicht
 überschneiden. Das Backend verhindert außerdem Raumüberschneidungen zwischen
-Slots verschiedener Stundenpläne, wenn deren Blockzuordnungen gleichzeitig
+Slots verschiedener Stundenpläne, wenn die Blöcke ihrer Klassen gleichzeitig
 aktiv sind. Sonst könnte ein Raumscan nicht eindeutig einer Klasse zugeordnet
 werden.
 
 ### `block_plan`
 
-Rahmen eines Schuljahres oder Planungszeitraums. Mehrere Klassen besitzen
-darin eigene zeitlich begrenzte Blockzuordnungen.
+Rahmen eines Schuljahres oder Planungszeitraums. Jede Klasse gehört genau
+einem aktuellen Blockplan. Welche seiner Blöcke für die Klasse gelten,
+bestimmt `class_block_assignment`.
 
 | Column | MySQL type | Rules | Example |
 | --- | --- | --- | --- |
@@ -191,34 +196,53 @@ darin eigene zeitlich begrenzte Blockzuordnungen.
 | `created_at` | `DATETIME` | not null, UTC | `2025-12-01 08:00:00` |
 | `changed_at` | `DATETIME` | not null, UTC | `2025-12-01 08:00:00` |
 
-`ends_on` ist nur der Anker für die Retention. Der Kontenreset erfolgt
-manuell, weil sein fachlich richtiger Zeitpunkt von Zeugnisausgabe und
-Sonderfällen abhängt.
+Beim Anlegen berechnet das Backend aus `ends_on` die Löschfrist und legt die
+passende `deletion_date` an oder verwendet eine vorhandene Zeile mit demselben
+Datum. Der Kontenreset erfolgt manuell.
 
 ### `block_assignment`
 
-Verbindet Blockplan, konkrete Klasse und Stundenplan für einen Teilzeitraum.
-Beispiel: Der Plan gilt `01.01–23.12`, die Klasse aber nur `07.10–10.11`.
+Ein Blockzeitraum innerhalb eines Blockplans. Beispiel: Der Plan gilt
+`01.01–23.12`; ein Block gilt darin `07.10–10.11`. Mehrere zugeordnete
+Klassen können im selben Block parallel in unterschiedlichen Räumen
+unterrichtet werden.
 
 | Column | MySQL type | Rules | Example |
 | --- | --- | --- | --- |
 | `id` | `BIGINT` | primary key, auto increment | `4` |
 | `block_plan_id` | `BIGINT` | not null, foreign key to `block_plan.id` | `1` |
-| `school_class_id` | `BIGINT` | not null, foreign key to `school_class.id` | `13` |
-| `timetable_id` | `BIGINT` | not null, foreign key to `timetable.id` | `1` |
 | `starts_on` | `DATE` | not null | `2026-10-07` |
 | `ends_on` | `DATE` | not null, check `ends_on >= starts_on` | `2026-11-10` |
 | `created_at` | `DATETIME` | not null, UTC | `2026-09-01 06:00:00` |
 | `changed_at` | `DATETIME` | not null, UTC | `2026-09-01 06:00:00` |
 
-Die Zuordnung muss vollständig innerhalb ihres Blockplans liegen. Zeiträume
-desselben Stundenplans und derselben Klasse dürfen nicht überlappen. Ein
-Schüler darf dadurch an einem Datum nur einer aktiven Blockzuordnung
-angehören. Die nächste Zuordnung eines Schülers darf erst nach dem
-Kontenreset seines vorherigen Blockplans beginnen; andernfalls könnte der
-Reset Minuten des neuen Plans löschen. Diese zeitabhängigen Regeln prüft das
-Backend transaktional, da einzelne SQL-Constraints keine Intervallüberschneidung
-über mehrere Zeilen ausdrücken.
+Ein Block muss vollständig innerhalb seines Blockplans liegen; Blöcke eines
+Plans dürfen sich nicht überschneiden. Nur über
+`class_block_assignment` zugeordnete Klassen sind in diesem Block aktiv. Zwei
+Klassen dürfen denselben Stundenplan nur verwenden, wenn sich ihre
+zugeordneten Blöcke zeitlich nicht überschneiden.
+Ein Schüler darf dadurch an einem Datum nur einem aktiven Block angehören.
+Der nächste Blockplan einer Klasse darf erst nach Ende aller Blöcke und dem
+abschließenden Kontenreset des vorherigen Plans aktiviert werden; andernfalls
+könnte der Reset Minuten des neuen Plans löschen. Diese zeitabhängigen Regeln prüft das Backend transaktional,
+da einzelne SQL-Constraints keine Intervallüberschneidung über mehrere Zeilen
+ausdrücken.
+
+### `class_block_assignment`
+
+N:M-Zuordnung zwischen Klassen und den einzelnen Blöcken ihres aktuellen
+Blockplans. Sie bildet wechselnde Klassengruppen ab.
+
+| Column | MySQL type | Rules | Example |
+| --- | --- | --- | --- |
+| `school_class_id` | `BIGINT` | primary key part, foreign key to `school_class.id` | `13` |
+| `block_assignment_id` | `BIGINT` | primary key part, foreign key to `block_assignment.id` | `4` |
+| `created_at` | `DATETIME` | not null, UTC | `2026-09-01 06:00:00` |
+| `changed_at` | `DATETIME` | not null, UTC | `2026-09-01 06:00:00` |
+
+Der zusammengesetzte Primärschlüssel verhindert doppelte Zuordnungen. Das
+Backend erzwingt transaktional, dass der Block zum aktuellen Blockplan der
+Klasse gehört.
 
 ### `attendance`
 
@@ -231,15 +255,16 @@ gilt implizit `ABWESEND`.
 | `id` | `BIGINT` | primary key, auto increment | `900` |
 | `student_id` | `BIGINT` | not null, foreign key to `student.id` | `101` |
 | `attendance_date` | `DATE` | not null, local date in `Europe/Berlin` | `2026-10-12` |
-| `block_assignment_id` | `BIGINT` | not null, foreign key to `block_assignment.id`; active on `attendance_date` | `4` |
 | `status` | `ENUM('ANWESEND', 'ABWESEND', 'BETRIEB', 'BETRIEBLICH_ENTSCHULDIGT', 'ENTSCHULDIGT', 'MIT_ATTEST_ENTSCHULDIGT')` | not null | `ANWESEND` |
 | `created_at` | `DATETIME` | not null, UTC | `2026-10-12 05:45:00` |
 | `changed_at` | `DATETIME` | not null, UTC | `2026-10-12 08:15:12` |
 
 `UNIQUE(student_id, attendance_date)` erzwingt genau einen Tagesdatensatz.
-`block_assignment_id` speichert die an diesem Tag aktive Zuordnung und bildet
-den Retention-Anker. `first_scanned_at` entfällt; der erste Scan ist ein
-Audit-Statuswechsel von `ABWESEND` auf `ANWESEND`.
+Klassenabfragen verbinden Attendance über `student_id` mit `student` und
+filtern nach `student.school_class_id` und `attendance_date`. Eine
+Blockzuordnung wird nicht an der Attendance gespeichert: Datum, Klasse
+und `class_block_assignment` reichen für die Laufzeitprüfung. Der erste Scan ist ein Audit-Statuswechsel von `ABWESEND` auf
+`ANWESEND`.
 
 Status und Minutenwirkung:
 
@@ -252,17 +277,17 @@ Status und Minutenwirkung:
 ### `attendance_audit`
 
 Unveränderliches Ereignis- und Buchungsprotokoll. Es dokumentiert
-Statuswechsel, Kontodeltas und deren Quelle.
+Statuswechsel, Kontodeltas, Ereignisart und optionalen Auslöser.
 
 | Column | MySQL type | Rules | Example |
 | --- | --- | --- | --- |
 | `id` | `BIGINT` | primary key, auto increment | `77` |
 | `student_id` | `BIGINT` | not null, foreign key to `student.id` | `101` |
 | `attendance_id` | `BIGINT` | nullable, foreign key to `attendance.id`; set for normal attendance audits | `900` |
-| `block_plan_id` | `BIGINT` | nullable, foreign key to `block_plan.id`; set only for account reset audit | `NULL` |
-| `source` | `ENUM('SYSTEM', 'STAFF', 'TERMINAL')` | not null | `STAFF` |
-| `changed_by_staff_id` | `BIGINT` | nullable, foreign key to `staff.id`; required only for `STAFF` | `1` |
-| `terminal_id` | `INT` | nullable, foreign key to `terminal.terminal_id`; required only for `TERMINAL` | `NULL` |
+| `deletion_date_id` | `BIGINT` | not null, foreign key to `deletion_date.id` | `5` |
+| `event_type` | `ENUM('SCAN', 'STATUS_CHANGE', 'DAILY_CLOSE', 'ACCOUNT_RESET')` | not null | `STATUS_CHANGE` |
+| `changed_by_staff_id` | `BIGINT` | nullable, foreign key to `staff.id` | `1` |
+| `terminal_id` | `INT` | nullable, foreign key to `terminal.terminal_id` | `NULL` |
 | `old_status` | same enum as `attendance.status` | nullable; set only with `new_status` | `ANWESEND` |
 | `new_status` | same enum as `attendance.status` | nullable; set only with `old_status`; must differ | `ENTSCHULDIGT` |
 | `occurred_at` | `DATETIME` | not null, fachlicher UTC-Zeitpunkt | `2026-10-12 08:15:00` |
@@ -270,15 +295,12 @@ Statuswechsel, Kontodeltas und deren Quelle.
 | `excused_minutes_delta` | `INT` | not null, default `0`, signed | `45` |
 | `created_at` | `DATETIME` | not null, technischer UTC-Zeitpunkt | `2026-10-12 08:16:00` |
 
-Normale Audits setzen `attendance_id` und lassen `block_plan_id` leer.
-Reset-Audits tun das Gegenteil. Diese exklusive Zuordnung verhindert einen
-willkürlichen Tagesbezug bei `attendance_id = NULL`. Bei gesetzter Attendance
-muss deren Schüler mit `student_id` übereinstimmen.
-
-Für `source = STAFF` ist nur `changed_by_staff_id` gesetzt, für
-`source = TERMINAL` nur `terminal_id`; bei `source = SYSTEM` sind beide
-leer. `source` bleibt zusätzlich erhalten, weil eine Staff- oder
-Terminal-ID allein die Ereignisart nicht eindeutig ausdrückt.
+Normale Audits setzen `attendance_id`; `ACCOUNT_RESET` lässt sie leer. Bei
+gesetzter Attendance muss deren Schüler mit `student_id` übereinstimmen.
+`SCAN` setzt nur `terminal_id`, `STATUS_CHANGE` und `ACCOUNT_RESET` nur
+`changed_by_staff_id`, `DAILY_CLOSE` keine der beiden Referenzen. Der
+`event_type` beschreibt den Vorgang; die nullable Foreign Keys zeigen den
+Auslöser.
 
 Bei einem Statuswechsel sind `old_status` und `new_status` gesetzt. Ohne
 Statuswechsel sind beide `NULL`. Ein normales Audit muss einen Statuswechsel
@@ -292,9 +314,23 @@ Erstellung bekannten Zustand, wird aber nicht zur Minutenberechnung benutzt.
 So bleibt ein rückdatiertes Audit unveränderlich und die Berechnung folgt
 allein der Ereignisreihenfolge.
 
-`UNIQUE(student_id, block_plan_id)` erlaubt genau einen Reset-Audit je
-Schüler und Blockplan. MySQL lässt weiterhin mehrere normale Audits zu, weil
-deren `block_plan_id` `NULL` ist.
+Für denselben Schüler sind mehrere `ACCOUNT_RESET`-Audits mit derselben
+`deletion_date_id` zulässig. Jeder manuelle Reset erzeugt einen eigenen Audit;
+die Löschfrist der Anwesenheitsdaten bleibt davon unberührt.
+
+### `deletion_date`
+
+Löschfrist für Attendance-Audits und die darüber ermittelten Attendances.
+
+| Column | MySQL type | Rules | Example |
+| --- | --- | --- | --- |
+| `id` | `BIGINT` | primary key, auto increment | `5` |
+| `delete_after` | `DATE` | not null, unique; Löschung um 00:00 Europe/Berlin | `2027-06-23` |
+
+Beim Erstellen eines Blockplans berechnet das Backend `ends_on + 6 Kalendermonate`
+und legt diese Zeile transaktional an oder verwendet sie
+wieder. Beim Erzeugen eines Audits ermittelt das Backend die zum damaligen Klassenplan
+berechnete Frist und setzt `attendance_audit.deletion_date_id`.
 
 ### `raw_scan`
 
@@ -331,8 +367,9 @@ ohne abgeschlossene Fachverarbeitung hinterließe und der Retry blockiert wäre.
    legt sonst den `raw_scan` innerhalb der gemeinsamen Transaktion an.
 3. Persistiertes Terminal und verifizierte Clientidentität müssen zur
    gemeldeten Nummer passen. Der Terminalraum bestimmt den Scanraum.
-4. Die Scanzeit muss in einem Slot liegen. Der Slot, seine aktive
-   Blockzuordnung und die aktuelle Schülerklasse müssen zusammenpassen.
+4. Die Scanzeit muss in einem Slot liegen. Der Slot muss zum Stundenplan der
+   aktuellen Schülerklasse gehören; der aktive Block muss ihr über
+   `class_block_assignment` zugeordnet sein.
 5. Nur `ABWESEND` oder `BETRIEBLICH_ENTSCHULDIGT` darf der Scan auf
    `ANWESEND` setzen. Jeder andere Status, einschließlich `ANWESEND`, wird
    abgelehnt; Schüler dürfen ihren Status nicht selbst korrigieren.
@@ -383,10 +420,10 @@ nicht verändert.
 
 ### Tagesabschluss
 
-Der Tagesabschluss läuft je `block_assignment` und Datum nach deren letztem
-Slot. Für jeden zugehörigen Schüler mit Unterrichtszeit wird bei Bedarf eine
-Attendance angelegt. Ohne Statusereignis gilt der ganze Tag als `ABWESEND` und
-alle geplanten Minuten werden unentschuldigt gebucht.
+Der Tagesabschluss läuft je aktivem Block und zugeordneter Klasse nach deren
+letztem Slot. Für jeden Schüler der Klasse mit Unterrichtszeit wird bei Bedarf
+eine Attendance angelegt. Ohne Statusereignis gilt der ganze Tag als
+`ABWESEND` und alle geplanten Minuten werden unentschuldigt gebucht.
 
 Ein Tag ist offen, wenn eine erwartete Attendance fehlt oder Soll und
 auditierte Deltas abweichen. Der regelmäßige und beim Start ausgeführte
@@ -400,49 +437,50 @@ Ein Administrator startet den Reset ausdrücklich für eine Klasse und einen
 Blockplan. Es gibt keinen automatischen Reset, keinen berechneten
 Resetzeitpunkt und keinen Reset-Nachholjob.
 
-Der Reset ist erst erlaubt, wenn alle Blockzuordnungen dieser Klasse im
-gewählten Plan beendet sind. Das Backend ermittelt die Schüler über ihre
-Attendances und verarbeitet zuerst alle offenen Tage des Plans. Danach sperrt
-es die betroffenen Schüler und setzt ihre beiden Konten in einer Transaktion
-auf `0`. Je Schüler entsteht ein `attendance_audit` mit `source = STAFF`, dem
-auslösenden `changed_by_staff_id`, gesetzter `block_plan_id`, leerer
-`attendance_id` und negativen bisherigen Kontoständen. Bei bereits leeren
-Konten sind beide Deltas `0`; der Audit bleibt als notwendiger Resetmarker.
-Nach dem Reset sind Attendances dieses Plans nicht mehr korrigierbar, sonst
+Mehrere manuelle Kontenresets sind innerhalb eines Blockplans möglich. Das
+Backend sperrt die betroffenen Schüler und setzt beide Konten in einer
+Transaktion auf `0`. Je Schüler und Reset entsteht ein
+`attendance_audit` mit `event_type = ACCOUNT_RESET`, dem auslösenden
+`changed_by_staff_id`, leerer `attendance_id`, der Löschfrist des aktuellen
+Plans und negativen bisherigen Kontoständen. Bei bereits leeren Konten sind
+beide Deltas `0`; der Audit dokumentiert auch diesen Reset. Mehrere Resets
+im selben Plan verwenden dieselbe Löschfrist und ändern sie nicht.
+Attendances vor dem jeweils letzten Reset sind nicht mehr korrigierbar, sonst
 könnten alte Deltas wieder in das geleerte Konto gelangen.
 
-Der manuelle Reset ist Voraussetzung für die nächste Blockzuordnung. Das
-Backend erkennt ihn über genau einen Reset-Audit je Schüler und Blockplan.
+Für den Planwechsel müssen alle Blöcke beendet, alle Tage abgeglichen und
+ein abschließender Reset durchgeführt sein. Die Klasse und ihre
+Schülerzuordnungen bleiben bestehen.
 
 Rohscans werden `14` Tage nach `raw_scan.created_at` gelöscht. Am Kalendertag
-`DATE_ADD(block_plan.ends_on, INTERVAL 6 MONTH)` um `00:00 Europe/Berlin`
-löscht der automatische Retention-Job dessen Attendance-Audits, Attendances
-und Blockzuordnungen. Er setzt keine Zeitkonten zurück und läuft unabhängig
-vom manuellen Reset, damit die Löschfrist nicht von einer Bedienhandlung
-abhängt. Ein fehlender Reset wird als Betriebsfehler protokolliert, aber nicht
-automatisch nachgeholt. Blockplan und Stundenpläne werden erst gelöscht, wenn
-keine aufzubewahrende Zuordnung mehr auf sie verweist.
-Unreferenzierte alte Klassen werden danach gelöscht. Schüler, Staff,
-Terminals und Räume bleiben erhalten. Kinder werden kontrolliert vor ihren
-Eltern gelöscht; ungeplante Hard-Deletes bleiben durch Foreign Keys gesperrt.
+`deletion_date.delete_after` um `00:00 Europe/Berlin` lädt der Retention-Job
+die fälligen Audits und merkt sich deren nichtleere `attendance_id`. Danach
+löscht er die Audits, die so ermittelten Attendances und die abgearbeitete
+`deletion_date`. Reset-Audits haben keine Attendance und werden nur selbst
+gelöscht. Der Job setzt keine Zeitkonten zurück. Blockpläne und
+Blockzuordnungen werden beim jährlichen Planersatz getrennt behandelt;
+Stundenpläne und Klassen werden nur manuell gelöscht, wenn keine Referenzen
+mehr bestehen. Schüler, Staff, Terminals und Räume bleiben erhalten.
 
 ## Required Indexes and Validation
 
 | Area | Rule |
 | --- | --- |
-| Class identity | `UNIQUE(school_class.class_code, school_class.school_year)` |
+| Class identity | `UNIQUE(school_class.class_code)` |
 | UID | `UNIQUE(student.rfid_uid)` |
 | Terminal | primary key `terminal.terminal_id`; `UNIQUE(terminal.room_id)` |
 | Teacher assignment | primary key `(teacher_class.staff_id, teacher_class.school_class_id)` |
+| Class block assignment | primary key `(class_block_assignment.school_class_id, class_block_assignment.block_assignment_id)`; backend requires the same current block plan. |
 | Scan idempotency | primary key `raw_scan.scan_id` |
 | Daily attendance | `UNIQUE(attendance.student_id, attendance.attendance_date)` |
-| Attendance lookup | `INDEX(attendance.block_assignment_id, attendance.attendance_date)` |
 | Audit reconciliation | `INDEX(attendance_audit.attendance_id)`, `INDEX(attendance_audit.occurred_at)` |
-| Reset audit | `UNIQUE(attendance_audit.student_id, attendance_audit.block_plan_id)`; MySQL permits multiple normal audit rows because their `block_plan_id` is `NULL` |
-| Assignment validity | Backend rejects dates outside the block plan and overlapping assignments for class, timetable or student. |
+| Retention | `UNIQUE(deletion_date.delete_after)`, `INDEX(attendance_audit.deletion_date_id)` |
+| Reset audit | Multiple `ACCOUNT_RESET` audits per student and deletion date are allowed; each manual reset is audited. |
+| Block validity | Backend rejects blocks outside their block plan and overlapping blocks in one plan. |
+| Timetable reuse | Backend rejects the same timetable for classes whose assigned blocks overlap in time. |
 | Slot validity | Database checks `end_time > start_time`; backend rejects overlaps in one timetable. |
 | Room resolution | Backend rejects same-room slot overlaps across simultaneously active assignments. |
-| Audit source | Backend enforces source-specific Staff/Terminal references and their mutual exclusion. |
+| Audit actor | Backend enforces event-specific Staff/Terminal references and their mutual exclusion. |
 | Audit content | Backend enforces status-pair consistency; only a Reset-Audit may have no status change and two zero deltas. |
 | Minute accounts | Database checks both accounts `>= 0`; application locks and updates accounts with audit in one transaction. |
 | Reset boundary | Backend rejects corrections after the student's manual plan reset. |
@@ -455,17 +493,22 @@ Requests keine Überschneidung einschleusen.
 ## Creation Order
 
 1. `staff`, `room` und `terminal` anlegen.
-2. `school_class` mit Schuljahr und Klassenlehrer anlegen; bei Bedarf
-   `teacher_class` ergänzen.
-3. `student` anlegen und seiner aktuellen Klasse zuordnen.
-4. `timetable` und seine nichtüberlappenden `timetable_slot`-Einträge anlegen.
-5. `block_plan` anlegen.
+2. `timetable` und seine nichtüberlappenden `timetable_slot`-Einträge anlegen.
+3. `block_plan` und die aus `ends_on` berechnete `deletion_date` in derselben
+   Transaktion anlegen.
+4. `school_class` mit Klassenlehrer, genau einem aktuellen Blockplan und
+   Stundenplan anlegen; bei Bedarf `teacher_class` ergänzen. Dieselben
+   Stundenpläne dürfen nur zeitversetzt verwendet werden.
+5. `student` anlegen und seiner aktuellen Klasse zuordnen.
 6. `block_assignment` innerhalb des Plans anlegen und alle Zeit- und
    Raumkonflikte prüfen.
-7. `attendance`, `attendance_audit` und `raw_scan` entstehen durch Scan,
+7. Klassen den vorgesehenen Blöcken über `class_block_assignment` zuordnen.
+8. `attendance`, `attendance_audit` und `raw_scan` entstehen durch Scan,
    Lehreraktion oder Tagesabschluss; Benutzer legen sie nicht direkt an.
-8. Ein Administrator erzeugt über den klassenweisen Reset genau einen
-   Reset-Audit je Schüler und Blockplan.
+9. Ein Administrator kann die Konten innerhalb des aktuellen Plans
+   klassenweise mehrfach zurücksetzen; jeder Reset erzeugt einen
+   `ACCOUNT_RESET`-Audit je Schüler. Nach Planende und abschließendem
+   Reset ersetzt er den Plan.
 
 ## Relationship Summary
 
@@ -473,17 +516,16 @@ Requests keine Überschneidung einschleusen.
 - `room 1 — N timetable_slot`
 - `timetable 1 — N timetable_slot`
 - `block_plan 1 — N block_assignment`
-- `school_class 1 — N block_assignment`
-- `timetable 1 — N block_assignment`
-- `block_assignment 1 — N attendance`
+- `block_plan 1 — N school_class`
+- `timetable 1 — N school_class`
+- `school_class N — M block_assignment` über `class_block_assignment`
 - `school_class 1 — N student`
 - `student 1 — N attendance`
 - `attendance 0..1 — N attendance_audit`; Reset-Audits besitzen keine
   Attendance.
-- `block_plan 0..1 — N attendance_audit`; nur Reset-Audits nutzen diese
-  Beziehung.
+- `deletion_date 1 — N attendance_audit`
 - `student 1 — N attendance_audit`
-- `staff 1 — N attendance_audit` für Quelle `STAFF`
-- `terminal 1 — N attendance_audit` für Quelle `TERMINAL`
+- `staff 1 — N attendance_audit` für Personalereignisse
+- `terminal 1 — N attendance_audit` für Scans
 - `staff N — M school_class` über `teacher_class`; zusätzlich besitzt jede
   Klasse genau einen `class_teacher_id`.

@@ -32,7 +32,7 @@ docker compose down
 
 ### IntelliJ IDEA
 
-Das Repository-Root als Projekt öffnen. Die Root-`pom.xml` importiert das Maven-Modul `backend` automatisch. IntelliJ fragt gegebenenfalls nach dem Maven-Import; diesen bestätigen und Java 21 als Project SDK wählen.
+Das Repository-Root als Projekt öffnen. Die Root-`pom.xml` importiert die Maven-Module `backend` und `terminal` automatisch. IntelliJ fragt gegebenenfalls nach dem Maven-Import; diesen bestätigen und Java 21 als Project SDK wählen. Einrichtung und Bedienung des JavaFX-Terminals beschreibt die [Terminal-README](terminal/README.md).
 
 Der Hybrid-Modus lässt Backend und Vue-Frontend lokal laufen. Docker stellt MySQL und den für JavaFX vorgesehenen mTLS-Proxy bereit.
 

@@ -1,9 +1,7 @@
-# RFID-Terminal (JavaFX-Prototyp)
+# RFID-Terminal (JavaFX)
 
 Desktop-Anwendung, an die ein ESP32 mit RFID-Leser per USB hängt. Sie erfasst
 Scans, puffert sie auf der Platte und stellt sie per HTTPS an einen Server zu.
-
-Lokaler Versuchsaufbau, gehört nicht ins GitHub-Projekt.
 
 ## Starten
 
@@ -180,7 +178,7 @@ Schüler gleich aus.
 
 Unten rechts steht, wie viele Scans noch auf Zustellung warten.
 
-Wie im Web-Terminal steht dort nie ein Name, eine Klasse oder ein Ablehnungsgrund.
+Es werden nie ein Name, eine Klasse oder ein Ablehnungsgrund angezeigt.
 
 ## Lokales mTLS
 

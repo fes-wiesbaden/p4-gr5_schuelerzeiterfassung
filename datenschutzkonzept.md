@@ -30,12 +30,12 @@ Die Terminal-ID identifiziert das Terminal und wird mit dessen mTLS-Identität a
 ## Aufbewahrung und Löschung
 
 - Rohscans werden automatisch 14 Tage nach Eingang gelöscht.
-- Anwesenheiten und Änderungsprotokolle werden um 00:00 Uhr Europe/Berlin sechs Kalendermonate nach `block_plan.ends_on` automatisch gelöscht.
-- Der automatische Löschlauf entfernt außerdem nicht mehr benötigte Stunden- und Blockpläne, sobald keine aufzubewahrende Blockzuordnung mehr darauf verweist.
+- Beim Erstellen eines Blockplans berechnet das Backend dessen Löschdatum als sechs Kalendermonate nach `ends_on`. Es speichert dieses Datum ohne direkte Blockplanbeziehung in `deletion_date`; jedes Änderungsprotokoll referenziert seine Frist.
+- Um 00:00 Uhr Europe/Berlin löscht der automatische Lauf fällige Änderungsprotokolle und die darüber ermittelten Anwesenheiten. Klassen und ihre Schülerzuordnungen bleiben erhalten.
 
 ## Nachvollziehbarkeit und Datenqualität
 
-Jede automatische, terminalbasierte oder manuelle Anwesenheits- und Minutenänderung erzeugt einen unveränderbaren und nur durch das System löschbaren Protokolleintrag mit ihrer Quelle und den entstandenen Minutendeltas. JavaFX versieht RFID-Scans mit einer eindeutigen Scan-ID; das Backend verarbeitet Wiederholungen idempotent. Wiederholte Übertragungen ändern daher keine bestehende Anwesenheit. Diese Maßnahmen schützen vor doppelten, unberechtigten oder nicht nachvollziehbaren Änderungen.
+Jede automatische, terminalbasierte oder manuelle Anwesenheits- und Minutenänderung erzeugt einen unveränderbaren und nur durch das System löschbaren Protokolleintrag mit Ereignisart, optionalem Auslöser und den entstandenen Minutendeltas. JavaFX versieht RFID-Scans mit einer eindeutigen Scan-ID; das Backend verarbeitet Wiederholungen idempotent. Wiederholte Übertragungen ändern daher keine bestehende Anwesenheit. Diese Maßnahmen schützen vor doppelten, unberechtigten oder nicht nachvollziehbaren Änderungen.
 
 ## Entwicklung und Betrieb
 
@@ -44,5 +44,5 @@ Während der Entwicklung verwenden wir ausschließlich fiktive Testdaten. Echte 
 
 ## Teil für Dokumentation
 Da das System personenbezogene Daten verarbeitet (Namen, Geburtsdaten, Anwesenheitsdaten), hat der Schutz seiner Daten hohe Priorität. Dafür greifen wir auf verschiedene Maßnahmen zurück: Organisatorische und technische.<br>
-Zu den organisatorischen gehören die Datenminimierung (wir nutzen nur Daten, die für die Funktion und die eindeutige Zuordnung relevant sind), die Zugriffsbeschränkungen (Lehrer haben nur Zugriff auf die von ihnen unterrichteten Klassen) sowie die Löschfristen (Rohscans werden 14 Tage nach Eingang, Anwesenheiten und Änderungsprotokolle um 00:00 Uhr Europe/Berlin sechs Kalendermonate nach `block_plan.ends_on` aufgehoben).
+Zu den organisatorischen gehören die Datenminimierung (wir nutzen nur Daten, die für die Funktion und die eindeutige Zuordnung relevant sind), die Zugriffsbeschränkungen (Lehrer haben nur Zugriff auf die von ihnen unterrichteten Klassen) sowie die Löschfristen (Rohscans werden 14 Tage nach Eingang, Anwesenheiten und Änderungsprotokolle gelöscht).
 Die technischen beinhalten unter anderem eine beidseitige Zertifikatsprüfung und verschlüsselte Kommunikation (HTTPS für Backend ↔ Frontend, mTLS für JavaFX-Terminal ↔ nginx), eine passwortgeschützte Datenbank und gehashte Passwörter sowie effektives Sitzungsmanagement durch das Backend (Inaktivitäts-Logout, Sitzungsrotation, HttpOnly-Flag am Cookie, CSRF-Schutz).
