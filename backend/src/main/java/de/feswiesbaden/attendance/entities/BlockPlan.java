@@ -19,7 +19,8 @@ public class BlockPlan {
 
   @Id
   @GeneratedValue(strategy = GenerationType.IDENTITY)
-  private Long blockPlanId;
+  @Column(name = "id")
+  private Long id;
 
   @NotNull
   @Column(name = "name", length = 150, nullable = false)

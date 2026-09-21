@@ -1,8 +1,8 @@
 package de.feswiesbaden.attendance.entities;
 
+import de.feswiesbaden.attendance.enums.Role;
 import jakarta.persistence.*;
 import jakarta.validation.constraints.NotNull;
-import java.time.LocalDate;
 import java.time.LocalDateTime;
 import lombok.AllArgsConstructor;
 import lombok.Getter;
@@ -10,12 +10,12 @@ import lombok.NoArgsConstructor;
 import lombok.Setter;
 
 @Entity
-@Table(name = "block_assignment")
+@Table(name = "staff")
 @Getter
 @Setter
 @NoArgsConstructor
 @AllArgsConstructor
-public class BlockAssignment {
+public class Staff {
 
   @Id
   @GeneratedValue(strategy = GenerationType.IDENTITY)
@@ -23,17 +23,25 @@ public class BlockAssignment {
   private Long id;
 
   @NotNull
-  @ManyToOne(fetch = FetchType.LAZY, optional = false)
-  @JoinColumn(name = "block_plan_id", nullable = false)
-  private BlockPlan blockPlan;
+  @Column(name = "first_name", length = 100, nullable = false)
+  private String firstName;
 
   @NotNull
-  @Column(name = "starts_on", nullable = false)
-  private LocalDate startsOn;
+  @Column(name = "last_name", length = 100, nullable = false)
+  private String lastName;
 
   @NotNull
-  @Column(name = "ends_on", nullable = false)
-  private LocalDate endsOn;
+  @Column(name = "username", length = 120, nullable = false, unique = true)
+  private String username;
+
+  @NotNull
+  @Column(name = "password_hash", length = 60, nullable = false)
+  private String passwordHash;
+
+  @NotNull
+  @Enumerated(EnumType.STRING)
+  @Column(name = "role", nullable = false)
+  private Role role;
 
   @Column(name = "created_at", insertable = false, updatable = false, nullable = false)
   private LocalDateTime createdAt;

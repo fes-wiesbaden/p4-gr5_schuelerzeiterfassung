@@ -8,11 +8,13 @@ import lombok.AllArgsConstructor;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
+import org.hibernate.annotations.Immutable;
 import org.hibernate.annotations.JdbcTypeCode;
 import org.hibernate.type.SqlTypes;
 
 @Entity
 @Table(name = "raw_scan")
+@Immutable
 @Getter
 @Setter
 @NoArgsConstructor
@@ -27,10 +29,6 @@ public class RawScan {
   @NotNull
   @Column(name = "rfid_uid", length = 64, nullable = false)
   private String rfidUid;
-
-  @NotNull
-  @Column(name = "terminal_number", nullable = false)
-  private Integer terminalNumber;
 
   @NotNull
   @Column(name = "scanned_at", nullable = false)

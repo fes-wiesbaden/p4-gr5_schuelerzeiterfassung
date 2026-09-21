@@ -20,8 +20,8 @@ public class TimetableSlot {
 
   @Id
   @GeneratedValue(strategy = GenerationType.IDENTITY)
-  @Column(name = "timetable_slot_id")
-  private Long timetableSlotId;
+  @Column(name = "id")
+  private Long id;
 
   @NotNull
   @ManyToOne(fetch = FetchType.LAZY, optional = false)

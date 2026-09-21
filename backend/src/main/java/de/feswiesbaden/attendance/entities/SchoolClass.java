@@ -9,9 +9,7 @@ import lombok.NoArgsConstructor;
 import lombok.Setter;
 
 @Entity
-@Table(
-    name = "school_class",
-    uniqueConstraints = {@UniqueConstraint(columnNames = {"class_code", "school_year"})})
+@Table(name = "school_class")
 @Getter
 @Setter
 @NoArgsConstructor
@@ -20,21 +18,17 @@ public class SchoolClass {
 
   @Id
   @GeneratedValue(strategy = GenerationType.IDENTITY)
-  @Column(name = "school_class_id")
-  private Long schoolClassId;
+  @Column(name = "id")
+  private Long id;
 
   @NotNull
-  @Column(name = "class_code", length = 30, nullable = false)
+  @Column(name = "class_code", length = 30, nullable = false, unique = true)
   private String classCode;
-
-  @NotNull
-  @Column(name = "school_year", length = 9, nullable = false)
-  private String schoolYear;
 
   @NotNull
   @ManyToOne(fetch = FetchType.LAZY, optional = false)
   @JoinColumn(name = "class_teacher_id", nullable = false)
-  private Teacher classTeacher;
+  private Staff classTeacher;
 
   @NotNull
   @ManyToOne(fetch = FetchType.LAZY, optional = false)
