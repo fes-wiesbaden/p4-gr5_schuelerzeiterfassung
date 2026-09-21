@@ -32,6 +32,13 @@ public class SchoolClass {
   @JoinColumn(name = "class_teacher_id", nullable = false)
   private Staff classTeacher;
 
+  @ManyToMany
+  @JoinTable(
+      name = "teacher_class",
+      joinColumns = @JoinColumn(name = "school_class_id"),
+      inverseJoinColumns = @JoinColumn(name = "staff_id"))
+  private Set<Staff> teachers = new HashSet<>();
+
   @NotNull
   @ManyToOne(fetch = FetchType.LAZY, optional = false)
   @JoinColumn(name = "block_plan_id", nullable = false)

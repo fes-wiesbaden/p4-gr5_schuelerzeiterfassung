@@ -58,8 +58,6 @@ CREATE TABLE student (
 CREATE TABLE teacher_class (
     staff_id BIGINT NOT NULL,
     school_class_id BIGINT NOT NULL,
-    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    changed_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     PRIMARY KEY (staff_id, school_class_id),
     CONSTRAINT fk_teacher_class_staff FOREIGN KEY (staff_id) REFERENCES staff(id),
     CONSTRAINT fk_teacher_class_class FOREIGN KEY (school_class_id) REFERENCES school_class(id)

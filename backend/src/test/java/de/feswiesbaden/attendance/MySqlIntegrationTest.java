@@ -28,6 +28,7 @@ class MySqlIntegrationTest {
         .doesNotContain("school_class_id", "block_assignment_id", "teaching_unit_id");
     assertThat(columnsOf("class_block_assignment"))
         .containsExactlyInAnyOrder("school_class_id", "block_assignment_id");
+    assertThat(columnsOf("teacher_class")).containsExactlyInAnyOrder("staff_id", "school_class_id");
     assertThat(columnsOf("deletion_date")).containsExactlyInAnyOrder("id", "delete_after");
     assertThat(columnsOf("attendance_audit"))
         .contains("event_type", "deletion_date_id", "attendance_id")

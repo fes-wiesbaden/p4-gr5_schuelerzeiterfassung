@@ -28,9 +28,10 @@ Tagesanwesenheitsmodell und ist keine eigenständige abweichende Regelquelle.
 - Eine Zeugnisstunde entspricht `45` Minuten. Das Schema speichert keine
   zusätzliche Zeugnis- oder Stundensumme.
 - Veränderbare Tabellen besitzen `created_at` und `changed_at`, außer
-  `class_block_assignment` und `deletion_date`. Die unveränderlichen Tabellen
-  `raw_scan` und `attendance_audit` besitzen nur `created_at`. Diese
-  technischen Felder fehlen im Chen-ERM zugunsten der Lesbarkeit.
+  `teacher_class`, `class_block_assignment` und `deletion_date`. Die
+  unveränderlichen Tabellen `raw_scan` und `attendance_audit` besitzen nur
+  `created_at`. Diese technischen Felder fehlen im Chen-ERM zugunsten der
+  Lesbarkeit.
 
 ## Tables
 
@@ -110,11 +111,9 @@ Planung.
 | --- | --- | --- | --- |
 | `staff_id` | `BIGINT` | primary key part, foreign key to `staff.id`; role must be `LEHRKRAFT` | `1` |
 | `school_class_id` | `BIGINT` | primary key part, foreign key to `school_class.id` | `13` |
-| `created_at` | `DATETIME` | not null, UTC | `2026-09-01 06:00:00` |
-| `changed_at` | `DATETIME` | not null, UTC | `2026-09-01 06:00:00` |
 
-Der Primärschlüssel `(staff_id, school_class_id)` verhindert doppelte
-Zuordnungen.
+Die reine Zuordnung enthält keine Zeitstempel. Der Primärschlüssel
+`(staff_id, school_class_id)` verhindert doppelte Zuordnungen.
 
 ### `room`
 
