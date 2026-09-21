@@ -110,8 +110,6 @@ CREATE TABLE block_assignment (
 CREATE TABLE class_block_assignment (
     school_class_id BIGINT NOT NULL,
     block_assignment_id BIGINT NOT NULL,
-    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    changed_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     PRIMARY KEY (school_class_id, block_assignment_id),
     CONSTRAINT fk_class_block_assignment_class FOREIGN KEY (school_class_id) REFERENCES school_class(id),
     CONSTRAINT fk_class_block_assignment_block FOREIGN KEY (block_assignment_id) REFERENCES block_assignment(id)

@@ -27,10 +27,10 @@ Tagesanwesenheitsmodell und ist keine eigenständige abweichende Regelquelle.
   Deltas.
 - Eine Zeugnisstunde entspricht `45` Minuten. Das Schema speichert keine
   zusätzliche Zeugnis- oder Stundensumme.
-- Veränderbare Tabellen besitzen `created_at` und `changed_at`. Die
-  unveränderlichen Tabellen `raw_scan` und `attendance_audit` besitzen nur
-  `created_at`. Diese technischen Felder fehlen im Chen-ERM zugunsten der
-  Lesbarkeit.
+- Veränderbare Tabellen besitzen `created_at` und `changed_at`, außer
+  `class_block_assignment` und `deletion_date`. Die unveränderlichen Tabellen
+  `raw_scan` und `attendance_audit` besitzen nur `created_at`. Diese
+  technischen Felder fehlen im Chen-ERM zugunsten der Lesbarkeit.
 
 ## Tables
 
@@ -235,8 +235,6 @@ Blockplans. Sie bildet wechselnde Klassengruppen ab.
 | --- | --- | --- | --- |
 | `school_class_id` | `BIGINT` | primary key part, foreign key to `school_class.id` | `13` |
 | `block_assignment_id` | `BIGINT` | primary key part, foreign key to `block_assignment.id` | `4` |
-| `created_at` | `DATETIME` | not null, UTC | `2026-09-01 06:00:00` |
-| `changed_at` | `DATETIME` | not null, UTC | `2026-09-01 06:00:00` |
 
 Der zusammengesetzte Primärschlüssel verhindert doppelte Zuordnungen. Das
 Backend erzwingt transaktional, dass der Block zum aktuellen Blockplan der
