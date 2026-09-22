@@ -27,8 +27,8 @@ Tagesanwesenheitsmodell und ist keine eigenständige abweichende Regelquelle.
   Deltas.
 - Eine Zeugnisstunde entspricht `45` Minuten. Das Schema speichert keine
   zusätzliche Zeugnis- oder Stundensumme.
-- Veränderbare Tabellen besitzen `created_at` und `changed_at`, außer
-  `teacher_class`, `class_block_assignment` und `deletion_date`. Die
+- Veränderbare Tabellen besitzen `created_at` und `changed_at`, 
+  außer `teacher_class`, `class_block_assignment` und `deletion_date`. Die
   unveränderlichen Tabellen `raw_scan` und `attendance_audit` besitzen nur
   `created_at`. Diese technischen Felder fehlen im Chen-ERM zugunsten der
   Lesbarkeit.
