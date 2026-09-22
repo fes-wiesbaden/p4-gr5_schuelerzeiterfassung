@@ -2,11 +2,7 @@
 
 Dieses Dokument beschreibt das geplante MySQL-8-Schema des
 Tagesanwesenheitsmodells. Tabellen- und Spaltennamen sind Englisch,
-fachliche Statuswerte Deutsch. Es konkretisiert das
-[Tagesanwesenheitsmodell](../../docs/architekturumbau/tagesanwesenheit-modell.md);
-bei Widersprüchen gilt dieses Schema nicht als
-eigenständige abweichende Regelquelle.
-
+fachliche Statuswerte Deutsch.
 ## Grundregeln
 
 - Eine `attendance` gilt für einen Schüler und Kalendertag. Die
@@ -29,7 +25,8 @@ eigenständige abweichende Regelquelle.
   Deltas.
 - Eine Zeugnisstunde entspricht `45` Minuten. Das Schema speichert keine
   zusätzliche Zeugnis- oder Stundensumme.
-- Veränderbare Tabellen besitzen `created_at` und `changed_at`. Die
+- Veränderbare Tabellen besitzen `created_at` und `changed_at`, 
+  außer `teacher_class`, `class_block_assignment` und `deletion_date`. Die
   unveränderlichen Tabellen `raw_scan` und `attendance_audit` besitzen nur
   `created_at`. Diese technischen Felder fehlen im Chen-ERM zugunsten der
   Lesbarkeit.
@@ -112,11 +109,9 @@ Planung.
 | --- | --- | --- | --- |
 | `staff_id` | `BIGINT` | primary key part, foreign key to `staff.id`; role must be `LEHRKRAFT` | `1` |
 | `school_class_id` | `BIGINT` | primary key part, foreign key to `school_class.id` | `13` |
-| `created_at` | `DATETIME` | not null, UTC | `2026-09-01 06:00:00` |
-| `changed_at` | `DATETIME` | not null, UTC | `2026-09-01 06:00:00` |
 
-Der Primärschlüssel `(staff_id, school_class_id)` verhindert doppelte
-Zuordnungen.
+Der Primärschlüssel
+`(staff_id, school_class_id)` verhindert doppelte Zuordnungen.
 
 ### `room`
 
@@ -237,8 +232,6 @@ Blockplans. Sie bildet wechselnde Klassengruppen ab.
 | --- | --- | --- | --- |
 | `school_class_id` | `BIGINT` | primary key part, foreign key to `school_class.id` | `13` |
 | `block_assignment_id` | `BIGINT` | primary key part, foreign key to `block_assignment.id` | `4` |
-| `created_at` | `DATETIME` | not null, UTC | `2026-09-01 06:00:00` |
-| `changed_at` | `DATETIME` | not null, UTC | `2026-09-01 06:00:00` |
 
 Der zusammengesetzte Primärschlüssel verhindert doppelte Zuordnungen. Das
 Backend erzwingt transaktional, dass der Block zum aktuellen Blockplan der
