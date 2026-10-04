@@ -5,7 +5,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import de.feswiesbaden.terminal.model.Scan;
 import de.feswiesbaden.terminal.queue.ScanQueue;
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -77,5 +79,28 @@ class ScanQueueTest {
   @Test
   void istLeerWennNochNichtsGescanntWurde(@TempDir Path ordner) throws IOException {
     assertEquals(0, new ScanQueue(ordner.resolve("gibtsnicht.jsonl")).size());
+  }
+
+  @Test
+  void fehlerhafteScansVerratenKeineUidImLog(@TempDir Path ordner) throws IOException {
+    String uid = "04A3B2C1";
+    Path datei = ordner.resolve("puffer.jsonl");
+    ScanQueue queue = new ScanQueue(datei);
+    Scan scan = Scan.of(uid, 3);
+    queue.add(scan);
+    String corrupt = "{\"rfidUid\":\"" + uid + "\",\"terminalNumber\":\"" + uid + "\"}\n";
+    Files.writeString(datei, corrupt, StandardOpenOption.APPEND);
+    ByteArrayOutputStream log = new ByteArrayOutputStream();
+    PrintStream original = System.err;
+    try (PrintStream capture = new PrintStream(log, true, StandardCharsets.UTF_8)) {
+      System.setErr(capture);
+      assertEquals(List.of(scan), queue.pending());
+      queue.remove(scan.scanId());
+      assertEquals(0, queue.size());
+    } finally {
+      System.setErr(original);
+    }
+    assertTrue(log.toString(StandardCharsets.UTF_8).contains("INVALID_QUEUE_ENTRY"));
+    assertTrue(!log.toString(StandardCharsets.UTF_8).contains(uid));
   }
 }

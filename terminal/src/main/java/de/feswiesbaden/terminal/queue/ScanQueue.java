@@ -37,7 +37,9 @@ public final class ScanQueue {
         offen.add(Json.mapper().readValue(zeile, Scan.class));
       } catch (IOException kaputt) {
         // Eine kaputte Zeile überspringen, sonst wäre der ganze Puffer verloren.
-        System.err.println("Puffereintrag übersprungen: " + kaputt.getMessage());
+        // Jackson-Fehlermeldungen können RFID-UIDs enthalten; nur Fehlercodes
+        // protokollieren.
+        System.err.println("Puffereintrag übersprungen: INVALID_QUEUE_ENTRY");
       }
     }
     return offen;

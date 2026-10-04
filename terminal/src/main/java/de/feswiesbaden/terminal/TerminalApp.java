@@ -82,7 +82,7 @@ public final class TerminalApp extends Application {
       updateQueueInfo();
       worker.deliverNow();
     } catch (IOException nichtSpeicherbar) {
-      System.err.println("Scan nicht speicherbar: " + nichtSpeicherbar.getMessage());
+      System.err.println("Scan nicht speicherbar: LOCAL_STORAGE_FAILED");
       view.showError("LOCAL_STORAGE_FAILED");
     }
   }
@@ -118,7 +118,7 @@ public final class TerminalApp extends Application {
     try {
       view.showQueueSize(queue.size());
     } catch (IOException nichtLesbar) {
-      System.err.println("Größe der Warteschlange unbekannt: " + nichtLesbar.getMessage());
+      System.err.println("Größe der Warteschlange unbekannt: LOCAL_STORAGE_FAILED");
     }
   }
 

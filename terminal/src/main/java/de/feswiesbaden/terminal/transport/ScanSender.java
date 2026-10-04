@@ -59,7 +59,9 @@ public final class ScanSender {
     }
     try {
       JsonNode code = Json.mapper().readTree(antwortkoerper).get("code");
-      return code == null || code.asText().isBlank() ? FALLBACK_CODE : code.asText();
+      return code != null && ALREADY_RECEIVED.equals(code.asText())
+          ? ALREADY_RECEIVED
+          : FALLBACK_CODE;
     } catch (IOException kaputt) {
       return FALLBACK_CODE;
     }
