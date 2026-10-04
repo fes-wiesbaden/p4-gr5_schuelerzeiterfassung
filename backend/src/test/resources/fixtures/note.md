@@ -36,3 +36,34 @@ Schüler 4 bleibt der Scan um 09:15, auch wenn das rückdatierte Audit später a
 Die Tests prüfen gespeicherte Zustände und verhindern eine doppelte Scan-ID auf
 Datenbankebene. Die spätere Scanverarbeitung muss zusätzlich die Ablehnung bei
 `ANWESEND` und die neutrale Retry-Antwort ohne weitere Buchung nachweisen.
+
+## Issue #20: Etappe 1
+
+`MySqlIntegrationTest` prüft Unique-Constraints durch abgelehnte Schreibversuche
+und zulässige Gegenfälle, die Klassenauflösung einer Attendance per SQL und JPA,
+Audit-Fremdschlüssel, mehrere Reset-Audits einschließlich Null-Deltas sowie den
+Schutz referenzierter Historie vor vorzeitiger Löschung. Jeder Test lädt die
+Fixture innerhalb einer zurückgerollten Transaktion.
+
+`MySqlTransactionTest` lädt die Fixture committed in einen eigenen MySQL-Container
+und bereinigt sie nach jedem Test in Fremdschlüsselreihenfolge. Geprüft werden
+Commit und Rollback von Konto und Audit sowie die Löschreihenfolge
+Audit → Attendance → Löschfrist mit einem nicht fälligen Kontrollfall.
+Kontostände, Rohscans und Stammdaten bleiben bei der Historienlöschung erhalten.
+Die Ergebnisse werden nach Abschluss der jeweiligen Transaktion gelesen.
+
+Die SQL-Abläufe beweisen DB-Constraints und Transaktionen, keine Servicevalidierung.
+Issue #20 bleibt offen, bis folgende Kriterien über die tatsächlichen Services
+getestet werden können:
+
+| Abhängigkeit | Ausstehende Nachweise |
+| --- | --- |
+| #21 / #40 | Blockplan-Erstellung berechnet `ends_on.plusMonths(6)`, einschließlich Monatsende und Schaltjahr; vorhandene Frist wird wiederverwendet; Plan und Frist werden atomar angelegt. |
+| #21 | Retention-Service löscht fällige Historie transaktional zum vorgesehenen Berliner Zeitpunkt. |
+| #40 | Slot-, Block- und Raumüberschneidungen werden beim Anlegen und Ändern abgelehnt. |
+| #40 | Falscher Klassen-Blockplan und gleichzeitig genutzter Stundenplan werden abgelehnt. |
+| #40 | Zulässige Gegenfälle, Zeitgrenzen und konkurrierende Planungsänderungen werden geprüft. |
+
+Es werden keine SQL-Trigger, neuen Schema-Constraints oder Test-Services ergänzt,
+um fehlende Backend-Logik zu ersetzen. Die Fixture-Prüfungen aus #19 bleiben
+Nachweise für gespeicherte Beispieldaten, nicht für deren fachliche Verarbeitung.
