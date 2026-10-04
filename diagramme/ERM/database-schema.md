@@ -92,8 +92,8 @@ Attendance ergibt sich über `student.school_class_id`.
 | `birth_date` | `DATE` | not null | `2008-05-14` |
 | `school_class_id` | `BIGINT` | not null, foreign key to `school_class.id` | `13` |
 | `rfid_uid` | `VARCHAR(64)` | nullable, unique, plaintext | `TEST-UID-001` |
-| `unexcused_minutes_account` | `INT` | not null, default `0`, check `>= 0` | `0` |
-| `excused_minutes_account` | `INT` | not null, default `0`, check `>= 0` | `0` |
+| `unexcused_minutes_account` | `INT` | not null, default `0`; backend checks `>= 0` | `0` |
+| `excused_minutes_account` | `INT` | not null, default `0`; backend checks `>= 0` | `0` |
 | `created_at` | `DATETIME` | not null, UTC | `2026-09-01 06:05:00` |
 | `changed_at` | `DATETIME` | not null, UTC | `2026-09-07 08:45:00` |
 
@@ -166,7 +166,7 @@ Start-/Endfelder wären redundant.
 | `room_id` | `BIGINT` | not null, foreign key to `room.id` | `2` |
 | `weekday` | `ENUM('MONTAG', 'DIENSTAG', 'MITTWOCH', 'DONNERSTAG', 'FREITAG')` | not null | `MONTAG` |
 | `start_time` | `TIME` | not null | `07:30:00` |
-| `end_time` | `TIME` | not null, check `end_time > start_time` | `09:00:00` |
+| `end_time` | `TIME` | not null; backend checks `end_time > start_time` | `09:00:00` |
 | `created_at` | `DATETIME` | not null, UTC | `2026-09-01 06:00:00` |
 | `changed_at` | `DATETIME` | not null, UTC | `2026-09-01 06:00:00` |
 
@@ -187,7 +187,7 @@ bestimmt `class_block_assignment`.
 | `id` | `BIGINT` | primary key, auto increment | `1` |
 | `name` | `VARCHAR(150)` | not null | `Blockplan Fachinformatik 2026/27` |
 | `starts_on` | `DATE` | not null | `2026-01-01` |
-| `ends_on` | `DATE` | not null, check `ends_on >= starts_on` | `2026-12-23` |
+| `ends_on` | `DATE` | not null; backend checks `ends_on >= starts_on` | `2026-12-23` |
 | `created_at` | `DATETIME` | not null, UTC | `2025-12-01 08:00:00` |
 | `changed_at` | `DATETIME` | not null, UTC | `2025-12-01 08:00:00` |
 
@@ -207,7 +207,7 @@ unterrichtet werden.
 | `id` | `BIGINT` | primary key, auto increment | `4` |
 | `block_plan_id` | `BIGINT` | not null, foreign key to `block_plan.id` | `1` |
 | `starts_on` | `DATE` | not null | `2026-10-07` |
-| `ends_on` | `DATE` | not null, check `ends_on >= starts_on` | `2026-11-10` |
+| `ends_on` | `DATE` | not null; backend checks `ends_on >= starts_on` | `2026-11-10` |
 | `created_at` | `DATETIME` | not null, UTC | `2026-09-01 06:00:00` |
 | `changed_at` | `DATETIME` | not null, UTC | `2026-09-01 06:00:00` |
 
@@ -471,11 +471,11 @@ mehr bestehen. Schüler, Staff, Terminals und Räume bleiben erhalten.
 | Reset audit | Multiple `ACCOUNT_RESET` audits per student and deletion date are allowed; each manual reset is audited. |
 | Block validity | Backend rejects blocks outside their block plan and overlapping blocks in one plan. |
 | Timetable reuse | Backend rejects the same timetable for classes whose assigned blocks overlap in time. |
-| Slot validity | Database checks `end_time > start_time`; backend rejects overlaps in one timetable. |
+| Slot validity | Backend checks `end_time > start_time` and rejects overlaps in one timetable. |
 | Room resolution | Backend rejects same-room slot overlaps across simultaneously active assignments. |
 | Audit actor | Backend enforces event-specific Staff/Terminal references and their mutual exclusion. |
 | Audit content | Backend enforces status-pair consistency; only a Reset-Audit may have no status change and two zero deltas. |
-| Minute accounts | Database checks both accounts `>= 0`; application locks and updates accounts with audit in one transaction. |
+| Minute accounts | Backend checks both accounts `>= 0`, locks and updates accounts with audit in one transaction. |
 | Reset boundary | Backend rejects corrections after the student's manual plan reset. |
 
 Intervall- und tabellenübergreifende Regeln liegen bewusst im Backend, weil

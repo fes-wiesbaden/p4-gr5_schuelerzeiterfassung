@@ -22,8 +22,7 @@ CREATE TABLE block_plan (
     starts_on DATE NOT NULL,
     ends_on DATE NOT NULL,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    changed_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    CONSTRAINT chk_block_plan_dates CHECK (ends_on >= starts_on)
+    changed_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 );
 
 CREATE TABLE school_class (
@@ -48,8 +47,8 @@ CREATE TABLE student (
     birth_date DATE NOT NULL,
     school_class_id BIGINT NOT NULL,
     rfid_uid VARCHAR(64) UNIQUE,
-    unexcused_minutes_account INT NOT NULL DEFAULT 0 CHECK (unexcused_minutes_account >= 0),
-    excused_minutes_account INT NOT NULL DEFAULT 0 CHECK (excused_minutes_account >= 0),
+    unexcused_minutes_account INT NOT NULL DEFAULT 0,
+    excused_minutes_account INT NOT NULL DEFAULT 0,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     changed_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     CONSTRAINT fk_student_class FOREIGN KEY (school_class_id) REFERENCES school_class(id)
@@ -87,7 +86,6 @@ CREATE TABLE timetable_slot (
     end_time TIME NOT NULL,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     changed_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    CONSTRAINT chk_timetable_slot_time CHECK (end_time > start_time),
     CONSTRAINT fk_timetable_slot_timetable FOREIGN KEY (timetable_id) REFERENCES timetable(id),
     CONSTRAINT fk_timetable_slot_room FOREIGN KEY (room_id) REFERENCES room(id),
     INDEX idx_timetable_slot_timetable_weekday_time (timetable_id, weekday, start_time, end_time)
@@ -100,7 +98,6 @@ CREATE TABLE block_assignment (
     ends_on DATE NOT NULL,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     changed_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    CONSTRAINT chk_block_assignment_dates CHECK (ends_on >= starts_on),
     CONSTRAINT fk_block_assignment_block_plan FOREIGN KEY (block_plan_id) REFERENCES block_plan(id),
     INDEX idx_block_assignment_plan_dates (block_plan_id, starts_on, ends_on)
 );
@@ -148,21 +145,6 @@ CREATE TABLE attendance_audit (
     CONSTRAINT fk_attendance_audit_deletion_date FOREIGN KEY (deletion_date_id) REFERENCES deletion_date(id),
     CONSTRAINT fk_attendance_audit_staff FOREIGN KEY (changed_by_staff_id) REFERENCES staff(id),
     CONSTRAINT fk_attendance_audit_terminal FOREIGN KEY (terminal_id) REFERENCES terminal(terminal_id),
-    CONSTRAINT chk_attendance_audit_status_pair CHECK (
-        (old_status IS NULL AND new_status IS NULL)
-        OR (old_status IS NOT NULL AND new_status IS NOT NULL AND old_status <> new_status)
-    ),
-    CONSTRAINT chk_attendance_audit_actor CHECK (
-        (event_type = 'SCAN' AND changed_by_staff_id IS NULL AND terminal_id IS NOT NULL)
-        OR (event_type IN ('STATUS_CHANGE', 'ACCOUNT_RESET') AND changed_by_staff_id IS NOT NULL AND terminal_id IS NULL)
-        OR (event_type = 'DAILY_CLOSE' AND changed_by_staff_id IS NULL AND terminal_id IS NULL)
-    ),
-    CONSTRAINT chk_attendance_audit_content CHECK (
-        (event_type = 'ACCOUNT_RESET' AND attendance_id IS NULL AND old_status IS NULL AND new_status IS NULL)
-        OR (event_type <> 'ACCOUNT_RESET' AND attendance_id IS NOT NULL AND (
-            old_status IS NOT NULL OR unexcused_minutes_delta <> 0 OR excused_minutes_delta <> 0
-        ))
-    ),
     INDEX idx_attendance_audit_attendance (attendance_id),
     INDEX idx_attendance_audit_deletion_date (deletion_date_id),
     INDEX idx_attendance_audit_occurred_at (occurred_at)
@@ -172,6 +154,5 @@ CREATE TABLE raw_scan (
     scan_id CHAR(36) PRIMARY KEY,
     rfid_uid VARCHAR(64) NOT NULL,
     scanned_at DATETIME NOT NULL,
-    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    CONSTRAINT chk_raw_scan_time CHECK (scanned_at <= created_at)
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
