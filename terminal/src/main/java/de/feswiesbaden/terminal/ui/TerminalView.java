@@ -78,7 +78,8 @@ public final class TerminalView {
 
   // Der öffentliche Code darf angezeigt werden, der wirkliche Grund nie (#37).
   public void showError(String code) {
-    Platform.runLater(() -> zeige(ScanState.ERROR, code));
+    String neutralCode = "LOCAL_STORAGE_FAILED".equals(code) ? code : "SCAN_REJECTED";
+    Platform.runLater(() -> zeige(ScanState.ERROR, neutralCode));
   }
 
   // Das Ergebnis wartet, bis "wird verarbeitet" lange genug zu sehen war.
