@@ -57,7 +57,7 @@ public final class DeliveryWorker implements AutoCloseable {
         }
       }
     } catch (IOException pufferKaputt) {
-      System.err.println("Warteschlange nicht lesbar: " + pufferKaputt.getMessage());
+      System.err.println("Warteschlange nicht lesbar: LOCAL_STORAGE_FAILED");
     }
   }
 

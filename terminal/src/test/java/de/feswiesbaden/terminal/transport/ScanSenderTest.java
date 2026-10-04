@@ -42,6 +42,9 @@ class ScanSenderTest {
     assertEquals("SCAN_REJECTED", ScanSender.readCode(""));
     assertEquals("SCAN_REJECTED", ScanSender.readCode("kein json"));
     assertEquals("SCAN_REJECTED", ScanSender.readCode("{}"));
-    assertEquals("SCAN_ID_CONFLICT", ScanSender.readCode("{\"code\":\"SCAN_ID_CONFLICT\"}"));
+    assertEquals("SCAN_REJECTED", ScanSender.readCode("{\"code\":\"SCAN_ID_CONFLICT\"}"));
+    assertEquals("SCAN_REJECTED", ScanSender.readCode("{\"code\":\"04A3B2C1\"}"));
+    assertEquals(
+        "SCAN_ALREADY_RECEIVED", ScanSender.readCode("{\"code\":\"SCAN_ALREADY_RECEIVED\"}"));
   }
 }
