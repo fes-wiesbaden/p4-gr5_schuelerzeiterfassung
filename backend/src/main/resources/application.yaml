@@ -16,6 +16,18 @@ spring:
   flyway:
     enabled: true
 
+server:
+  servlet:
+    session:
+      timeout: 30m
+      tracking-modes: cookie
+      cookie:
+        name: SESSION
+        http-only: true
+        secure: true
+        same-site: strict
+        path: /
+
 management:
   endpoints:
     web:
