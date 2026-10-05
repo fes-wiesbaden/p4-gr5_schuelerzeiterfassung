@@ -17,8 +17,8 @@ CERT_DIR="$cert_dir" TLS_HOST=192.168.1.10 /usr/local/bin/generate-certificates
 openssl verify -CAfile "$cert_dir/ca.crt" "$cert_dir/server.crt"
 openssl verify -purpose sslclient -CAfile "$cert_dir/terminal-client-ca.crt" \
   "$cert_dir/terminal-23102003-client.crt"
-openssl x509 -in "$cert_dir/terminal-23102003-client.crt" -noout -subject \
-  | grep -Fq 'CN = terminal-23102003'
+openssl x509 -in "$cert_dir/terminal-23102003-client.crt" -noout -subject -nameopt RFC2253 \
+  | grep -Fxq 'subject=CN=terminal-23102003'
 openssl pkcs12 -in "$cert_dir/terminal-23102003-client.p12" -passin pass:changeit -noout
 keytool -list -storetype PKCS12 -keystore "$cert_dir/terminal-server-truststore.p12" \
   -storepass changeit -alias attendance-server-ca

@@ -16,7 +16,7 @@ else
   openssl verify -verify_hostname "$tls_host" -CAfile "$ca_file" "$server_certificate"
 fi
 openssl verify -CAfile "$client_ca_file" "$client_certificate"
-curl --fail --silent --show-error --cacert "$ca_file" "https://$tls_host:8443/" \
+curl --fail --silent --show-error --cacert "$ca_file" "https://$tls_host:5173/" \
   | grep -Fq 'id="app"'
 
 if curl --fail --silent --show-error --cacert "$ca_file" \
@@ -34,19 +34,13 @@ if curl --fail --silent --show-error --cacert "$ca_file" --cert "$client_certifi
   exit 1
 fi
 
-if curl --connect-timeout 2 --fail --silent "http://$tls_host:8443/" >/dev/null; then
+if curl --connect-timeout 2 --fail --silent "http://$tls_host:5173/" >/dev/null; then
   echo 'HTTP unexpectedly reachable' >&2
   exit 1
 fi
 
-backend_port=$(docker compose --env-file "$env_file" port backend 8080 2>/dev/null || true)
-if printf '%s' "$backend_port" | grep -Eq ':[1-9][0-9]*$'; then
-  echo 'Backend port unexpectedly published' >&2
-  exit 1
-fi
-
-mysql_port=$(docker compose --env-file "$env_file" port mysql 3306 2>/dev/null || true)
-if printf '%s' "$mysql_port" | grep -Eq ':[1-9][0-9]*$'; then
-  echo 'MySQL port unexpectedly published' >&2
+mysql_port=$(docker compose --env-file "$env_file" port mysql 3306)
+if [ "$mysql_port" != "127.0.0.1:3306" ]; then
+  echo 'MySQL must be published exclusively on 127.0.0.1:3306' >&2
   exit 1
 fi
