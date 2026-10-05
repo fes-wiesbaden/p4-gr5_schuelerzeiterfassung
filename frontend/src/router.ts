@@ -1,6 +1,7 @@
 import { createRouter, createWebHistory } from 'vue-router'
 
 import { useAuthStore } from '@/stores/auth'
+import { setUnauthorizedHandler } from '@/api/client'
 import AppLayout from './layouts/AppLayout.vue'
 import LoginView from './views/LoginView.vue'
 import TerminalView from './views/TerminalView.vue'
@@ -70,6 +71,19 @@ const router = createRouter({
       ]
     }
   ]
+})
+
+setUnauthorizedHandler(async () => {
+  const auth = useAuthStore()
+  const wasLoggedIn = auth.isLoggedIn
+  auth.clearSession()
+  const currentRoute = router.currentRoute.value
+  if (wasLoggedIn && !currentRoute.meta.public) {
+    await router.replace({
+      name: 'login',
+      query: { weiter: currentRoute.fullPath }
+    })
+  }
 })
 
 router.beforeEach(async (to) => {

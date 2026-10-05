@@ -50,15 +50,33 @@ export const useAuthStore = defineStore('auth', () => {
     }
   }
 
-  async function logout() {
-    try {
-      await postJson('/api/logout', {})
-    } catch {
-      // Auch wenn der Server nicht antwortet, wird hier abgemeldet.
-    }
-
+  function clearSession() {
     user.value = null
     sessionChecked.value = true
+    errorMessage.value = ''
+  }
+
+  async function logout(): Promise<boolean> {
+    busy.value = true
+    errorMessage.value = ''
+    try {
+      const response = await postJson('/api/logout', {})
+      if (!response.ok && response.status !== 401) {
+        errorMessage.value = 'Abmeldung fehlgeschlagen. Bitte erneut versuchen.'
+        return false
+      }
+      clearSession()
+      // Logout entfernt den CSRF-Cookie. /api/me liefert vor dem nächsten Login
+      // einen neuen Token, auch wenn keine Sitzung mehr besteht.
+      sessionChecked.value = false
+      return true
+    } catch {
+      errorMessage.value =
+        'Abmeldung nicht bestätigt: Server nicht erreichbar. Bitte erneut versuchen.'
+      return false
+    } finally {
+      busy.value = false
+    }
   }
 
   // Nach einem Neuladen der Seite ist der Store leer, das Sitzungscookie kann
@@ -81,6 +99,7 @@ export const useAuthStore = defineStore('auth', () => {
     sessionChecked,
     isLoggedIn,
     isAdmin,
+    clearSession,
     login,
     logout,
     loadCurrentUser

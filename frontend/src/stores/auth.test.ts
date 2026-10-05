@@ -3,8 +3,8 @@ import { createPinia, setActivePinia } from 'pinia'
 
 import { useAuthStore } from './auth'
 
-function antwort(ok: boolean, body: unknown = {}) {
-  return { ok, json: async () => body } as Response
+function antwort(ok: boolean, body: unknown = {}, status = ok ? 200 : 401) {
+  return { ok, status, json: async () => body } as Response
 }
 
 describe('Auth-Store', () => {
@@ -83,14 +83,38 @@ describe('Auth-Store', () => {
     expect(optionen.credentials).toBe('include')
   })
 
-  it('meldet auch dann lokal ab, wenn der Server nicht antwortet', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('offline')))
+  it.each([204, 401])(
+    'meldet bei HTTP %s ab und fordert einen neuen CSRF-Token an',
+    async (status) => {
+      vi.stubGlobal(
+        'fetch',
+        vi.fn().mockResolvedValue(antwort(status === 204, {}, status))
+      )
+      const auth = useAuthStore()
+      auth.user = { name: 'A. Muster', role: 'admin' }
+
+      expect(await auth.logout()).toBe(true)
+
+      expect(auth.isLoggedIn).toBe(false)
+      expect(auth.sessionChecked).toBe(false)
+      expect(auth.errorMessage).toBe('')
+    }
+  )
+
+  it('liest nach dem Login den erneuerten CSRF-Token für den Logout', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(antwort(true, { name: 'A', role: 'admin' }))
+    vi.stubGlobal('fetch', fetchMock)
     const auth = useAuthStore()
-    auth.user = { name: 'A. Muster', role: 'admin' }
+    await auth.login('muster', 'geheim')
+    document.cookie = 'XSRF-TOKEN=renewed-token'
 
     await auth.logout()
 
-    expect(auth.isLoggedIn).toBe(false)
+    expect(fetchMock.mock.calls[1][1].headers['X-XSRF-TOKEN']).toBe(
+      'renewed-token'
+    )
   })
 
   it('erkennt eine abgelaufene Sitzung an HTTP 401', async () => {
