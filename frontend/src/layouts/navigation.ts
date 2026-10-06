@@ -2,7 +2,6 @@ export interface NavItem {
   label: string
   routeName: string
   icon: string
-  adminOnly?: boolean
 }
 
 export const mainNavItems: NavItem[] = [
@@ -22,17 +21,15 @@ export const mainNavItems: NavItem[] = [
 ]
 
 export const administrationNavItems: NavItem[] = [
-  { label: 'Räume', routeName: 'raeume', icon: 'pi-building', adminOnly: true },
+  { label: 'Räume', routeName: 'raeume', icon: 'pi-building' },
   {
     label: 'Terminals',
     routeName: 'terminals',
-    icon: 'pi-desktop',
-    adminOnly: true
+    icon: 'pi-desktop'
   },
   {
     label: 'Personal',
     routeName: 'personal',
-    icon: 'pi-id-card',
-    adminOnly: true
+    icon: 'pi-id-card'
   }
 ]
