@@ -1,80 +1,157 @@
 # Anwesenheitserfassung
 
-Lokale Entwicklungsumgebung für die RFID-basierte Anwesenheitserfassung.
+RFID-basierte Anwesenheitserfassung für Schulklassen mit wechselnden
+Raumbelegungen. Das Repository enthält Spring-Backend, Vue-Weboberfläche,
+JavaFX-Terminal und ESP32-Firmware. Diese Anleitung richtet sich an
+Projektentwickler.
 
-## Voraussetzungen
+[![Qualitätsprüfungen](https://github.com/fes-wiesbaden/p4-gr5_schuelerzeiterfassung/actions/workflows/quality.yml/badge.svg?branch=main)](https://github.com/fes-wiesbaden/p4-gr5_schuelerzeiterfassung/actions/workflows/quality.yml)
 
-- Docker Engine mit Docker Compose
-- Java 21 und Maven 3.8+
-- Node.js 22.12+ und npm
+## Entwicklungsumgebung
 
-## Lokal starten
+| Komponente | Ausführung | Aufgabe/Zugang |
+| --- | --- | --- |
+| `tls-init` | Docker, einmalig | Lokale Zertifikate und Truststore erzeugen |
+| MySQL 8 | Docker | Datenbank auf `127.0.0.1:3306` |
+| nginx | Docker | JavaFX-mTLS auf Port `8444`; Proxy zum lokalen Backend |
+| Spring Boot | Lokal, Java 21 | Backend auf Port `8080` |
+| Vue/Vite | Lokal, Node.js | Browser über `https://<TLS_HOST>:5173/`; `/api/`-Proxy zum Backend |
+| JavaFX | Lokal, Java 21 | RFID-Terminal; [Einrichtung](terminal/README.md) |
 
-```bash
+Der Browser verwendet Vite. nginx ist für den Terminalzugang bestimmt und
+leitet dessen Testanfragen an `host.docker.internal:8080` weiter. Port `8444`
+ist keine Browser-Oberfläche.
+
+## Starten
+
+Voraussetzungen: Docker Engine mit Docker Compose, Java 21, Maven 3.8+,
+Node.js 22.12+ und npm. Befehle aus dem Repository-Hauptverzeichnis ausführen.
+
+### Konfiguration
+
+Bei der ersten Einrichtung, sofern `.env` noch nicht existiert:
+
+```sh
 cp .env.example .env
-docker compose pull
-docker compose up -d
 ```
 
-Unter Linux müssen `HOST_UID` und `HOST_GID` in `.env` der Ausgabe von `id -u` und `id -g` entsprechen. Unter Docker Desktop für Windows bleiben die Standardwerte `1000`.
+Vor dem Start `.env` prüfen:
 
-Die Anwendung ist anschließend unter `https://127.0.0.1:8443/terminal/1` erreichbar. Der ESP32-Scan-Endpunkt ist getrennt unter Port `8444` und verlangt mTLS. HTTP wird nicht veröffentlicht.
+| Einstellung | Bedeutung |
+| --- | --- |
+| `TLS_HOST` | Host/IP in den Zertifikaten; Standard `127.0.0.1` |
+| `HOST_UID`, `HOST_GID` | Unter Linux Werte aus `id -u` und `id -g`; unter Docker Desktop für Windows Standard `1000` |
+| `MYSQL_DATABASE`, `MYSQL_USER`, `MYSQL_PASSWORD` | Zugangsdaten für die lokale Datenbank |
 
-```bash
-docker compose down
+### Infrastruktur
+
+```sh
+docker compose up --build -d
+docker compose ps
 ```
 
-`docker compose down -v` nicht verwenden, wenn der ESP32 weiterhin derselben CA vertrauen soll: Dadurch wird die lokale MySQL-Datenbank gelöscht. Das TLS-Verzeichnis bleibt zwar bestehen, muss aber ebenfalls nicht gelöscht werden.
+Vor dem Backendstart muss MySQL `healthy` sein. `tls-init` beendet sich nach
+der Zertifikatserzeugung; MySQL und nginx laufen weiter.
+
+### Backend und Frontend
+
+In getrennten Terminals starten:
+
+```sh
+mvn -pl backend spring-boot:run
+```
+
+```sh
+npm --prefix frontend ci
+npm --prefix frontend run dev
+```
+
+Vite leitet `/api/` an `http://127.0.0.1:8080` weiter. Nach dem
+[CA-Import](#tls-und-terminal) die Weboberfläche auf `https://<TLS_HOST>:5173/`
+öffnen, standardmäßig `https://127.0.0.1:5173/`.
 
 ## Lokal debuggen
 
-### IntelliJ IDEA
+Für IntelliJ IDEA die Root-`pom.xml` importieren; sie enthält `backend` und
+`terminal`. Java 21 als Project SDK verwenden und `AttendanceApplication`
+starten oder debuggen.
 
-Das Repository-Root als Projekt öffnen. Die Root-`pom.xml` importiert das Maven-Modul `backend` automatisch. IntelliJ fragt gegebenenfalls nach dem Maven-Import; diesen bestätigen und Java 21 als Project SDK wählen.
+## Komponenten und Dokumentation
 
-Der Hybrid-Modus lässt Backend und Frontend lokal laufen. Docker stellt nur MySQL und den mTLS-Proxy für den ESP32 bereit.
+| Verzeichnis | Inhalt | Weiterführend |
+| --- | --- | --- |
+| `backend/` | Datenmodell, Dienste und Login | [Login und Sitzungen](backend/src/main/java/de/feswiesbaden/attendance/login/login.md) |
+| `frontend/` | Vue 3 / TypeScript für Lehrkraft- und Verwaltungsansichten | [Lokaler Start](#backend-und-frontend) |
+| `terminal/` | JavaFX, USB-Scans und persistente Zustellwarteschlange | [Terminal-Anleitung](terminal/README.md) |
+| `terminal/firmware/` | ESP32-RFID-Leser mit USB-Serial | [ESP32-Einrichtung](terminal/README.md#mit-echtem-esp32) |
+| `infra/` | TLS-Erzeugung und nginx | [TLS und Terminal](#tls-und-terminal) |
 
-```bash
-docker compose -f compose.dev.yaml up --build -d
-cd backend && mvn spring-boot:run
-cd frontend && npm run dev
+## TLS und Terminal
+
+`tls-init` erzeugt beim ersten Start die lokale Server-CA `.local/tls/ca.crt`.
+Diese im Browser als vertrauenswürdige Stammzertifizierungsstelle für Websites
+[importieren](https://chromium.googlesource.com/chromium/src/+/HEAD/docs/linux/cert_management.md "Offizielle Chromium-Anleitung für Linux") und den Browser neu starten. Vite verwendet das erzeugte
+Serverzertifikat für HTTPS auf Port `5173`.
+
+Immer exakt `TLS_HOST` öffnen: `localhost` und `127.0.0.1` sind unterschiedliche
+Zertifikatsnamen. Das TLS-Verzeichnis bleibt bei einem Neustart erhalten.
+
+Für JavaFX entstehen Clientzertifikat, privater Schlüssel, Client-PKCS#12 und
+Java-Truststore unter `.local/tls/`. In `terminal/` die Beispiel-Properties
+kopieren, `server.url` auf exakt diesen Host setzen und dort `mvn javafx:run`
+starten. Zertifikate lassen sich auch separat erzeugen:
+
+```sh
+docker compose up tls-init
 ```
 
-Das Backend ist in IntelliJ über die Klasse `AttendanceApplication` debugbar. Der lokale Vite-Server nutzt das erzeugte Serverzertifikat: `https://<TLS_HOST>:5173/terminal/1`. Für den ESP32 bleibt `https://<TLS_HOST>:8444/api/` das mTLS-Ziel. `compose.dev.yaml` veröffentlicht MySQL ausschließlich für den lokalen Backend-Debugger.
-
-```bash
-docker compose -f compose.dev.yaml down
-```
-
-## Lokales Browser-Zertifikat
-
-Beim ersten Start erzeugt `tls-init` die lokale Server-CA unter `.local/tls/ca.crt`. Sie gilt sowohl für den vollständigen Container-Start auf Port `8443` als auch für den lokalen Vite-Debugger auf Port `5173`.
-
-Der Browser vertraut dieser privaten CA nicht automatisch. `ca.crt` deshalb einmal als vertrauenswürdige Stammzertifizierungsstelle für Websites importieren und den Browser neu starten. Anschließend immer exakt den in `TLS_HOST` eingetragenen Host öffnen, zum Beispiel `https://127.0.0.1:8443/terminal/1` oder `https://127.0.0.1:5173/terminal/1`. `localhost` ist bei TLS ein anderer Name als `127.0.0.1`.
-
-Port `8444` ist ausschließlich der mTLS-Endpunkt des ESP32 und keine Browser-Oberfläche.
-
-## ESP32-Test mit mTLS
-
-Beim ersten Einrichten erzeugt `tls-init` einmalig die feste ESP32-Identität: `esp32-client.crt` und `esp32-client.key`. Diese beiden Dateien gehören ausschließlich in die ESP32-Firmware. Der private Schlüssel darf nicht in Git, Logs oder Screenshots erscheinen.
-
-1. Die WLAN-IP des testenden Laptops in `TLS_HOST` in `.env` eintragen.
-2. `./.local/tls/ca.crt` als Server-CA sowie `esp32-client.crt` und `esp32-client.key` in die ESP32-Test-Firmware übernehmen.
-3. Die HTTPS-URL des ESP32 auf `https://<TLS_HOST>:8444/api/` setzen.
-
-`WiFiClientSecure` erhält die Server-CA mit `setCACert(...)`, das feste Client-Zertifikat mit `setCertificate(...)` und den privaten Schlüssel mit `setPrivateKey(...)`. Dadurch prüft der ESP32 den Server und nginx prüft den ESP32. `setInsecure()` ist verboten.
-
-Beim Wechsel auf einen anderen Laptop: Vor dem Start dessen `.local/tls/esp32-client-ca.crt` mit der öffentlichen Client-CA vom ersten Einrichten ersetzen. Dann dessen WLAN-IP in `.env` setzen, `docker compose up --build` starten und dessen neue `ca.crt` sowie die Ziel-URL in der ESP32-Firmware aktualisieren. Das feste ESP32-Client-Zertifikat und sein privater Schlüssel bleiben unverändert.
+JavaFX prüft Serverzertifikat und Hostnamen; nginx prüft das Clientzertifikat
+gegen die Terminal-Client-CA. Private Schlüssel und Speicher nie in Git,
+Logs oder Screenshots aufnehmen. Trust-all und deaktivierte Hostnamenprüfung
+sind verboten. Die [Terminal-README](terminal/README.md) beschreibt USB,
+Firmware und Konfiguration.
 
 ## Prüfungen
 
-```bash
-cd backend && mvn spotless:check test
-cd frontend && npm ci && npm run lint && npm run format:check && npm test && npm run build
-docker compose config
-docker compose --profile test build tls-test
-docker compose --profile test run --rm tls-test
-docker compose up --build -d
+Die Backend-Integrationstests verwenden eine eigene MySQL-Datenbank über
+Testcontainers und benötigen laufendes Docker.
+
+```sh
+mvn -pl backend spotless:check verify
+mvn -pl terminal spotless:check test
+npm --prefix frontend run lint
+npm --prefix frontend run format:check
+npm --prefix frontend test
+npm --prefix frontend run typecheck
+npm --prefix frontend run build
+```
+
+Die Zertifikatserzeugung benötigt kein laufendes Backend oder Frontend:
+
+```sh
+docker compose build tls-init
+docker compose run --rm --no-deps --entrypoint /usr/local/bin/test-generate-certificates tls-init
+```
+
+Für die TLS-Verbindungsprüfung müssen Infrastruktur, lokales Backend und
+Frontend laufen:
+
+```sh
 sh scripts/verify-local-tls.sh
+```
+
+Die CI führt außerdem Checkstyle aus. Git- und PR-Regeln stehen in
+[CONTRIBUTING.md](CONTRIBUTING.md); die [GitHub-Issues](https://github.com/fes-wiesbaden/p4-gr5_schuelerzeiterfassung/issues)
+enthalten die Projektanforderungen.
+
+## Beenden
+
+Backend und Frontend mit `Strg+C` beenden, beziehungsweise die Backend-
+Anwendung in IntelliJ stoppen. Danach die Infrastruktur beenden:
+
+```sh
 docker compose down
 ```
+
+`docker compose down -v` löscht die lokale MySQL-Datenbank. Die Zertifikate
+unter `.local/tls/` bleiben bestehen.

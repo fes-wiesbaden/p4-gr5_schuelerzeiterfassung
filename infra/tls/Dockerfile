@@ -1,6 +1,6 @@
 FROM alpine:3.21
 
-RUN apk add --no-cache openssl
+RUN apk add --no-cache openjdk21-jre-headless openssl
 
 COPY generate-certificates.sh /usr/local/bin/generate-certificates
 COPY test-generate-certificates.sh /usr/local/bin/test-generate-certificates

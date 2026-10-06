@@ -1,0 +1,27 @@
+# Kopiere diese Datei nach terminal.properties und passe sie an.
+
+# mTLS-Endpunkt fuer Scans (Issue #26). Ueber diesen Port ist nur der
+# Scan-Endpunkt erreichbar, keine anderen /api/-Pfade.
+server.url=https://127.0.0.1:8444/api/scans
+
+# Serieller Port des ESP32. LEER LASSEN, dann werden Scans von der Konsole
+# gelesen und man braucht keine Hardware.
+# Unter Linux typischerweise /dev/ttyUSB0 oder /dev/ttyACM0
+# Geht auch ueber die Umgebungsvariable TERMINAL_SERIAL_PORT.
+serial.port=
+
+serial.baud=115200
+
+# Clientzertifikat dieser Installation als PKCS12-Datei. nginx prueft es gegen
+# die Terminal-Client-CA. Beide Speicher sind Pflicht; ohne sie startet keine
+# Zustellung.
+client.keystore=../.local/tls/terminal-23102003-client.p12
+client.keystore.password=changeit
+
+# PKCS12-Truststore mit der Server-CA. Die JVM prueft damit Zertifikat und
+# Hostname/IP des Servers; Trust-all ist nicht erlaubt.
+server.truststore=../.local/tls/terminal-server-truststore.p12
+server.truststore.password=changeit
+
+# Datei fuer die lokale Warteschlange.
+queue.file=scan-puffer.jsonl
