@@ -23,9 +23,10 @@ export default defineConfig(({ command }) => ({
           },
           port: 5173,
           strictPort: true,
-          ws: {
-            protocol: 'wss',
-            clientPort: 8443
+          proxy: {
+            '/api/': {
+              target: 'http://127.0.0.1:8080'
+            }
           }
         }
       : undefined
