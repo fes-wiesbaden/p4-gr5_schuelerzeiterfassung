@@ -93,11 +93,10 @@ Der Workflow `Publish Docker images` startet bei Pull Requests und Pushes auf `m
 
 Jedes Image erhält den Commit-SHA und `latest`. Fehlgeschlagene Builds veröffentlichen keine Images. Die Infrastruktur-Images für MySQL und nginx werden nicht in GHCR veröffentlicht; TLS-Init wird lokal gebaut.
 
-Für den Containerstart werden die veröffentlichten Images verwendet:
+Die lokale Compose-Umgebung startet MySQL und den mTLS-Proxy:
 
 ```sh
-docker compose pull
-docker compose up -d
+docker compose up --build -d
 ```
 
-Bei privaten GHCR-Paketen vorher mit `docker login ghcr.io` anmelden. Lokale Entwicklung mit laufendem Backend und Frontend erfolgt weiterhin über `compose.dev.yaml`.
+Backend und Frontend laufen lokal. Einrichtung und Start stehen in der [README](README.md#lokal-debuggen).
