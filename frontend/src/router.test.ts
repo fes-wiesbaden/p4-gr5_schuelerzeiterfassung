@@ -135,13 +135,7 @@ describe('Router-Guard für die Anmeldung', () => {
     expect(router.currentRoute.value.name).toBe('live-anwesenheit')
   })
 
-  it('lässt die Terminalansicht ohne Anmeldung zu', async () => {
-    const auth = useAuthStore()
-    auth.user = null
-    auth.sessionChecked = true
-
-    await router.push('/terminal/1')
-
-    expect(router.currentRoute.value.path).toBe('/terminal/1')
+  it('stellt keine Vue-Terminalroute bereit', () => {
+    expect(router.resolve('/terminal/test').matched).toEqual([])
   })
 })

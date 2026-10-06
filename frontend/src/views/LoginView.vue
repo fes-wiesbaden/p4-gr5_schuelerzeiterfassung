@@ -3,7 +3,6 @@ import { ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import Button from 'primevue/button'
 import InputText from 'primevue/inputtext'
-import Password from 'primevue/password'
 
 import { useAuthStore } from '@/stores/auth'
 
@@ -13,8 +12,10 @@ const route = useRoute()
 
 const username = ref('')
 const password = ref('')
+const passwordVisible = ref(false)
 
 async function handleSubmit() {
+  passwordVisible.value = false
   const erfolgreich = await auth.login(username.value, password.value)
   if (!erfolgreich) {
     password.value = ''
@@ -52,15 +53,29 @@ async function handleSubmit() {
 
       <div class="login__field">
         <label class="login__label" for="login-password">Passwort</label>
-        <Password
-          v-model="password"
-          input-id="login-password"
-          autocomplete="current-password"
-          :feedback="false"
-          toggle-mask
-          required
-          :disabled="auth.busy"
-        />
+        <div class="login__password">
+          <InputText
+            id="login-password"
+            v-model="password"
+            :type="passwordVisible ? 'text' : 'password'"
+            autocomplete="current-password"
+            required
+            :disabled="auth.busy"
+          />
+          <Button
+            type="button"
+            class="login__password-toggle"
+            :icon="passwordVisible ? 'pi pi-eye-slash' : 'pi pi-eye'"
+            text
+            rounded
+            size="small"
+            aria-label="Passwort anzeigen"
+            aria-controls="login-password"
+            :aria-pressed="passwordVisible"
+            :disabled="auth.busy"
+            @click="passwordVisible = !passwordVisible"
+          />
+        </div>
       </div>
 
       <p v-if="auth.errorMessage" class="login__error" role="alert">
@@ -138,5 +153,20 @@ async function handleSubmit() {
 
 .login__field :deep(input) {
   width: 100%;
+}
+
+.login__password {
+  position: relative;
+}
+
+.login__password :deep(input) {
+  padding-inline-end: 44px;
+}
+
+.login__password-toggle {
+  position: absolute;
+  inset-inline-end: 4px;
+  top: 50%;
+  transform: translateY(-50%);
 }
 </style>

@@ -4,7 +4,6 @@ import { useAuthStore } from '@/stores/auth'
 import { setUnauthorizedHandler } from '@/api/client'
 import AppLayout from './layouts/AppLayout.vue'
 import LoginView from './views/LoginView.vue'
-import TerminalView from './views/TerminalView.vue'
 import LiveAttendanceView from './views/LiveAttendanceView.vue'
 import ClassesView from './views/ClassesView.vue'
 import StudentsView from './views/StudentsView.vue'
@@ -29,11 +28,6 @@ const router = createRouter({
       path: '/login',
       name: 'login',
       component: LoginView,
-      meta: { public: true }
-    },
-    {
-      path: '/terminal/:terminalId',
-      component: TerminalView,
       meta: { public: true }
     },
     {

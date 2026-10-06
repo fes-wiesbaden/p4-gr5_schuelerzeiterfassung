@@ -46,6 +46,27 @@ describe('Anmeldemaske', () => {
     const ansicht = baueAnsicht()
 
     expect(ansicht.find('#login-password').attributes('type')).toBe('password')
+    expect(ansicht.find('#login-password').attributes('autocomplete')).toBe(
+      'current-password'
+    )
+  })
+
+  it('schaltet die Passwortanzeige über einen beschrifteten Button ohne Formularversand um', async () => {
+    const auth = useAuthStore()
+    const login = vi.spyOn(auth, 'login')
+    const ansicht = baueAnsicht()
+    const button = ansicht.get('button[aria-label="Passwort anzeigen"]')
+
+    expect(button.attributes('type')).toBe('button')
+    expect(button.attributes('aria-controls')).toBe('login-password')
+    expect(button.attributes('aria-pressed')).toBe('false')
+    await button.trigger('click')
+    expect(ansicht.get('#login-password').attributes('type')).toBe('text')
+    expect(button.attributes('aria-pressed')).toBe('true')
+    await button.trigger('click')
+    expect(ansicht.get('#login-password').attributes('type')).toBe('password')
+    expect(button.attributes('aria-pressed')).toBe('false')
+    expect(login).not.toHaveBeenCalled()
   })
 
   it('lässt sich per Enter absenden, weil es ein echtes Formular ist', async () => {
