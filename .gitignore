@@ -1,4 +1,8 @@
 backend/target/
+terminal/target/
+terminal/terminal.properties
+terminal/scan-puffer.jsonl
+*.p12
 /target/
 frontend/node_modules/
 frontend/dist/
@@ -7,3 +11,5 @@ frontend/dist/
 img-screenshots/
 .idea/
 *.iml
+diagramme/**/*.drawio
+diagramme/**/old/

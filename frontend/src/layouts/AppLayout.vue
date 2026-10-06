@@ -34,9 +34,10 @@ watch(
   }
 )
 
-function handleLogout() {
-  auth.logout()
-  router.push({ name: 'live-anwesenheit' })
+async function handleLogout() {
+  if (await auth.logout()) {
+    await router.replace({ name: 'login' })
+  }
 }
 
 function handleSidebarKeydown(event: KeyboardEvent) {
@@ -67,7 +68,13 @@ function handleSidebarKeydown(event: KeyboardEvent) {
           {{ auth.user?.name }}
           <span class="app-header__user-role">· {{ roleLabel }}</span>
         </span>
-        <Button label="Abmelden" size="small" outlined @click="handleLogout" />
+        <Button
+          label="Abmelden"
+          size="small"
+          outlined
+          :loading="auth.busy"
+          @click="handleLogout"
+        />
       </div>
     </header>
 
@@ -120,6 +127,9 @@ function handleSidebarKeydown(event: KeyboardEvent) {
       </aside>
 
       <main class="app-content">
+        <p v-if="auth.errorMessage" class="app-content__error" role="alert">
+          {{ auth.errorMessage }}
+        </p>
         <RouterView />
       </main>
     </div>
@@ -128,6 +138,8 @@ function handleSidebarKeydown(event: KeyboardEvent) {
 
 <style scoped>
 .app-shell {
+  --app-header-height: 64px;
+
   display: grid;
   grid-template-rows: auto 1fr;
   min-height: 100vh;
@@ -137,7 +149,7 @@ function handleSidebarKeydown(event: KeyboardEvent) {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  height: 64px;
+  height: var(--app-header-height);
   padding: 0 24px;
   background: #ffffff;
   border-bottom: 1px solid #e2e5ea;
@@ -250,6 +262,15 @@ function handleSidebarKeydown(event: KeyboardEvent) {
   min-width: 0;
 }
 
+.app-content__error {
+  margin: 0 0 16px;
+  padding: 10px 12px;
+  border: 1px solid #f0b4b4;
+  border-radius: 6px;
+  background: #fdf2f2;
+  color: #a12525;
+}
+
 @media (max-width: 960px) {
   .app-header__menu-toggle {
     display: inline-flex;
@@ -261,9 +282,9 @@ function handleSidebarKeydown(event: KeyboardEvent) {
 
   .app-sidebar {
     position: fixed;
-    inset: 64px 0 0 0;
+    inset: var(--app-header-height) 0 0 0;
     width: 260px;
-    height: calc(100vh - 64px);
+    height: calc(100vh - var(--app-header-height));
     transform: translateX(-100%);
     visibility: hidden;
     transition:
@@ -282,9 +303,27 @@ function handleSidebarKeydown(event: KeyboardEvent) {
   .app-sidebar__backdrop {
     display: block;
     position: fixed;
-    inset: 64px 0 0 0;
+    inset: var(--app-header-height) 0 0 0;
     background: rgba(15, 23, 42, 0.4);
     z-index: 10;
+  }
+}
+
+@media (max-width: 600px) {
+  .app-shell {
+    --app-header-height: 112px;
+  }
+
+  .app-header {
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 12px;
+  }
+
+  .app-header__user {
+    width: 100%;
+    justify-content: space-between;
+    gap: 8px;
   }
 }
 </style>
