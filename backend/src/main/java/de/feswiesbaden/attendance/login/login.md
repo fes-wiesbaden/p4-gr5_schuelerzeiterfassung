@@ -7,8 +7,9 @@ Benutzeranlage und Klassenrechte gehören nicht zu diesem Package.
 
 ## API
 
-Browser, Vite und Spring verwenden dieselben `/api/`-Pfade. Der Vite-Proxy
-entfernt den Präfix nicht. Alle Browser-Anfragen laufen über HTTPS.
+Browser, nginx und Spring verwenden dieselben `/api/`-Pfade. nginx erhält
+den Präfix bei der Weiterleitung. Alle Browser-Anfragen laufen über HTTPS;
+Vite liefert ausschließlich Seiten und HMR hinter nginx.
 
 | Aufruf | Rumpf | Antwort |
 | --- | --- | --- |
@@ -97,10 +98,13 @@ meldet alle Benutzer ab. Mehrere Backend-Instanzen werden hier nicht unterstütz
 bis zur Umsetzung ihrer Berechtigungen gesperrt. Die Rollenanzeige im Frontend
 ersetzt keine Backend-Autorisierung.
 
-Browser-API-Anfragen gehen über HTTPS an den lokalen Vite-Server auf Port
-`5173`. Vite leitet `/api/` an `http://127.0.0.1:8080` weiter; Cookies bleiben
-auch bei dieser internen HTTP-Verbindung `Secure`. Die einzige `compose.yaml`
-startet MySQL, `tls-init` und nginx. Backend und Frontend laufen lokal.
+Browser-API-Anfragen gehen über HTTPS an nginx auf Port `8443`. nginx leitet
+`/api/` direkt an das lokale Spring-Backend auf Port `8080` weiter. Dieser
+interne Abschnitt verwendet in diesem Entwicklungsschritt weiterhin HTTP;
+Cookies bleiben `Secure`. Seiten und HMR kommen über nginx von Vite auf
+HTTPS-Port `5173`, mit CA- und Namensprüfung des Upstream-Zertifikats.
+Die einzige `compose.yaml` startet MySQL, `tls-init` und nginx. Backend und
+Frontend laufen lokal. Vite enthält keinen API-Proxy.
 nginx stellt den getrennten JavaFX-mTLS-Zugang auf Port `8444` bereit und
 verwendet keine Staff-Anmeldung.
 
