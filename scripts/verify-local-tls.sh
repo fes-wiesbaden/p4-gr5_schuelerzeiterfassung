@@ -16,8 +16,15 @@ else
   openssl verify -verify_hostname "$tls_host" -CAfile "$ca_file" "$server_certificate"
 fi
 openssl verify -CAfile "$client_ca_file" "$client_certificate"
-curl --fail --silent --show-error --cacert "$ca_file" "https://$tls_host:5173/" \
+curl --fail --silent --show-error --cacert "$ca_file" "https://$tls_host:8443/" \
   | grep -Fq 'id="app"'
+
+api_status=$(curl --silent --show-error --cacert "$ca_file" \
+  --output /dev/null --write-out '%{http_code}' "https://$tls_host:8443/api/me")
+if [ "$api_status" != "401" ]; then
+  echo 'Browser API must reach Spring and reject an unauthenticated request with HTTP 401' >&2
+  exit 1
+fi
 
 if curl --fail --silent --show-error --cacert "$ca_file" \
   "https://$tls_host:8444/api/__scan-endpoint-todo__" >/dev/null; then
@@ -34,7 +41,7 @@ if curl --fail --silent --show-error --cacert "$ca_file" --cert "$client_certifi
   exit 1
 fi
 
-if curl --connect-timeout 2 --fail --silent "http://$tls_host:5173/" >/dev/null; then
+if curl --connect-timeout 2 --fail --silent "http://$tls_host:8443/" >/dev/null; then
   echo 'HTTP unexpectedly reachable' >&2
   exit 1
 fi

@@ -1,0 +1,53 @@
+ssl_certificate /etc/nginx/tls/server.crt;
+ssl_certificate_key /etc/nginx/tls/server.key;
+ssl_protocols TLSv1.2 TLSv1.3;
+
+map $http_upgrade $connection_upgrade {
+    default upgrade;
+    '' close;
+}
+
+server {
+    listen 8443 ssl;
+    server_name _;
+
+    location /api/ {
+        proxy_pass http://host.docker.internal:8080;
+        proxy_set_header Host $http_host;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Terminal-Client-Subject "";
+    }
+
+    location / {
+        proxy_pass https://host.docker.internal:5173;
+        proxy_ssl_trusted_certificate /etc/nginx/tls/ca.crt;
+        proxy_ssl_verify on;
+        proxy_ssl_server_name on;
+        proxy_ssl_name ${TLS_HOST};
+        proxy_http_version 1.1;
+        proxy_set_header Host $http_host;
+        proxy_set_header Cookie "";
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection $connection_upgrade;
+        proxy_read_timeout 1h;
+    }
+}
+
+server {
+    listen 8444 ssl;
+    server_name _;
+
+    ssl_client_certificate /etc/nginx/tls/terminal-client-ca.crt;
+    ssl_verify_client on;
+    ssl_verify_depth 1;
+
+    # TODO: Durch den JavaFX-Scan-Endpunkt aus Issue #26 ersetzen.
+    location = /api/__scan-endpoint-todo__ {
+        proxy_pass http://host.docker.internal:8080/actuator/health;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Terminal-Client-Subject $ssl_client_s_dn;
+    }
+}
