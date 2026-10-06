@@ -13,15 +13,14 @@ Projektentwickler.
 | --- | --- | --- |
 | `tls-init` | Docker, einmalig | Lokale Zertifikate und Truststore erzeugen |
 | MySQL 8 | Docker | Datenbank auf `127.0.0.1:3306` |
-| nginx | Docker | Browser-HTTPS auf Port `8443`, JavaFX-mTLS auf Port `8444` |
+| nginx | Docker | JavaFX-mTLS auf Port `8444`; Proxy zum lokalen Backend |
 | Spring Boot | Lokal, Java 21 | Backend auf Port `8080` |
-| Vue/Vite | Lokal, Node.js | Seiten und HMR auf HTTPS-Port `5173`, hinter nginx |
+| Vue/Vite | Lokal, Node.js | Browser über `https://<TLS_HOST>:5173/`; `/api/`-Proxy zum Backend |
 | JavaFX | Lokal, Java 21 | RFID-Terminal; [Einrichtung](terminal/README.md) |
 
-Der Browser verwendet nginx auf Port `8443`. nginx leitet `/api/` direkt an
-das lokale Backend auf Port `8080` und Seiten an Vite weiter.
-Port `8444` ist ausschließlich für den
-JavaFX-Terminalzugang mit Clientzertifikat bestimmt.
+Der Browser verwendet Vite. nginx ist für den Terminalzugang bestimmt und
+leitet dessen Testanfragen an `host.docker.internal:8080` weiter. Port `8444`
+ist keine Browser-Oberfläche.
 
 ## Starten
 
@@ -67,8 +66,9 @@ npm --prefix frontend ci
 npm --prefix frontend run dev
 ```
 
-Nach dem [CA-Import](#tls-und-terminal) die Weboberfläche auf
-`https://<TLS_HOST>:8443/` öffnen, standardmäßig `https://127.0.0.1:8443/`.
+Vite leitet `/api/` an `http://127.0.0.1:8080` weiter. Nach dem
+[CA-Import](#tls-und-terminal) die Weboberfläche auf `https://<TLS_HOST>:5173/`
+öffnen, standardmäßig `https://127.0.0.1:5173/`.
 
 ## Lokal debuggen
 
@@ -91,9 +91,7 @@ starten oder debuggen.
 `tls-init` erzeugt beim ersten Start die lokale Server-CA `.local/tls/ca.crt`.
 Diese im Browser als vertrauenswürdige Stammzertifizierungsstelle für Websites
 [importieren](https://chromium.googlesource.com/chromium/src/+/HEAD/docs/linux/cert_management.md "Offizielle Chromium-Anleitung für Linux") und den Browser neu starten. Vite verwendet das erzeugte
-Serverzertifikat für HTTPS auf Port `5173`; nginx verwendet es für den
-Browserzugang auf Port `8443`. nginx vertraut beim Vite-Upstream nur dieser
-CA und prüft dessen Zertifikatsnamen gegen `TLS_HOST`.
+Serverzertifikat für HTTPS auf Port `5173`.
 
 Immer exakt `TLS_HOST` öffnen: `localhost` und `127.0.0.1` sind unterschiedliche
 Zertifikatsnamen. Das TLS-Verzeichnis bleibt bei einem Neustart erhalten.

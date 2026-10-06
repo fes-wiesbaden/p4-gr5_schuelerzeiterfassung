@@ -27,22 +27,15 @@ services:
 
   nginx:
     image: nginx:1.28-alpine
-    environment:
-      TLS_HOST: ${TLS_HOST:-127.0.0.1}
-      NGINX_ENVSUBST_FILTER: "^TLS_HOST$$"
     ports:
-      # frontend
-      - "8443:8443"
-      # javafx
       - "8444:8444"
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:
-      - ./infra/nginx/development.conf.template:/etc/nginx/templates/default.conf.template:ro
+      - ./infra/nginx/development.conf:/etc/nginx/conf.d/default.conf:ro
       # vverzeichnis-mount entfernt, damit nginx keine privaten CA und Schlüssel enthält
       - ./.local/tls/server.crt:/etc/nginx/tls/server.crt:ro
       - ./.local/tls/server.key:/etc/nginx/tls/server.key:ro
-      - ./.local/tls/ca.crt:/etc/nginx/tls/ca.crt:ro
       - ./.local/tls/terminal-client-ca.crt:/etc/nginx/tls/terminal-client-ca.crt:ro
     depends_on:
       tls-init:
