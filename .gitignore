@@ -20,3 +20,5 @@ terminal/scan-puffer.jsonl
 diagramme/**/*.drawio
 diagramme/**/backup/*
 diagramme/**/old/*
+docs/
+diagramme/
