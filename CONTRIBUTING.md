@@ -82,16 +82,11 @@ Die Backend-Integrationstests verwenden MySQL über Testcontainers und benötige
 Der Workflow `Quality checks` startet bei Pushes und Pull Requests. Er prüft:
 
 - Backend: Spotless, Checkstyle, Maven-Tests und Build;
-- Frontend: ESLint, Prettier, TypeScript-Typecheck, Vitest und Produktionsbuild.
+- Frontend: ESLint, Prettier, TypeScript-Typecheck, Vitest und Buildprüfung.
 
 Security-Scans sind derzeit nicht Bestandteil der Pipeline.
 
-Der Workflow `Publish Docker images` startet bei Pull Requests und Pushes auf `main`. Bei Pull Requests werden Backend- und Frontend-Images nur gebaut. Nach einem erfolgreichen Push auf `main` werden beide Images in die GitHub Container Registry veröffentlicht:
-
-- `ghcr.io/fes-wiesbaden/p4-gr5_schuelerzeiterfassung-backend`;
-- `ghcr.io/fes-wiesbaden/p4-gr5_schuelerzeiterfassung-frontend`.
-
-Jedes Image erhält den Commit-SHA und `latest`. Fehlgeschlagene Builds veröffentlichen keine Images. Die Infrastruktur-Images für MySQL und nginx werden nicht in GHCR veröffentlicht; TLS-Init wird lokal gebaut.
+Frontend und Backend werden ausschließlich lokal gestartet. Die Qualitätspipeline prüft weiterhin die Builds.
 
 Die lokale Compose-Umgebung startet MySQL und den mTLS-Proxy:
 
