@@ -183,6 +183,27 @@ class Issue21IntegrationTest {
   }
 
   @Test
+  void createsSingleDayPlanWithCalendarDeadline() {
+    LocalDate day = LocalDate.of(2027, 8, 31);
+
+    Long id = plans.create(3L, "Test-Eintaegig", day, day);
+
+    assertThat(
+            jdbc.queryForObject(
+                "SELECT COUNT(*) FROM block_plan WHERE id = ? AND starts_on = ? AND ends_on = ?",
+                Integer.class,
+                id,
+                day,
+                day))
+        .isEqualTo(1);
+    assertThat(
+            jdbc.queryForObject(
+                "SELECT COUNT(*) FROM deletion_date WHERE delete_after = '2028-02-29'",
+                Integer.class))
+        .isEqualTo(1);
+  }
+
+  @Test
   void concurrentPlansShareOneDeadline() throws Exception {
     LocalDate endsOn = LocalDate.of(2027, 8, 31);
     CyclicBarrier barrier = new CyclicBarrier(2);
