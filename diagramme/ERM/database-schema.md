@@ -1,8 +1,10 @@
 # Database Schema
 
-Dieses Dokument beschreibt das geplante MySQL-8-Schema des
-Tagesanwesenheitsmodells. Tabellen- und Spaltennamen sind Englisch,
-fachliche Statuswerte Deutsch.
+Dieses Dokument beschreibt das MySQL-8-Schema und die ergänzenden Fachregeln
+des Tagesanwesenheitsmodells. Flyway V1–V5 setzt das Schema einschließlich
+der Intervall-CHECKs um (#18, #20). Die beschriebenen Backend-Fachregeln sind
+Zielvorgaben; insbesondere die Planungsprüfungen aus #40 sind noch offen.
+Tabellen- und Spaltennamen sind Englisch, fachliche Statuswerte Deutsch.
 ## Grundregeln
 
 - Eine `attendance` gilt für einen Schüler und Kalendertag. Die
@@ -166,7 +168,7 @@ Start-/Endfelder wären redundant.
 | `room_id` | `BIGINT` | not null, foreign key to `room.id` | `2` |
 | `weekday` | `ENUM('MONTAG', 'DIENSTAG', 'MITTWOCH', 'DONNERSTAG', 'FREITAG')` | not null | `MONTAG` |
 | `start_time` | `TIME` | not null | `07:30:00` |
-| `end_time` | `TIME` | not null; backend checks `end_time > start_time` | `09:00:00` |
+| `end_time` | `TIME` | not null; DB CHECK `start_time <= end_time` (V5) | `09:00:00` |
 | `created_at` | `DATETIME` | not null, UTC | `2026-09-01 06:00:00` |
 | `changed_at` | `DATETIME` | not null, UTC | `2026-09-01 06:00:00` |
 
@@ -187,7 +189,7 @@ bestimmt `class_block_assignment`.
 | `id` | `BIGINT` | primary key, auto increment | `1` |
 | `name` | `VARCHAR(150)` | not null | `Blockplan Fachinformatik 2026/27` |
 | `starts_on` | `DATE` | not null | `2026-01-01` |
-| `ends_on` | `DATE` | not null; backend checks `ends_on >= starts_on` | `2026-12-23` |
+| `ends_on` | `DATE` | not null; DB CHECK `starts_on <= ends_on` (V4) | `2026-12-23` |
 | `created_at` | `DATETIME` | not null, UTC | `2025-12-01 08:00:00` |
 | `changed_at` | `DATETIME` | not null, UTC | `2025-12-01 08:00:00` |
 
@@ -207,7 +209,7 @@ unterrichtet werden.
 | `id` | `BIGINT` | primary key, auto increment | `4` |
 | `block_plan_id` | `BIGINT` | not null, foreign key to `block_plan.id` | `1` |
 | `starts_on` | `DATE` | not null | `2026-10-07` |
-| `ends_on` | `DATE` | not null; backend checks `ends_on >= starts_on` | `2026-11-10` |
+| `ends_on` | `DATE` | not null; DB CHECK `starts_on <= ends_on` (V3) | `2026-11-10` |
 | `created_at` | `DATETIME` | not null, UTC | `2026-09-01 06:00:00` |
 | `changed_at` | `DATETIME` | not null, UTC | `2026-09-01 06:00:00` |
 
@@ -445,12 +447,14 @@ Für den Planwechsel müssen alle Blöcke beendet, alle Tage abgeglichen und
 ein abschließender Reset durchgeführt sein. Die Klasse und ihre
 Schülerzuordnungen bleiben bestehen.
 
-Rohscans werden `14` Tage nach `raw_scan.created_at` gelöscht. Am Kalendertag
+Der Rohscan-Job läuft stündlich und löscht Scans ab einem Alter von `14`
+Tagen seit `raw_scan.created_at`. Bei störungsfreiem Betrieb beträgt die
+zusätzliche Wartezeit weniger als eine Stunde. Am Kalendertag
 `deletion_date.delete_after` um `00:00 Europe/Berlin` lädt der Retention-Job
 die fälligen Audits und merkt sich deren nichtleere `attendance_id`. Danach
-löscht er die Audits, die so ermittelten Attendances und die abgearbeitete
-`deletion_date`. Reset-Audits haben keine Attendance und werden nur selbst
-gelöscht. Der Job setzt keine Zeitkonten zurück. Blockpläne und
+löscht er die Audits und die so ermittelten Attendances. Die
+`deletion_date`-Zeilen bleiben erhalten. Reset-Audits haben keine Attendance
+und werden nur selbst gelöscht. Der Job setzt keine Zeitkonten zurück. Blockpläne und
 Blockzuordnungen werden beim jährlichen Planersatz getrennt behandelt;
 Stundenpläne und Klassen werden nur manuell gelöscht, wenn keine Referenzen
 mehr bestehen. Schüler, Staff, Terminals und Räume bleiben erhalten.
@@ -469,17 +473,24 @@ mehr bestehen. Schüler, Staff, Terminals und Räume bleiben erhalten.
 | Audit reconciliation | `INDEX(attendance_audit.attendance_id)`, `INDEX(attendance_audit.occurred_at)` |
 | Retention | `UNIQUE(deletion_date.delete_after)`, `INDEX(attendance_audit.deletion_date_id)` |
 | Reset audit | Multiple `ACCOUNT_RESET` audits per student and deletion date are allowed; each manual reset is audited. |
+| Interval order | DB CHECKs require `starts_on <= ends_on` for blocks and plans, and `start_time <= end_time` for slots (V3–V5); equal boundaries are allowed. |
 | Block validity | Backend rejects blocks outside their block plan and overlapping blocks in one plan. |
 | Timetable reuse | Backend rejects the same timetable for classes whose assigned blocks overlap in time. |
-| Slot validity | Backend checks `end_time > start_time` and rejects overlaps in one timetable. |
+| Slot validity | Backend planning must reject overlaps in one timetable (#40); interval order is enforced by the DB CHECK above. |
 | Room resolution | Backend rejects same-room slot overlaps across simultaneously active assignments. |
 | Audit actor | Backend enforces event-specific Staff/Terminal references and their mutual exclusion. |
 | Audit content | Backend enforces status-pair consistency; only a Reset-Audit may have no status change and two zero deltas. |
 | Minute accounts | Backend checks both accounts `>= 0`, locks and updates accounts with audit in one transaction. |
 | Reset boundary | Backend rejects corrections after the student's manual plan reset. |
 
-Intervall- und tabellenübergreifende Regeln liegen bewusst im Backend, weil
-MySQL-Checks keine konkurrierenden Zeilen zuverlässig vergleichen. Die
+Die Reihenfolge der Grenzen einer Zeile sichern die DB-CHECKs bei INSERT
+und UPDATE; gleiche Grenzen sind zulässig. Ungültige Bestandsdaten brechen
+die jeweilige Migration ab und werden nicht automatisch korrigiert oder
+gelöscht. Eine strengere fachliche Mindestdauer für Slots ist in den Issues
+nicht festgelegt.
+
+Überschneidungs- und tabellenübergreifende Regeln gehören dagegen ins Backend,
+weil MySQL-Checks keine konkurrierenden Zeilen zuverlässig vergleichen. Die
 betroffenen Planungszeilen werden beim Prüfen gesperrt, damit parallele
 Requests keine Überschneidung einschleusen.
 
