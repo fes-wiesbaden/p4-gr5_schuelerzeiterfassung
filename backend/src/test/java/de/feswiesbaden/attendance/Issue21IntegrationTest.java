@@ -47,10 +47,15 @@ class Issue21IntegrationTest {
   @Container @ServiceConnection static MySQLContainer<?> mysql = new MySQLContainer<>("mysql:8.0");
 
   @Autowired JdbcTemplate jdbc;
+
   @Autowired RfidUidService uids;
+
   @Autowired BlockPlanService plans;
+
   @Autowired DeletionDateService deletionDates;
+
   @Autowired RetentionService retention;
+
   @MockitoBean Clock clock;
 
   @BeforeEach
@@ -265,7 +270,9 @@ class Issue21IntegrationTest {
     assertThat(jdbc.queryForObject("SELECT @@session.time_zone", String.class)).isEqualTo("+00:00");
     assertThat(
             jdbc.queryForObject(
-                "SELECT COUNT(*) FROM information_schema.statistics WHERE table_schema = DATABASE() AND table_name = 'raw_scan' AND index_name = 'idx_raw_scan_created_at'",
+                "SELECT COUNT(*) FROM information_schema.statistics"
+                    + " WHERE table_schema = DATABASE() AND table_name = 'raw_scan'"
+                    + " AND index_name = 'idx_raw_scan_created_at'",
                 Integer.class))
         .isEqualTo(1);
     assertThat(retention.deleteRawScans()).isEqualTo(2);
@@ -281,7 +288,8 @@ class Issue21IntegrationTest {
         "INSERT INTO deletion_date (id, delete_after) VALUES (2, '2027-07-01'), (3, '2027-06-29')");
     jdbc.update("UPDATE attendance_audit SET deletion_date_id = 2 WHERE attendance_id = 8");
     jdbc.update(
-        "INSERT INTO attendance_audit (student_id, deletion_date_id, event_type, occurred_at) VALUES (1, 3, 'ACCOUNT_RESET', '2026-12-31')");
+        "INSERT INTO attendance_audit (student_id, deletion_date_id, event_type, occurred_at)"
+            + " VALUES (1, 3, 'ACCOUNT_RESET', '2026-12-31')");
     List<Map<String, Object>> students = jdbc.queryForList("SELECT * FROM student ORDER BY id");
     when(clock.instant()).thenReturn(Instant.parse("2027-06-29T21:59:59Z"));
     assertThat(retention.deleteHistory()).isEqualTo(1);

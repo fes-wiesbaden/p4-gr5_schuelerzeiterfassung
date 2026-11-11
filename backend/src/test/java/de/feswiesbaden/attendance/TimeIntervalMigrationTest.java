@@ -27,6 +27,7 @@ class TimeIntervalMigrationTest {
       List.of("block_assignment", "block_plan", "timetable_slot");
 
   private DriverManagerDataSource dataSource;
+
   private JdbcTemplate jdbc;
 
   @BeforeEach

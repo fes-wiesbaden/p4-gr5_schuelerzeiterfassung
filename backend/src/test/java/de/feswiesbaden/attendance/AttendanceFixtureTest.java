@@ -129,8 +129,11 @@ class AttendanceFixtureTest {
                 WHERE aa.student_id <> a.student_id
                   OR d.delete_after <> DATE_ADD(p.ends_on, INTERVAL 6 MONTH)
                   OR (aa.event_type = 'SCAN' AND (aa.terminal_id IS NULL OR aa.changed_by_staff_id IS NOT NULL))
-                  OR (aa.event_type = 'STATUS_CHANGE' AND (aa.changed_by_staff_id IS NULL OR aa.changed_by_staff_id <> c.class_teacher_id OR aa.terminal_id IS NOT NULL))
-                  OR (aa.event_type = 'DAILY_CLOSE' AND (aa.terminal_id IS NOT NULL OR aa.changed_by_staff_id IS NOT NULL))
+                  OR (aa.event_type = 'STATUS_CHANGE' AND (
+                    aa.changed_by_staff_id IS NULL OR aa.changed_by_staff_id <> c.class_teacher_id
+                    OR aa.terminal_id IS NOT NULL))
+                  OR (aa.event_type = 'DAILY_CLOSE' AND (
+                    aa.terminal_id IS NOT NULL OR aa.changed_by_staff_id IS NOT NULL))
                 """))
         .isZero();
     assertThat(

@@ -50,11 +50,17 @@ class Issue22IntegrationTest {
   @Container @ServiceConnection static MySQLContainer<?> mysql = new MySQLContainer<>("mysql:8.0");
 
   @LocalServerPort int port;
+
   @Autowired JdbcTemplate jdbc;
+
   @Autowired PasswordEncoder encoder;
+
   @Autowired ObjectMapper mapper;
+
   @Autowired SessionRegistry sessions;
+
   @Autowired ServletWebServerApplicationContext context;
+
   private String hash;
 
   @BeforeEach
@@ -313,8 +319,10 @@ class Issue22IntegrationTest {
 
   private class Client {
     private final Map<String, String> cookies = new HashMap<>();
+
     private final HttpClient http =
         HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build();
+
     private HttpResponse<String> last;
 
     String csrf() {

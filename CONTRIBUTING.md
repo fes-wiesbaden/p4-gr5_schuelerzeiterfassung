@@ -47,41 +47,54 @@ Commits werden nicht ohne ausdrückliche Anfrage geändert (`git commit --amend`
 Vor dem Pull Request:
 
 - den aufgabenspezifischen Diff auf unbeabsichtigte Änderungen prüfen;
+- eigenen und generierten Code auf Korrektheit, Sicherheit, Datenschutz, Duplikate und unnötige Komplexität prüfen;
 - alle relevanten Prüfungen und Tests erfolgreich ausführen;
 - die Akzeptanzkriterien des Issues gegen die Implementierung prüfen;
 - keine Geheimnisse, personenbezogenen Daten, lokalen Datenbanken, Debug-Dateien oder temporären Artefakte einschließen;
-- bei UI-Änderungen bereinigte Vorher-/Nachher-Bilder beifügen; unsichere Bilder nicht hochladen.
+- bei UI-Änderungen bereinigte Vorher-/Nachher-Bilder beifügen; keine sensiblen Daten, internen Kennungen oder RFID-UIDs hochladen.
 
 Vor dem Merge wird die PR geprüft und bei Qualitätsmängeln überarbeitet oder neu strukturiert. Eine vorhandene PR wird verbessert und anschließend gemergt, statt sie zu schließen und dieselbe Änderung als direkten Commit zu duplizieren.
 
-Für Issue- und PR-Arbeit wird die GitHub CLI verwendet. Pushes erfolgen nur mit ausdrücklicher Freigabe.
+Commits und Pushes erfolgen nur mit ausdrücklicher Freigabe.
 
 ## Qualitätsprüfungen
 
 Das Projekt verwendet System-Maven; ein Maven Wrapper ist nicht eingecheckt. Befehle werden aus dem Repository-Hauptverzeichnis ausgeführt:
 
 ```sh
-# Backend-Formatierung und Verifikation
-mvn spotless:check
-mvn spotless:apply
-mvn -pl backend test
-mvn -pl backend verify
+# Backend: Formatierung, Tests und Build
+mvn -pl backend spotless:check verify
+mvn -pl backend org.apache.maven.plugins:maven-checkstyle-plugin:3.6.0:check "-Dcheckstyle.config.location=config/checkstyle/checkstyle.xml"
+
+# Terminal: Formatierung, Tests und Build
+mvn -pl terminal spotless:check verify
+mvn -pl terminal org.apache.maven.plugins:maven-checkstyle-plugin:3.6.0:check "-Dcheckstyle.config.location=$PWD/backend/config/checkstyle/checkstyle.xml"
 
 # Frontend-Abhängigkeiten und Prüfungen
 npm --prefix frontend ci
 npm --prefix frontend run lint
 npm --prefix frontend run format:check
+npm --prefix frontend run typecheck
 npm --prefix frontend test
 npm --prefix frontend run build
 ```
 
-Die Backend-Integrationstests verwenden MySQL über Testcontainers und benötigen Docker. Nach `spotless:apply` erneut `mvn spotless:check` ausführen. GitHub Actions soll dieselben Befehle verwenden.
+Die Backend-Integrationstests verwenden MySQL 8 über Testcontainers und benötigen Docker; H2 ist kein Ersatz. Checkstyle erfasst Produktions- und Testquellen beider Java-Module. Formatierung bei Bedarf mit `mvn -pl 'backend,terminal' spotless:apply` korrigieren und danach erneut prüfen.
+
+JavaFX-Tests benötigen eine Anzeige. Unter Linux ohne Desktop `xvfb-run -a mvn -pl terminal spotless:check verify` verwenden.
+
+Zusätzlich nach Änderungsumfang prüfen:
+
+- UI: Playwright und lokale, von personenbezogenen Daten bereinigte Screenshots verwenden.
+- RFID: USB-Zustellung, Client- und Serverzertifikatsprüfung, gültige HTTPS-Zustellung, Bindung der Terminalidentität und Idempotenz doppelter Scans nachweisen.
+- Terminal: erfolgreiche Zustellung, persistierte und wiederholte Scans, neutrale synchrone Erfolgs- und Fehlerrückmeldungen sowie fehlende RFID-UIDs in UI, Logs, Browser-Speichern und Screenshots nachweisen.
 
 ## GitHub Actions
 
-Der Workflow `Quality checks` startet bei Pushes und Pull Requests. Er prüft:
+Der Workflow [Quality checks](.github/workflows/quality.yml) startet bei Pushes auf alle Branches. Er prüft:
 
 - Backend: Spotless, Checkstyle, Maven-Tests und Build;
+- Terminal: Spotless, Checkstyle, JavaFX-Tests unter Xvfb und Build;
 - Frontend: ESLint, Prettier, TypeScript-Typecheck, Vitest und Buildprüfung.
 
 Security-Scans sind derzeit nicht Bestandteil der Pipeline.
