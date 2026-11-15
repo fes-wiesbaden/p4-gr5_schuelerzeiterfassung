@@ -78,7 +78,7 @@ public class SecurityConfig {
                 new ChangeSessionIdAuthenticationStrategy(),
                 new RegisterSessionAuthenticationStrategy(sessions),
                 csrfAuthentication)) {
-          // ponytail: global registration lock; per-user locks if login throughput requires it.
+          // ponytail: globale Registrierungssperre; bei Login-Engpässen pro Benutzer sperren.
           @Override
           public synchronized void onAuthentication(
               Authentication authentication,

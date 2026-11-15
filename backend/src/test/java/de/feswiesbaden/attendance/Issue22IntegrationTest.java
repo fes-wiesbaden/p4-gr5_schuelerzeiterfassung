@@ -351,8 +351,8 @@ class Issue22IntegrationTest {
       var request =
           HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + port + path))
               .timeout(Duration.ofSeconds(15));
-      // Test-only direct HTTP transport; production clients send these cookies exclusively over
-      // HTTPS.
+      // Direkter HTTP-Zugriff nur im Test; produktive Clients senden diese Cookies ausschließlich
+      // über HTTPS.
       if (!cookies.isEmpty()) {
         request.header(
             "Cookie",
