@@ -1,6 +1,7 @@
 package de.feswiesbaden.attendance.repository;
 
 import java.sql.Statement;
+import java.time.LocalDate;
 import java.util.List;
 import java.util.Optional;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -94,6 +95,53 @@ public class SchoolClassRepository {
         key);
     return key.getKey().longValue();
   }
+
+  public Optional<ClassPlan> lockPlan(Long classId) {
+    return jdbc
+        .query(
+            "SELECT c.id, c.block_plan_id, c.timetable_id, p.starts_on, p.ends_on FROM school_class c"
+                + " JOIN block_plan p ON p.id = c.block_plan_id WHERE c.id = ? FOR UPDATE",
+            (row, index) ->
+                new ClassPlan(
+                    row.getLong("id"),
+                    row.getLong("block_plan_id"),
+                    row.getLong("timetable_id"),
+                    row.getDate("starts_on").toLocalDate(),
+                    row.getDate("ends_on").toLocalDate()),
+            classId)
+        .stream()
+        .findFirst();
+  }
+
+  public Optional<PlanDates> lockPlanDates(Long planId) {
+    return jdbc
+        .query(
+            "SELECT starts_on, ends_on FROM block_plan WHERE id = ? FOR SHARE",
+            (row, index) ->
+                new PlanDates(row.getDate(1).toLocalDate(), row.getDate(2).toLocalDate()),
+            planId)
+        .stream()
+        .findFirst();
+  }
+
+  public boolean hasUnfinishedBlocks(Long planId, LocalDate today) {
+    return !jdbc.queryForList(
+            "SELECT id FROM block_assignment WHERE block_plan_id = ? AND ends_on >= ? FOR UPDATE",
+            Long.class,
+            planId,
+            today)
+        .isEmpty();
+  }
+
+  public void replacePlan(Long classId, Long planId) {
+    jdbc.update("DELETE FROM class_block_assignment WHERE school_class_id = ?", classId);
+    jdbc.update("UPDATE school_class SET block_plan_id = ? WHERE id = ?", planId, classId);
+  }
+
+  public record ClassPlan(
+      Long classId, Long planId, Long timetableId, LocalDate startsOn, LocalDate endsOn) {}
+
+  public record PlanDates(LocalDate startsOn, LocalDate endsOn) {}
 
   public record ClassData(
       Long id, String classCode, Long classTeacherId, Long blockPlanId, Long timetableId) {}

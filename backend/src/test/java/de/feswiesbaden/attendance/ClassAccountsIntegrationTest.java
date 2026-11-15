@@ -1,0 +1,673 @@
+package de.feswiesbaden.attendance;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.when;
+
+import de.feswiesbaden.attendance.service.BlockPlanService;
+import de.feswiesbaden.attendance.service.RetentionService;
+import de.feswiesbaden.attendance.service.SchoolClassService;
+import de.feswiesbaden.attendance.service.StudentService;
+import java.time.Clock;
+import java.time.Instant;
+import java.time.LocalDate;
+import java.util.List;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CyclicBarrier;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.ValueSource;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
+import org.springframework.dao.DataAccessException;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.security.access.AccessDeniedException;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import org.springframework.test.context.jdbc.Sql;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
+import org.testcontainers.containers.MySQLContainer;
+import org.testcontainers.junit.jupiter.Container;
+import org.testcontainers.junit.jupiter.Testcontainers;
+
+@SpringBootTest(properties = "attendance.retention.scheduling.enabled=false")
+@Testcontainers
+@Sql("/fixtures/attendance.sql")
+class ClassAccountsIntegrationTest {
+  @Container @ServiceConnection static MySQLContainer<?> mysql = new MySQLContainer<>("mysql:8.0");
+
+  @Autowired JdbcTemplate jdbc;
+
+  @Autowired SchoolClassService classes;
+
+  @Autowired BlockPlanService plans;
+
+  @Autowired StudentService students;
+
+  @Autowired RetentionService retention;
+
+  @Autowired PlatformTransactionManager transactions;
+
+  @MockitoBean Clock clock;
+
+  @BeforeEach
+  void prepare() {
+    signIn("test.admin");
+    setTime("2026-09-14T08:45:00Z");
+    when(clock.withZone(any()))
+        .thenAnswer(invocation -> Clock.fixed(clock.instant(), invocation.getArgument(0)));
+  }
+
+  @AfterEach
+  void cleanup() {
+    SecurityContextHolder.clearContext();
+    for (String table :
+        List.of(
+            "attendance_audit",
+            "attendance",
+            "raw_scan",
+            "class_block_assignment",
+            "teacher_class",
+            "student",
+            "school_class",
+            "block_assignment",
+            "timetable_slot",
+            "terminal",
+            "room",
+            "staff",
+            "block_plan",
+            "timetable",
+            "deletion_date")) {
+      jdbc.update("DELETE FROM " + table);
+    }
+  }
+
+  @Test
+  void resetsTheClassRepeatedlyAndAuditsEveryStudentIncludingEmptyAccounts() {
+    var attendances = jdbc.queryForList("SELECT * FROM attendance ORDER BY id");
+    assertThat(classes.resetAccounts(1L, 1L)).isEqualTo(6);
+    assertThat(
+            jdbc.query(
+                "SELECT student_id, unexcused_minutes_delta, excused_minutes_delta"
+                    + " FROM attendance_audit WHERE event_type = 'ACCOUNT_RESET' ORDER BY id",
+                (row, index) -> List.of(row.getInt(1), row.getInt(2), row.getInt(3))))
+        .containsExactly(
+            List.of(1, -180, 0),
+            List.of(2, -90, 0),
+            List.of(3, -150, 0),
+            List.of(4, -30, -60),
+            List.of(5, 0, 0),
+            List.of(6, 0, 0));
+    assertThat(
+            jdbc.queryForObject(
+                "SELECT COUNT(*) FROM attendance_audit WHERE event_type = 'ACCOUNT_RESET'"
+                    + " AND changed_by_staff_id = 3 AND deletion_date_id = 1 AND attendance_id IS NULL"
+                    + " AND terminal_id IS NULL AND old_status IS NULL AND new_status IS NULL",
+                Integer.class))
+        .isEqualTo(6);
+    assertThat(classes.resetAccounts(1L, 1L)).isEqualTo(6);
+    assertThat(
+            jdbc.queryForObject(
+                "SELECT COUNT(*) FROM attendance_audit WHERE event_type = 'ACCOUNT_RESET'",
+                Integer.class))
+        .isEqualTo(12);
+    assertThat(
+            jdbc.queryForObject(
+                "SELECT SUM(unexcused_minutes_account + excused_minutes_account)"
+                    + " FROM student WHERE school_class_id = 1",
+                Integer.class))
+        .isZero();
+    assertThat(
+            jdbc.queryForObject(
+                "SELECT unexcused_minutes_account FROM student WHERE id = 7", Integer.class))
+        .isEqualTo(180);
+    assertThat(jdbc.queryForList("SELECT * FROM attendance ORDER BY id")).isEqualTo(attendances);
+    assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM raw_scan", Integer.class)).isEqualTo(7);
+  }
+
+  private void signIn(String username) {
+    SecurityContextHolder.getContext()
+        .setAuthentication(
+            UsernamePasswordAuthenticationToken.authenticated(username, null, List.of()));
+  }
+
+  @Test
+  void changesPlanAfterFinalResetAndKeepsClassStudentsAndTeachers() {
+    setTime("2026-12-31T23:00:00Z");
+    Long next = plans.create("Folgeplan", LocalDate.of(2027, 1, 1), LocalDate.of(2027, 12, 31));
+    assertThat(classes.resetAccounts(1L, 1L)).isEqualTo(6);
+    var students = jdbc.queryForList("SELECT * FROM student ORDER BY id");
+    var teachers =
+        jdbc.queryForList("SELECT * FROM teacher_class ORDER BY staff_id, school_class_id");
+    var audits = jdbc.queryForList("SELECT * FROM attendance_audit ORDER BY id");
+    setTime("2027-02-01T12:00:00Z");
+    classes.changeBlockPlan(1L, 1L, next);
+    assertThat(classes.list())
+        .contains(new SchoolClassService.ClassView(1L, "26TEST-A", 1L, next, 1L));
+    assertThat(
+            jdbc.queryForObject(
+                "SELECT COUNT(*) FROM class_block_assignment WHERE school_class_id = 1",
+                Integer.class))
+        .isZero();
+    assertThat(
+            jdbc.queryForObject(
+                "SELECT COUNT(*) FROM class_block_assignment WHERE school_class_id IN (2, 3)",
+                Integer.class))
+        .isEqualTo(2);
+    assertThat(jdbc.queryForList("SELECT * FROM student ORDER BY id")).isEqualTo(students);
+    assertThat(jdbc.queryForList("SELECT * FROM teacher_class ORDER BY staff_id, school_class_id"))
+        .isEqualTo(teachers);
+    assertThat(jdbc.queryForList("SELECT * FROM attendance_audit ORDER BY id")).isEqualTo(audits);
+  }
+
+  @Test
+  void rejectsBookedMinutesOnAnUnplannedDayInsteadOfTrustingTheAccountBalance() {
+    setTime("2026-09-15T16:00:00Z");
+    jdbc.update(
+        "INSERT INTO attendance (id, student_id, attendance_date, status) VALUES (20, 1, '2026-09-15', 'ABWESEND')");
+    jdbc.update(
+        "INSERT INTO attendance_audit (student_id, attendance_id, deletion_date_id, event_type,"
+            + " occurred_at, unexcused_minutes_delta) VALUES (1, 20, 1, 'DAILY_CLOSE', '2026-09-15 12:00:00', 60)");
+    jdbc.update("UPDATE student SET unexcused_minutes_account = 240 WHERE id = 1");
+    assertThatThrownBy(() -> classes.resetAccounts(1L, 1L)).hasMessage("CLASS_NOT_FULLY_ACCOUNTED");
+    assertThat(
+            jdbc.queryForObject(
+                "SELECT unexcused_minutes_account FROM student WHERE id = 1", Integer.class))
+        .isEqualTo(240);
+    assertThat(
+            jdbc.queryForObject(
+                "SELECT COUNT(*) FROM attendance_audit WHERE event_type = 'ACCOUNT_RESET'",
+                Integer.class))
+        .isZero();
+  }
+
+  @Test
+  void storesResetTimeAtDatabasePrecisionForImmediateRepeat() {
+    setTime("2026-09-14T08:45:00.900Z");
+    assertThat(classes.resetAccounts(1L, 1L)).isEqualTo(6);
+    assertThat(classes.resetAccounts(1L, 1L)).isEqualTo(6);
+    assertThat(
+            jdbc.queryForObject(
+                "SELECT MAX(occurred_at) FROM attendance_audit WHERE event_type = 'ACCOUNT_RESET'",
+                java.sql.Timestamp.class))
+        .isEqualTo(java.sql.Timestamp.valueOf("2026-09-14 08:45:00"));
+  }
+
+  @Test
+  void zeroLengthSlotsNeitherBlockResetNorRequireAttendance() {
+    jdbc.update("INSERT INTO timetable (id, name) VALUES (3, 'Nullzeit')");
+    jdbc.update(
+        "INSERT INTO timetable_slot (timetable_id, room_id, weekday, start_time, end_time)"
+            + " VALUES (3, 1, 'MONTAG', '12:00:00', '12:00:00')");
+    Long classId = classes.create("Nullzeit", 1L, 1L, 3L);
+    jdbc.update(
+        "INSERT INTO class_block_assignment (school_class_id, block_assignment_id) VALUES (?, 1)",
+        classId);
+    Long studentId = students.create(classId, "Test", "Nullzeit", LocalDate.of(2008, 1, 1));
+    jdbc.update("UPDATE student SET created_at = '2026-09-14 04:00:00' WHERE id = ?", studentId);
+    setTime("2026-09-14T05:00:00Z");
+    assertThat(classes.resetAccounts(classId, 1L)).isEqualTo(1);
+    assertThat(
+            jdbc.queryForObject(
+                "SELECT COUNT(*) FROM attendance WHERE student_id = ?", Integer.class, studentId))
+        .isZero();
+  }
+
+  @ParameterizedTest
+  @ValueSource(strings = {"test.teacher.a", "test.teacher.b", "test.unknown", "missing"})
+  void bothOperationsRequireCurrentAdministrator(String username) {
+    Long next = nextPlan();
+    if (username.equals("missing")) {
+      SecurityContextHolder.clearContext();
+    } else {
+      signIn(username);
+    }
+    assertThatThrownBy(() -> classes.resetAccounts(1L, 1L))
+        .isInstanceOf(AccessDeniedException.class);
+    assertThatThrownBy(() -> classes.changeBlockPlan(1L, 1L, next))
+        .isInstanceOf(AccessDeniedException.class);
+    assertThat(resetCount()).isZero();
+  }
+
+  @Test
+  void rejectsMissingClassesAndStaleExpectedPlansWithoutChangingAccounts() {
+    assertThatThrownBy(() -> classes.resetAccounts(999L, 1L)).hasMessage("CLASS_NOT_FOUND");
+    assertThatThrownBy(() -> classes.resetAccounts(1L, 999L)).hasMessage("CLASS_PLAN_CHANGED");
+    assertThatThrownBy(() -> classes.changeBlockPlan(1L, 999L, 2L))
+        .hasMessage("CLASS_PLAN_CHANGED");
+    assertThat(
+            jdbc.queryForObject(
+                "SELECT unexcused_minutes_account FROM student WHERE id = 1", Integer.class))
+        .isEqualTo(180);
+    assertThat(resetCount()).isZero();
+  }
+
+  @ParameterizedTest
+  @ValueSource(strings = {"2026-09-14T05:29:59Z", "2026-09-14T07:01:00Z", "2026-09-14T08:44:59Z"})
+  void rejectsResetBeforeAllOfTodaysSlotsHaveEnded(String now) {
+    setTime(now);
+    assertThatThrownBy(() -> classes.resetAccounts(1L, 1L)).hasMessage("CLASS_HAS_REMAINING_SLOTS");
+    assertThat(resetCount()).isZero();
+  }
+
+  @ParameterizedTest
+  @ValueSource(
+      strings = {
+        "missing_attendance",
+        "wrong_total",
+        "missing_status",
+        "wrong_status",
+        "wrong_account",
+        "audit_without_attendance",
+        "foreign_attendance"
+      })
+  void rejectsIncompleteOrInconsistentDailyAccounting(String defect) {
+    switch (defect) {
+      case "missing_attendance" -> {
+        jdbc.update("DELETE FROM attendance_audit WHERE attendance_id = 1");
+        jdbc.update("DELETE FROM attendance WHERE id = 1");
+        jdbc.update("UPDATE student SET unexcused_minutes_account = 0 WHERE id = 1");
+      }
+      case "wrong_total" -> {
+        jdbc.update("UPDATE attendance_audit SET unexcused_minutes_delta = 179 WHERE id = 1");
+        jdbc.update("UPDATE student SET unexcused_minutes_account = 179 WHERE id = 1");
+      }
+      case "missing_status" ->
+          jdbc.update("UPDATE attendance_audit SET new_status = NULL WHERE id = 8");
+      case "wrong_status" -> jdbc.update("UPDATE attendance SET status = 'BETRIEB' WHERE id = 5");
+      case "wrong_account" ->
+          jdbc.update("UPDATE student SET unexcused_minutes_account = 179 WHERE id = 1");
+      case "audit_without_attendance", "foreign_attendance" -> {
+        jdbc.update(
+            "INSERT INTO attendance_audit (student_id, attendance_id, deletion_date_id, event_type, occurred_at,"
+                + " unexcused_minutes_delta) VALUES (1, ?, 1, 'DAILY_CLOSE', '2026-09-14 08:45:00', 60)",
+            defect.equals("foreign_attendance") ? 7L : null);
+        jdbc.update("UPDATE student SET unexcused_minutes_account = 240 WHERE id = 1");
+      }
+      default -> throw new AssertionError(defect);
+    }
+    var accounts = jdbc.queryForList("SELECT * FROM student ORDER BY id");
+    assertThatThrownBy(() -> classes.resetAccounts(1L, 1L)).hasMessage("CLASS_NOT_FULLY_ACCOUNTED");
+    assertThat(jdbc.queryForList("SELECT * FROM student ORDER BY id")).isEqualTo(accounts);
+    assertThat(resetCount()).isZero();
+  }
+
+  @ParameterizedTest
+  @CsvSource({
+    "ANWESEND,0,0",
+    "BETRIEB,0,0",
+    "ABWESEND,180,0",
+    "ENTSCHULDIGT,0,180",
+    "MIT_ATTEST_ENTSCHULDIGT,0,180",
+    "BETRIEBLICH_ENTSCHULDIGT,0,180"
+  })
+  void verifiesTheDocumentedMinuteContributionOfEveryStatus(
+      String status, int unexcused, int excused) {
+    jdbc.update("UPDATE attendance SET status = ? WHERE id = 5", status);
+    jdbc.update(
+        "UPDATE attendance_audit SET event_type = ?, new_status = ?, terminal_id = NULL,"
+            + " changed_by_staff_id = ?, unexcused_minutes_delta = ?, excused_minutes_delta = ? WHERE id = 8",
+        status.equals("ABWESEND") ? "DAILY_CLOSE" : "STATUS_CHANGE",
+        status.equals("ABWESEND") ? null : status,
+        status.equals("ABWESEND") ? null : 3L,
+        unexcused,
+        excused);
+    jdbc.update(
+        "UPDATE student SET unexcused_minutes_account = ?, excused_minutes_account = ? WHERE id = 5",
+        unexcused,
+        excused);
+    assertThat(classes.resetAccounts(1L, 1L)).isEqualTo(6);
+    assertThat(
+            jdbc.queryForObject(
+                "SELECT unexcused_minutes_delta FROM attendance_audit"
+                    + " WHERE student_id = 5 AND event_type = 'ACCOUNT_RESET'",
+                Integer.class))
+        .isEqualTo(-unexcused);
+    assertThat(
+            jdbc.queryForObject(
+                "SELECT excused_minutes_delta FROM attendance_audit"
+                    + " WHERE student_id = 5 AND event_type = 'ACCOUNT_RESET'",
+                Integer.class))
+        .isEqualTo(-excused);
+  }
+
+  @ParameterizedTest
+  @CsvSource({"ABWESEND,1", "ENTSCHULDIGT,0"})
+  void roundsOnlyAfterAddingEverySlotPerAccountAndNeverCountsPauses(
+      String secondStatus, int unexcused) {
+    jdbc.update("UPDATE attendance_audit SET occurred_at = '2026-09-14 05:30:30' WHERE id = 8");
+    jdbc.update(
+        "INSERT INTO attendance_audit (student_id, attendance_id, deletion_date_id, event_type,"
+            + " changed_by_staff_id, old_status, new_status, occurred_at)"
+            + " VALUES (5, 5, 1, 'STATUS_CHANGE', 3, 'ANWESEND', ?, '2026-09-14 07:00:00')",
+        secondStatus);
+    jdbc.update(
+        "INSERT INTO attendance_audit (student_id, attendance_id, deletion_date_id, event_type,"
+            + " terminal_id, old_status, new_status, occurred_at, unexcused_minutes_delta)"
+            + " VALUES (5, 5, 1, 'SCAN', 9001, ?, 'ANWESEND', '2026-09-14 07:15:30', ?)",
+        secondStatus,
+        unexcused);
+    jdbc.update("UPDATE student SET unexcused_minutes_account = ? WHERE id = 5", unexcused);
+    assertThat(classes.resetAccounts(1L, 1L)).isEqualTo(6);
+  }
+
+  @Test
+  void resolvesSameTimestampStatusEventsByTheirAuditId() {
+    jdbc.update(
+        "INSERT INTO attendance_audit (student_id, attendance_id, deletion_date_id, event_type,"
+            + " changed_by_staff_id, old_status, new_status, occurred_at, unexcused_minutes_delta)"
+            + " VALUES (3, 3, 1, 'STATUS_CHANGE', 3, 'ABWESEND', 'ANWESEND', '2026-09-14 06:00:00', -150)");
+    jdbc.update("UPDATE student SET unexcused_minutes_account = 0 WHERE id = 3");
+    jdbc.update("UPDATE attendance SET status = 'ANWESEND' WHERE id = 3");
+    assertThat(classes.resetAccounts(1L, 1L)).isEqualTo(6);
+  }
+
+  @Test
+  void rejectsLaterBookingsOnTheResetDayAndDoesNotRebookEarlierDays() {
+    assertThat(classes.resetAccounts(1L, 1L)).isEqualTo(6);
+    setTime("2026-09-14T09:00:00Z");
+    jdbc.update(
+        "INSERT INTO attendance_audit (student_id, attendance_id, deletion_date_id, event_type,"
+            + " changed_by_staff_id, old_status, new_status, occurred_at, unexcused_minutes_delta)"
+            + " VALUES (5, 5, 1, 'STATUS_CHANGE', 3, 'ANWESEND', 'ABWESEND', '2026-09-14 05:30:00', 180)");
+    jdbc.update("UPDATE student SET unexcused_minutes_account = 180 WHERE id = 5");
+    jdbc.update("UPDATE attendance SET status = 'ABWESEND' WHERE id = 5");
+    assertThatThrownBy(() -> classes.resetAccounts(1L, 1L)).hasMessage("RESET_DAY_LOCKED");
+    assertThat(resetCount()).isEqualTo(6);
+    assertThat(
+            jdbc.queryForObject(
+                "SELECT unexcused_minutes_account FROM student WHERE id = 5", Integer.class))
+        .isEqualTo(180);
+  }
+
+  @Test
+  void aPriorResetCannotHideAnUnaccountedLaterPlannedDay() {
+    classes.resetAccounts(1L, 1L);
+    jdbc.update(
+        "INSERT INTO block_assignment (id, block_plan_id, starts_on, ends_on)"
+            + " VALUES (3, 1, '2026-09-28', '2026-10-02')");
+    jdbc.update(
+        "INSERT INTO class_block_assignment (school_class_id, block_assignment_id) VALUES (1, 3)");
+    setTime("2026-09-28T08:45:00Z");
+    assertThatThrownBy(() -> classes.resetAccounts(1L, 1L)).hasMessage("CLASS_NOT_FULLY_ACCOUNTED");
+    assertThat(resetCount()).isEqualTo(6);
+  }
+
+  @ParameterizedTest
+  @CsvSource({"2026-09-14T08:45:00,true", "2026-09-14T22:30:00,false"})
+  void expectedDaysStartWithTheWholeBerlinEnrollmentDay(
+      java.time.LocalDateTime enrolled, boolean monday) {
+    Long student = students.create(1L, "Test", "Aufnahme", LocalDate.of(2008, 1, 1));
+    jdbc.update("UPDATE student SET created_at = ? WHERE id = ?", enrolled, student);
+    setTime("2026-09-15T16:00:00Z");
+    if (monday) {
+      assertThatThrownBy(() -> classes.resetAccounts(1L, 1L))
+          .hasMessage("CLASS_NOT_FULLY_ACCOUNTED");
+      jdbc.update(
+          "INSERT INTO attendance (id, student_id, attendance_date, status) VALUES (20, ?, '2026-09-14', 'ABWESEND')",
+          student);
+      jdbc.update(
+          "INSERT INTO attendance_audit (student_id, attendance_id, deletion_date_id, event_type,"
+              + " occurred_at, unexcused_minutes_delta) VALUES (?, 20, 1, 'DAILY_CLOSE', '2026-09-14 08:45:00', 180)",
+          student);
+      jdbc.update("UPDATE student SET unexcused_minutes_account = 180 WHERE id = ?", student);
+    }
+    assertThat(classes.resetAccounts(1L, 1L)).isEqualTo(7);
+  }
+
+  @Test
+  void auditFailureOnTheSecondStudentRollsBackEveryAccountAndAudit() {
+    var accounts = jdbc.queryForList("SELECT * FROM student ORDER BY id");
+    var audits = jdbc.queryForList("SELECT * FROM attendance_audit ORDER BY id");
+    jdbc.execute(
+        "ALTER TABLE attendance_audit ADD CONSTRAINT test_reject_reset"
+            + " CHECK (event_type <> 'ACCOUNT_RESET' OR student_id <> 2)");
+    try {
+      assertThatThrownBy(() -> classes.resetAccounts(1L, 1L))
+          .isInstanceOf(DataAccessException.class);
+      assertThat(jdbc.queryForList("SELECT * FROM student ORDER BY id")).isEqualTo(accounts);
+      assertThat(jdbc.queryForList("SELECT * FROM attendance_audit ORDER BY id")).isEqualTo(audits);
+    } finally {
+      jdbc.execute("ALTER TABLE attendance_audit DROP CHECK test_reject_reset");
+    }
+  }
+
+  @Test
+  void planChangeNeedsPlanEndAndAFinalResetAfterThatBerlinDay() {
+    Long next = nextPlan();
+    setTime("2026-12-31T22:59:59Z");
+    classes.resetAccounts(1L, 1L);
+    assertThatThrownBy(() -> classes.changeBlockPlan(1L, 1L, next))
+        .hasMessage("CURRENT_PLAN_NOT_FINISHED");
+    setTime("2026-12-31T23:00:00Z");
+    assertThatThrownBy(() -> classes.changeBlockPlan(1L, 1L, next))
+        .hasMessage("FINAL_CLASS_RESET_REQUIRED");
+    classes.resetAccounts(1L, 1L);
+    classes.changeBlockPlan(1L, 1L, next);
+    assertThatThrownBy(() -> classes.resetAccounts(1L, 1L)).hasMessage("CLASS_PLAN_CHANGED");
+  }
+
+  @Test
+  void planChangeRejectsUnfinishedOldBlocksAndOverlappingOrMissingNewPlans() {
+    Long next = nextPlan();
+    setTime("2026-12-31T23:00:00Z");
+    jdbc.update(
+        "INSERT INTO block_assignment (id, block_plan_id, starts_on, ends_on)"
+            + " VALUES (3, 1, '2027-01-01', '2027-01-03')");
+    assertThatThrownBy(() -> classes.changeBlockPlan(1L, 1L, next))
+        .hasMessage("CURRENT_PLAN_NOT_FINISHED");
+    jdbc.update("DELETE FROM block_assignment WHERE id = 3");
+    assertThatThrownBy(() -> classes.changeBlockPlan(1L, 1L, 999L))
+        .hasMessage("BLOCK_PLAN_NOT_FOUND");
+    Long overlap =
+        plans.create("Ueberlappend", LocalDate.of(2026, 12, 31), LocalDate.of(2027, 12, 31));
+    assertThatThrownBy(() -> classes.changeBlockPlan(1L, 1L, overlap))
+        .hasMessage("NEXT_PLAN_OVERLAPS_CURRENT_PLAN");
+    assertThatThrownBy(() -> classes.changeBlockPlan(1L, 1L, next))
+        .hasMessage("CLASS_ACCOUNTS_NOT_EMPTY");
+    assertThat(resetCount()).isZero();
+  }
+
+  @Test
+  void aNewStudentAfterFinalResetRequiresAnotherClassReset() {
+    Long next = nextPlan();
+    setTime("2026-12-31T23:00:00Z");
+    classes.resetAccounts(1L, 1L);
+    Long added = students.create(1L, "Test", "Nachaufnahme", LocalDate.of(2008, 1, 1));
+    jdbc.update("UPDATE student SET created_at = '2027-01-01 00:01:00' WHERE id = ?", added);
+    setTime("2027-01-01T00:02:00Z");
+    assertThatThrownBy(() -> classes.changeBlockPlan(1L, 1L, next))
+        .hasMessage("FINAL_CLASS_RESET_REQUIRED");
+    assertThat(classes.resetAccounts(1L, 1L)).isEqualTo(7);
+    classes.changeBlockPlan(1L, 1L, next);
+  }
+
+  @Test
+  void rejectsFinishedTargetWithSharedRetentionDate() {
+    Long first = plans.create("August-A", LocalDate.of(2026, 8, 1), LocalDate.of(2026, 8, 30));
+    Long finished = plans.create("August-B", LocalDate.of(2026, 8, 31), LocalDate.of(2026, 8, 31));
+    Long classId = classes.create("26Kollision", 1L, first, 1L);
+    Long student = students.create(classId, "Test", "Kollision", LocalDate.of(2008, 1, 1));
+    jdbc.update("UPDATE student SET created_at = '2026-08-01 00:00:00' WHERE id = ?", student);
+    setTime("2026-09-01T10:00:00Z");
+    classes.resetAccounts(classId, first);
+    assertThat(
+            jdbc.queryForObject(
+                "SELECT COUNT(*) FROM deletion_date WHERE delete_after = '2027-02-28'",
+                Integer.class))
+        .isEqualTo(1);
+
+    assertThatThrownBy(() -> classes.changeBlockPlan(classId, first, finished))
+        .hasMessage("NEXT_PLAN_FINISHED");
+    assertThat(classes.list())
+        .filteredOn(schoolClass -> schoolClass.id().equals(classId))
+        .extracting(SchoolClassService.ClassView::blockPlanId)
+        .containsExactly(first);
+  }
+
+  @ParameterizedTest
+  @ValueSource(strings = {"2027-01-02", "2027-12-31"})
+  void acceptsRunningTargetWithPastStartDate(LocalDate endsOn) {
+    Long next = plans.create("Laufend", LocalDate.of(2027, 1, 1), endsOn);
+    setTime("2027-01-02T12:00:00Z");
+    classes.resetAccounts(1L, 1L);
+
+    classes.changeBlockPlan(1L, 1L, next);
+
+    assertThat(classes.list())
+        .filteredOn(schoolClass -> schoolClass.id().equals(1L))
+        .extracting(SchoolClassService.ClassView::blockPlanId)
+        .containsExactly(next);
+  }
+
+  @Test
+  void expiredHistoryIsUnnecessaryForResetAndPlanChangeWithoutExtendingRetention() {
+    Long next = nextPlan();
+    setTime("2027-06-29T22:00:00Z");
+    assertThat(retention.deleteHistory()).isEqualTo(11);
+    assertThat(classes.resetAccounts(1L, 1L)).isEqualTo(6);
+    assertThat(
+            jdbc.queryForObject(
+                "SELECT delete_after FROM deletion_date WHERE id = 1", LocalDate.class))
+        .isEqualTo(LocalDate.of(2027, 6, 30));
+    assertThat(retention.deleteHistory()).isEqualTo(6);
+    assertThat(resetCount()).isZero();
+    classes.changeBlockPlan(1L, 1L, next);
+    assertThat(
+            jdbc.queryForObject(
+                "SELECT COUNT(*) FROM attendance WHERE student_id IN (1,2,3,4,5,6)", Integer.class))
+        .isZero();
+    assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM raw_scan", Integer.class)).isEqualTo(7);
+  }
+
+  @Test
+  void missingHistoryBeforeRetentionExpiryStillPreventsReset() {
+    setTime("2027-06-29T21:59:59Z");
+    jdbc.update("DELETE FROM attendance_audit");
+    jdbc.update("DELETE FROM attendance");
+    assertThatThrownBy(() -> classes.resetAccounts(1L, 1L)).hasMessage("CLASS_NOT_FULLY_ACCOUNTED");
+    assertThat(resetCount()).isZero();
+  }
+
+  @Test
+  void anEmptyClassCanResetButCannotChangePlan() {
+    setTime("2026-12-31T23:00:00Z");
+    Long empty = classes.create("Leer", 1L, 1L, 1L);
+    assertThat(classes.resetAccounts(empty, 1L)).isZero();
+    assertThatThrownBy(() -> classes.changeBlockPlan(empty, 1L, nextPlan()))
+        .hasMessage("CLASS_HAS_NO_STUDENTS");
+    assertThat(resetCount()).isZero();
+  }
+
+  private int resetCount() {
+    return jdbc.queryForObject(
+        "SELECT COUNT(*) FROM attendance_audit WHERE event_type = 'ACCOUNT_RESET'", Integer.class);
+  }
+
+  @Test
+  void concurrentResetsEachAuditTheWholeClass() throws Exception {
+    var barrier = new CyclicBarrier(2);
+    try (var workers = Executors.newFixedThreadPool(2)) {
+      var first = workers.submit(() -> resetTogether(barrier));
+      var second = workers.submit(() -> resetTogether(barrier));
+      assertThat(first.get(20, TimeUnit.SECONDS)).isEqualTo(6);
+      assertThat(second.get(20, TimeUnit.SECONDS)).isEqualTo(6);
+    }
+    assertThat(
+            jdbc.queryForList(
+                "SELECT COUNT(*) FROM attendance_audit WHERE event_type = 'ACCOUNT_RESET'"
+                    + " GROUP BY student_id ORDER BY student_id",
+                Integer.class))
+        .containsExactly(2, 2, 2, 2, 2, 2);
+  }
+
+  @Test
+  void resetWaitsForConcurrentEnrollmentAndIncludesTheNewStudent() throws Exception {
+    setTime("2026-12-31T23:00:00Z");
+    classes.resetAccounts(1L, 1L);
+    setTime("2027-01-01T00:02:00Z");
+    var created = new CompletableFuture<Long>();
+    var release = new CompletableFuture<Void>();
+    var attempted = new CompletableFuture<Void>();
+    try (var workers = Executors.newFixedThreadPool(2)) {
+      var enrollment =
+          workers.submit(
+              () -> {
+                signIn("test.teacher.a");
+                try {
+                  return new TransactionTemplate(transactions)
+                      .execute(
+                          transaction -> {
+                            Long id =
+                                students.create(1L, "Test", "Parallel", LocalDate.of(2008, 1, 1));
+                            jdbc.update(
+                                "UPDATE student SET created_at = '2027-01-01 00:01:00' WHERE id = ?",
+                                id);
+                            created.complete(id);
+                            release.join();
+                            return id;
+                          });
+                } finally {
+                  SecurityContextHolder.clearContext();
+                }
+              });
+      try {
+        Long studentId = created.get(10, TimeUnit.SECONDS);
+        var reset =
+            workers.submit(
+                () -> {
+                  signIn("test.admin");
+                  try {
+                    attempted.complete(null);
+                    return classes.resetAccounts(1L, 1L);
+                  } finally {
+                    SecurityContextHolder.clearContext();
+                  }
+                });
+        attempted.get(10, TimeUnit.SECONDS);
+        assertThatThrownBy(() -> reset.get(300, TimeUnit.MILLISECONDS))
+            .isInstanceOf(TimeoutException.class);
+        release.complete(null);
+        assertThat(enrollment.get(10, TimeUnit.SECONDS)).isEqualTo(studentId);
+        assertThat(reset.get(10, TimeUnit.SECONDS)).isEqualTo(7);
+        assertThat(
+                jdbc.queryForObject(
+                    "SELECT COUNT(*) FROM attendance_audit"
+                        + " WHERE event_type = 'ACCOUNT_RESET' AND student_id = ?",
+                    Integer.class,
+                    studentId))
+            .isEqualTo(1);
+      } finally {
+        release.complete(null);
+      }
+    }
+  }
+
+  private int resetTogether(CyclicBarrier barrier) throws Exception {
+    signIn("test.admin");
+    try {
+      barrier.await(10, TimeUnit.SECONDS);
+      return classes.resetAccounts(1L, 1L);
+    } finally {
+      SecurityContextHolder.clearContext();
+    }
+  }
+
+  private Long nextPlan() {
+    return plans.create("Folgeplan", LocalDate.of(2027, 1, 1), LocalDate.of(2027, 12, 31));
+  }
+
+  private void setTime(String instant) {
+    when(clock.instant()).thenReturn(Instant.parse(instant));
+  }
+}
