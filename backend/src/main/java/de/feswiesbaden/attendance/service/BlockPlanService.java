@@ -1,31 +1,31 @@
 package de.feswiesbaden.attendance.service;
 
 import de.feswiesbaden.attendance.entities.BlockPlan;
-import jakarta.persistence.EntityManager;
+import de.feswiesbaden.attendance.repository.BlockPlanRepository;
 import java.time.LocalDate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 @Service
 public class BlockPlanService {
-  private final EntityManager entityManager;
+  private final BlockPlanRepository plans;
 
-  private final AdminAuthorization authorization;
+  private final StaffAuthorization authorization;
 
   private final DeletionDateService deletionDates;
 
   public BlockPlanService(
-      EntityManager entityManager,
-      AdminAuthorization authorization,
+      BlockPlanRepository plans,
+      StaffAuthorization authorization,
       DeletionDateService deletionDates) {
-    this.entityManager = entityManager;
+    this.plans = plans;
     this.authorization = authorization;
     this.deletionDates = deletionDates;
   }
 
   @Transactional
-  public Long create(Long staffId, String name, LocalDate startsOn, LocalDate endsOn) {
-    authorization.requireAdministrator(staffId);
+  public Long create(String name, LocalDate startsOn, LocalDate endsOn) {
+    authorization.requireAdministrator();
     if (name == null
         || name.isBlank()
         || name.strip().length() > 150
@@ -38,7 +38,7 @@ public class BlockPlanService {
     plan.setName(name.strip());
     plan.setStartsOn(startsOn);
     plan.setEndsOn(endsOn);
-    entityManager.persist(plan);
+    plans.insert(plan);
     deletionDates.getOrCreate(endsOn);
     return plan.getId();
   }
