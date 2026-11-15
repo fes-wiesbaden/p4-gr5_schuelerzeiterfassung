@@ -1,10 +1,40 @@
 package de.feswiesbaden.terminal.transport;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
+import javax.net.ssl.SSLContext;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 class ScanSenderTest {
+
+  @ParameterizedTest
+  @ValueSource(
+      strings = {
+        "http://127.0.0.1/api/scans",
+        "ftp://127.0.0.1/api/scans",
+        "/api/scans",
+        "https:/api/scans"
+      })
+  void lehntAdressenOhneHttpsUndHostAb(String adresse) {
+    assertThrows(
+        IllegalArgumentException.class, () -> new ScanSender(adresse, SSLContext.getDefault()));
+  }
+
+  @Test
+  void verlangtEinenTlsKontext() {
+    assertThrows(
+        NullPointerException.class, () -> new ScanSender("https://127.0.0.1/api/scans", null));
+  }
+
+  @Test
+  void akzeptiertHttpsMitTlsKontext() {
+    assertDoesNotThrow(
+        () -> new ScanSender("https://127.0.0.1/api/scans", SSLContext.getDefault()));
+  }
 
   @Test
   void zweihundertIstEineErfolgreicheBuchung() {
