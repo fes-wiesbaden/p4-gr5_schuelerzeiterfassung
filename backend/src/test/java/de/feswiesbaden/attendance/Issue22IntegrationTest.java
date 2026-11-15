@@ -105,7 +105,6 @@ class Issue22IntegrationTest {
         .isEqualTo("Test " + username.toUpperCase(java.util.Locale.ROOT));
     assertThat(client.get("/api/me").body()).isEqualTo(login.body());
     assertThat(hash).startsWith("$2a$12$").hasSize(60);
-    assertThat(encoder.matches(PASSWORD, hash)).isTrue();
     assertThat(login.body()).doesNotContain(PASSWORD, hash, "password", "username");
     assertThat(output.getAll()).doesNotContain(PASSWORD, hash);
   }

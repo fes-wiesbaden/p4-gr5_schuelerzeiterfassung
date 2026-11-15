@@ -98,12 +98,12 @@ class TerminalViewTest {
     Platform.runLater(build);
     TerminalView view = build.get(10, TimeUnit.SECONDS);
     Label headline = (Label) view.node().lookup(".headline");
-    for (ScanState state : new ScanState[] {ScanState.SUCCESS, ScanState.QUEUED}) {
-      view.showState(state);
-      warteAufText(headline, state.headline());
-    }
+    view.showState(ScanState.SUCCESS);
+    warteAufText(headline, "Buchung erfolgreich");
+    view.showState(ScanState.QUEUED);
+    warteAufText(headline, "Lokal vorgemerkt");
     view.showError("04A3B2C1");
-    warteAufText(headline, ScanState.ERROR.headline());
+    warteAufText(headline, "Nicht gebucht");
     FutureTask<Void> check =
         new FutureTask<>(
             () -> {
