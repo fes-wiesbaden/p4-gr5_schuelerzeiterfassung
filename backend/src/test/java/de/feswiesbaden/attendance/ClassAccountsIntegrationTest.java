@@ -263,8 +263,6 @@ class ClassAccountsIntegrationTest {
   @ParameterizedTest
   @ValueSource(
       strings = {
-        "missing_attendance",
-        "wrong_total",
         "missing_status",
         "wrong_status",
         "wrong_account",
@@ -273,15 +271,6 @@ class ClassAccountsIntegrationTest {
       })
   void rejectsIncompleteOrInconsistentDailyAccounting(String defect) {
     switch (defect) {
-      case "missing_attendance" -> {
-        jdbc.update("DELETE FROM attendance_audit WHERE attendance_id = 1");
-        jdbc.update("DELETE FROM attendance WHERE id = 1");
-        jdbc.update("UPDATE student SET unexcused_minutes_account = 0 WHERE id = 1");
-      }
-      case "wrong_total" -> {
-        jdbc.update("UPDATE attendance_audit SET unexcused_minutes_delta = 179 WHERE id = 1");
-        jdbc.update("UPDATE student SET unexcused_minutes_account = 179 WHERE id = 1");
-      }
       case "missing_status" ->
           jdbc.update("UPDATE attendance_audit SET new_status = NULL WHERE id = 8");
       case "wrong_status" -> jdbc.update("UPDATE attendance SET status = 'BETRIEB' WHERE id = 5");
@@ -303,6 +292,32 @@ class ClassAccountsIntegrationTest {
   }
 
   @ParameterizedTest
+  @ValueSource(strings = {"missing_attendance", "partial_total"})
+  void completesMissingAccountingBeforeResetInsteadOfWaitingForTheNightJob(String missing) {
+    if (missing.equals("missing_attendance")) {
+      jdbc.update("DELETE FROM attendance_audit WHERE attendance_id = 1");
+      jdbc.update("DELETE FROM attendance WHERE id = 1");
+      jdbc.update("UPDATE student SET unexcused_minutes_account = 0 WHERE id = 1");
+    } else {
+      jdbc.update("UPDATE attendance_audit SET unexcused_minutes_delta = 179 WHERE id = 1");
+      jdbc.update("UPDATE student SET unexcused_minutes_account = 179 WHERE id = 1");
+    }
+    assertThat(classes.resetAccounts(1L, 1L)).isEqualTo(6);
+    assertThat(
+            jdbc.queryForObject(
+                "SELECT SUM(unexcused_minutes_delta) FROM attendance_audit"
+                    + " WHERE student_id = 1 AND event_type = 'DAILY_CLOSE'",
+                Integer.class))
+        .isEqualTo(180);
+    assertThat(
+            jdbc.queryForObject(
+                "SELECT unexcused_minutes_delta FROM attendance_audit"
+                    + " WHERE student_id = 1 AND event_type = 'ACCOUNT_RESET'",
+                Integer.class))
+        .isEqualTo(-180);
+  }
+
+  @ParameterizedTest
   @CsvSource({
     "ANWESEND,0,0",
     "BETRIEB,0,0",
@@ -315,10 +330,11 @@ class ClassAccountsIntegrationTest {
       String status, int unexcused, int excused) {
     jdbc.update("UPDATE attendance SET status = ? WHERE id = 5", status);
     jdbc.update(
-        "UPDATE attendance_audit SET event_type = ?, new_status = ?, terminal_id = NULL,"
+        "UPDATE attendance_audit SET event_type = ?, new_status = ?, old_status = ?, terminal_id = NULL,"
             + " changed_by_staff_id = ?, unexcused_minutes_delta = ?, excused_minutes_delta = ? WHERE id = 8",
         status.equals("ABWESEND") ? "DAILY_CLOSE" : "STATUS_CHANGE",
         status.equals("ABWESEND") ? null : status,
+        status.equals("ABWESEND") ? null : "ABWESEND",
         status.equals("ABWESEND") ? null : 3L,
         unexcused,
         excused);
@@ -391,7 +407,7 @@ class ClassAccountsIntegrationTest {
   }
 
   @Test
-  void aPriorResetCannotHideAnUnaccountedLaterPlannedDay() {
+  void aLaterResetFirstBooksTheNewPlannedDayAndThenResetsItsMinutes() {
     classes.resetAccounts(1L, 1L);
     jdbc.update(
         "INSERT INTO block_assignment (id, block_plan_id, starts_on, ends_on)"
@@ -399,8 +415,14 @@ class ClassAccountsIntegrationTest {
     jdbc.update(
         "INSERT INTO class_block_assignment (school_class_id, block_assignment_id) VALUES (1, 3)");
     setTime("2026-09-28T08:45:00Z");
-    assertThatThrownBy(() -> classes.resetAccounts(1L, 1L)).hasMessage("CLASS_NOT_FULLY_ACCOUNTED");
-    assertThat(resetCount()).isEqualTo(6);
+    assertThat(classes.resetAccounts(1L, 1L)).isEqualTo(6);
+    assertThat(resetCount()).isEqualTo(12);
+    assertThat(
+            jdbc.queryForObject(
+                "SELECT unexcused_minutes_delta FROM attendance_audit"
+                    + " WHERE student_id = 1 AND event_type = 'ACCOUNT_RESET' ORDER BY id DESC LIMIT 1",
+                Integer.class))
+        .isEqualTo(-180);
   }
 
   @ParameterizedTest
@@ -410,19 +432,14 @@ class ClassAccountsIntegrationTest {
     Long student = students.create(1L, "Test", "Aufnahme", LocalDate.of(2008, 1, 1));
     jdbc.update("UPDATE student SET created_at = ? WHERE id = ?", enrolled, student);
     setTime("2026-09-15T16:00:00Z");
-    if (monday) {
-      assertThatThrownBy(() -> classes.resetAccounts(1L, 1L))
-          .hasMessage("CLASS_NOT_FULLY_ACCOUNTED");
-      jdbc.update(
-          "INSERT INTO attendance (id, student_id, attendance_date, status) VALUES (20, ?, '2026-09-14', 'ABWESEND')",
-          student);
-      jdbc.update(
-          "INSERT INTO attendance_audit (student_id, attendance_id, deletion_date_id, event_type,"
-              + " occurred_at, unexcused_minutes_delta) VALUES (?, 20, 1, 'DAILY_CLOSE', '2026-09-14 08:45:00', 180)",
-          student);
-      jdbc.update("UPDATE student SET unexcused_minutes_account = 180 WHERE id = ?", student);
-    }
     assertThat(classes.resetAccounts(1L, 1L)).isEqualTo(7);
+    assertThat(
+            jdbc.queryForObject(
+                "SELECT unexcused_minutes_delta FROM attendance_audit"
+                    + " WHERE student_id = ? AND event_type = 'ACCOUNT_RESET'",
+                Integer.class,
+                student))
+        .isEqualTo(monday ? -180 : 0);
   }
 
   @Test

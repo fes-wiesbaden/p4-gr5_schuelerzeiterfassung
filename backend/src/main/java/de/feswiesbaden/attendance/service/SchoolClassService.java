@@ -88,6 +88,10 @@ public class SchoolClassService {
     var deadline = deletionDates.getOrCreate(plan.endsOn());
     var accounts = accounting.lockAccounts(classId);
     var now = LocalDateTime.ofInstant(clock.instant(), ZoneOffset.UTC);
+    verification.requireNoRemainingSlots(plan, now);
+    verification.completeDays(
+        plan, accounts, deadline.getId(), now.truncatedTo(ChronoUnit.SECONDS));
+    accounts = accounting.lockAccounts(classId);
     verification.requireFullyAccounted(plan, accounts, now);
     for (var account : accounts) {
       accounting.reset(account, actor.id(), deadline.getId(), now.truncatedTo(ChronoUnit.SECONDS));
