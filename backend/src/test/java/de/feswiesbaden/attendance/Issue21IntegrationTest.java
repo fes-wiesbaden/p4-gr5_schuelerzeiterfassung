@@ -33,6 +33,8 @@ import org.springframework.boot.testcontainers.service.connection.ServiceConnect
 import org.springframework.dao.DataAccessException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.access.AccessDeniedException;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.context.jdbc.Sql;
 import org.testcontainers.containers.MySQLContainer;
@@ -60,6 +62,7 @@ class Issue21IntegrationTest {
 
   @BeforeEach
   void fixTime() {
+    signIn("test.admin");
     when(clock.instant()).thenReturn(Instant.parse("2027-06-29T22:00:00Z"));
     when(clock.withZone(any()))
         .thenAnswer(invocation -> Clock.fixed(clock.instant(), invocation.getArgument(0)));
@@ -67,6 +70,7 @@ class Issue21IntegrationTest {
 
   @AfterEach
   void cleanup() {
+    SecurityContextHolder.clearContext();
     for (String table :
         List.of(
             "attendance_audit",
@@ -91,16 +95,16 @@ class Issue21IntegrationTest {
   @ParameterizedTest
   @ValueSource(strings = {"04A3B2C1", "04A3B2C1D2E3F4", "04A3B2C1D2E3F4A5B6C7"})
   void assignsReplacesAndRemovesUid(String uid) {
-    uids.assign(3L, 1L, uid);
-    uids.assign(3L, 1L, uid);
+    uids.assign(1L, uid);
+    uids.assign(1L, uid);
     assertThat(uidOf(1L)).isEqualTo(uid);
-    uids.assign(3L, 1L, "DEADBEEF");
+    uids.assign(1L, "DEADBEEF");
     assertThat(uidOf(1L)).isEqualTo("DEADBEEF");
-    uids.remove(3L, 1L);
-    uids.remove(3L, 2L);
+    uids.remove(1L);
+    uids.remove(2L);
     assertThat(uidOf(1L)).isNull();
     assertThat(uidOf(2L)).isNull();
-    uids.assign(3L, 2L, uid);
+    uids.assign(2L, uid);
     assertThat(uidOf(2L)).isEqualTo(uid);
   }
 
@@ -117,7 +121,7 @@ class Issue21IntegrationTest {
         "000000000000"
       })
   void rejectsInvalidUidWithoutChangingStudent(String uid) {
-    assertThatThrownBy(() -> uids.assign(3L, 1L, uid))
+    assertThatThrownBy(() -> uids.assign(1L, uid))
         .isInstanceOf(IllegalArgumentException.class)
         .hasMessage("INVALID_RFID_UID")
         .hasNoCause();
@@ -125,12 +129,12 @@ class Issue21IntegrationTest {
   }
 
   @ParameterizedTest
-  @ValueSource(longs = {1, 2, 999})
-  void rejectsNonAdministrators(Long staffId) {
-    assertThatThrownBy(() -> uids.assign(staffId, 1L, "04A3B2C1"))
-        .isInstanceOf(AccessDeniedException.class);
-    assertThatThrownBy(() -> uids.remove(staffId, 1L)).isInstanceOf(AccessDeniedException.class);
-    assertThatThrownBy(() -> plans.create(staffId, "Test", LocalDate.now(), LocalDate.now()))
+  @ValueSource(strings = {"test.teacher.a", "test.teacher.b", "test.unknown"})
+  void rejectsNonAdministrators(String username) {
+    signIn(username);
+    assertThatThrownBy(() -> uids.assign(1L, "04A3B2C1")).isInstanceOf(AccessDeniedException.class);
+    assertThatThrownBy(() -> uids.remove(1L)).isInstanceOf(AccessDeniedException.class);
+    assertThatThrownBy(() -> plans.create("Test", LocalDate.now(), LocalDate.now()))
         .isInstanceOf(AccessDeniedException.class);
     assertThat(uidOf(1L)).isEqualTo("TEST-UID-001");
     assertThat(count("block_plan")).isEqualTo(1);
@@ -138,17 +142,18 @@ class Issue21IntegrationTest {
 
   @Test
   void rejectsMissingActorAndStudent() {
-    assertThatThrownBy(() -> uids.assign(null, 1L, "04A3B2C1"))
-        .isInstanceOf(AccessDeniedException.class);
-    assertThatThrownBy(() -> uids.assign(3L, 999L, "04A3B2C1")).hasMessage("STUDENT_NOT_FOUND");
-    assertThatThrownBy(() -> uids.remove(3L, 999L)).hasMessage("STUDENT_NOT_FOUND");
+    SecurityContextHolder.clearContext();
+    assertThatThrownBy(() -> uids.assign(1L, "04A3B2C1")).isInstanceOf(AccessDeniedException.class);
+    signIn("test.admin");
+    assertThatThrownBy(() -> uids.assign(999L, "04A3B2C1")).hasMessage("STUDENT_NOT_FOUND");
+    assertThatThrownBy(() -> uids.remove(999L)).hasMessage("STUDENT_NOT_FOUND");
   }
 
   @Test
   void uidConflictPreservesAssignmentsAndDoesNotLeak(CapturedOutput output) {
     String uid = "04A3B2C1";
-    uids.assign(3L, 1L, uid);
-    assertThatThrownBy(() -> uids.assign(3L, 2L, uid))
+    uids.assign(1L, uid);
+    assertThatThrownBy(() -> uids.assign(2L, uid))
         .hasMessage("RFID_UID_ALREADY_ASSIGNED")
         .hasNoCause();
     assertThat(uidOf(1L)).isEqualTo(uid);
@@ -175,8 +180,8 @@ class Issue21IntegrationTest {
   @ParameterizedTest
   @CsvSource({"2027-08-31,2028-02-29", "2026-08-31,2027-02-28", "2026-12-31,2027-06-30"})
   void createsPlansWithReusableCalendarDeadline(LocalDate endsOn, LocalDate expected) {
-    Long first = plans.create(3L, "Test-A", endsOn.minusMonths(1), endsOn);
-    Long second = plans.create(3L, "Test-B", endsOn.minusMonths(1), endsOn);
+    Long first = plans.create("Test-A", endsOn.minusMonths(1), endsOn);
+    Long second = plans.create("Test-B", endsOn.minusMonths(1), endsOn);
     assertThat(first).isNotEqualTo(second);
     assertThat(
             jdbc.queryForObject(
@@ -191,7 +196,7 @@ class Issue21IntegrationTest {
   void createsSingleDayPlanWithCalendarDeadline() {
     LocalDate day = LocalDate.of(2027, 8, 31);
 
-    Long id = plans.create(3L, "Test-Eintaegig", day, day);
+    Long id = plans.create("Test-Eintaegig", day, day);
 
     assertThat(
             jdbc.queryForObject(
@@ -229,15 +234,12 @@ class Issue21IntegrationTest {
   void rejectsInvalidPlansBeforeWriting() {
     LocalDate start = LocalDate.of(2027, 1, 1);
     for (String name : List.of("", " ", "X".repeat(151))) {
-      assertThatThrownBy(() -> plans.create(3L, name, start, start))
-          .hasMessage("INVALID_BLOCK_PLAN");
+      assertThatThrownBy(() -> plans.create(name, start, start)).hasMessage("INVALID_BLOCK_PLAN");
     }
-    assertThatThrownBy(() -> plans.create(3L, null, start, start)).hasMessage("INVALID_BLOCK_PLAN");
-    assertThatThrownBy(() -> plans.create(3L, "Test", null, start))
-        .hasMessage("INVALID_BLOCK_PLAN");
-    assertThatThrownBy(() -> plans.create(3L, "Test", start, null))
-        .hasMessage("INVALID_BLOCK_PLAN");
-    assertThatThrownBy(() -> plans.create(3L, "Test", start, start.minusDays(1)))
+    assertThatThrownBy(() -> plans.create(null, start, start)).hasMessage("INVALID_BLOCK_PLAN");
+    assertThatThrownBy(() -> plans.create("Test", null, start)).hasMessage("INVALID_BLOCK_PLAN");
+    assertThatThrownBy(() -> plans.create("Test", start, null)).hasMessage("INVALID_BLOCK_PLAN");
+    assertThatThrownBy(() -> plans.create("Test", start, start.minusDays(1)))
         .hasMessage("INVALID_BLOCK_PLAN");
     assertThat(count("block_plan")).isEqualTo(1);
     assertThat(count("deletion_date")).isEqualTo(1);
@@ -249,7 +251,7 @@ class Issue21IntegrationTest {
         "ALTER TABLE deletion_date ADD CONSTRAINT test_reject_deadline CHECK (delete_after <> '2028-06-30')");
     try {
       assertThatThrownBy(
-              () -> plans.create(3L, "Test", LocalDate.of(2027, 1, 1), LocalDate.of(2027, 12, 31)))
+              () -> plans.create("Test", LocalDate.of(2027, 1, 1), LocalDate.of(2027, 12, 31)))
           .isInstanceOf(DataAccessException.class);
       assertThat(count("block_plan")).isEqualTo(1);
       assertThat(count("deletion_date")).isEqualTo(1);
@@ -327,9 +329,10 @@ class Issue21IntegrationTest {
   }
 
   private String assignTogether(CyclicBarrier barrier, Long studentId) throws Exception {
+    signIn("test.admin");
     barrier.await(10, TimeUnit.SECONDS);
     try {
-      uids.assign(3L, studentId, "04A3B2C1");
+      uids.assign(studentId, "04A3B2C1");
       return "ASSIGNED";
     } catch (IllegalArgumentException conflict) {
       return conflict.getMessage();
@@ -338,7 +341,14 @@ class Issue21IntegrationTest {
 
   private Long createTogether(CyclicBarrier barrier, String name, LocalDate endsOn)
       throws Exception {
+    signIn("test.admin");
     barrier.await(10, TimeUnit.SECONDS);
-    return plans.create(3L, name, endsOn.minusMonths(1), endsOn);
+    return plans.create(name, endsOn.minusMonths(1), endsOn);
+  }
+
+  private void signIn(String username) {
+    SecurityContextHolder.getContext()
+        .setAuthentication(
+            UsernamePasswordAuthenticationToken.authenticated(username, null, List.of()));
   }
 }

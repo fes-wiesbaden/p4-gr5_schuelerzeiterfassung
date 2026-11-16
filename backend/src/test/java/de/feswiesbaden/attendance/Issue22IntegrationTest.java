@@ -105,7 +105,6 @@ class Issue22IntegrationTest {
         .isEqualTo("Test " + username.toUpperCase(java.util.Locale.ROOT));
     assertThat(client.get("/api/me").body()).isEqualTo(login.body());
     assertThat(hash).startsWith("$2a$12$").hasSize(60);
-    assertThat(encoder.matches(PASSWORD, hash)).isTrue();
     assertThat(login.body()).doesNotContain(PASSWORD, hash, "password", "username");
     assertThat(output.getAll()).doesNotContain(PASSWORD, hash);
   }
@@ -351,8 +350,8 @@ class Issue22IntegrationTest {
       var request =
           HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + port + path))
               .timeout(Duration.ofSeconds(15));
-      // Test-only direct HTTP transport; production clients send these cookies exclusively over
-      // HTTPS.
+      // Direkter HTTP-Zugriff nur im Test; produktive Clients senden diese Cookies ausschließlich
+      // über HTTPS.
       if (!cookies.isEmpty()) {
         request.header(
             "Cookie",

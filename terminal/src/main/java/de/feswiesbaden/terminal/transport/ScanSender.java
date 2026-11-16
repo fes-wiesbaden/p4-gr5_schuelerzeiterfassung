@@ -9,6 +9,7 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
+import java.util.Objects;
 import javax.net.ssl.SSLContext;
 
 public final class ScanSender {
@@ -25,12 +26,15 @@ public final class ScanSender {
 
   public ScanSender(String serverUrl, SSLContext sslContext) {
     this.endpoint = URI.create(serverUrl);
-
-    HttpClient.Builder bauer = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5));
-    if (sslContext != null) {
-      bauer.sslContext(sslContext);
+    if (!"https".equalsIgnoreCase(endpoint.getScheme()) || endpoint.getHost() == null) {
+      throw new IllegalArgumentException("Terminal benötigt eine gültige HTTPS-Adresse.");
     }
-    this.client = bauer.build();
+
+    this.client =
+        HttpClient.newBuilder()
+            .connectTimeout(Duration.ofSeconds(5))
+            .sslContext(Objects.requireNonNull(sslContext, "mTLS-Konfiguration fehlt."))
+            .build();
   }
 
   public SendResult send(Scan scan) {
