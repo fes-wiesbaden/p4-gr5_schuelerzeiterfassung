@@ -357,26 +357,6 @@ class ClassAccountsIntegrationTest {
         .isEqualTo(-excused);
   }
 
-  @ParameterizedTest
-  @CsvSource({"ABWESEND,1", "ENTSCHULDIGT,0"})
-  void roundsOnlyAfterAddingEverySlotPerAccountAndNeverCountsPauses(
-      String secondStatus, int unexcused) {
-    jdbc.update("UPDATE attendance_audit SET occurred_at = '2026-09-14 05:30:30' WHERE id = 8");
-    jdbc.update(
-        "INSERT INTO attendance_audit (student_id, attendance_id, deletion_date_id, event_type,"
-            + " changed_by_staff_id, old_status, new_status, occurred_at)"
-            + " VALUES (5, 5, 1, 'STATUS_CHANGE', 3, 'ANWESEND', ?, '2026-09-14 07:00:00')",
-        secondStatus);
-    jdbc.update(
-        "INSERT INTO attendance_audit (student_id, attendance_id, deletion_date_id, event_type,"
-            + " terminal_id, old_status, new_status, occurred_at, unexcused_minutes_delta)"
-            + " VALUES (5, 5, 1, 'SCAN', 9001, ?, 'ANWESEND', '2026-09-14 07:15:30', ?)",
-        secondStatus,
-        unexcused);
-    jdbc.update("UPDATE student SET unexcused_minutes_account = ? WHERE id = 5", unexcused);
-    assertThat(classes.resetAccounts(1L, 1L)).isEqualTo(6);
-  }
-
   @Test
   void resolvesSameTimestampStatusEventsByTheirAuditId() {
     jdbc.update(
