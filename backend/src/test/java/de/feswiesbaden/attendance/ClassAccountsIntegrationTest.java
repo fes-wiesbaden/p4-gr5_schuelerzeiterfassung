@@ -95,6 +95,7 @@ class ClassAccountsIntegrationTest {
   @Test
   void resetsTheClassRepeatedlyAndAuditsEveryStudentIncludingEmptyAccounts() {
     var attendances = jdbc.queryForList("SELECT * FROM attendance ORDER BY id");
+    var deadlines = jdbc.queryForList("SELECT * FROM deletion_date ORDER BY id");
     assertThat(classes.resetAccounts(1L, 1L)).isEqualTo(6);
     assertThat(
             jdbc.query(
@@ -112,10 +113,30 @@ class ClassAccountsIntegrationTest {
             jdbc.queryForObject(
                 "SELECT COUNT(*) FROM attendance_audit WHERE event_type = 'ACCOUNT_RESET'"
                     + " AND changed_by_staff_id = 3 AND deletion_date_id = 1 AND attendance_id IS NULL"
-                    + " AND terminal_id IS NULL AND old_status IS NULL AND new_status IS NULL",
+                    + " AND terminal_id IS NULL AND old_status IS NULL AND new_status IS NULL"
+                    + " AND occurred_at = '2026-09-14 08:45:00'",
                 Integer.class))
         .isEqualTo(6);
+    var originalAudits = jdbc.queryForList("SELECT * FROM attendance_audit ORDER BY id");
+    setTime("2026-09-14T09:00:00Z");
     assertThat(classes.resetAccounts(1L, 1L)).isEqualTo(6);
+    var audits = jdbc.queryForList("SELECT * FROM attendance_audit ORDER BY id");
+    assertThat(audits.subList(0, originalAudits.size())).isEqualTo(originalAudits);
+    assertThat(audits.subList(originalAudits.size(), audits.size()))
+        .hasSize(6)
+        .allSatisfy(
+            audit ->
+                assertThat(audit)
+                    .containsEntry("event_type", "ACCOUNT_RESET")
+                    .containsEntry("changed_by_staff_id", 3L)
+                    .containsEntry("deletion_date_id", 1L)
+                    .containsEntry("attendance_id", null)
+                    .containsEntry("terminal_id", null)
+                    .containsEntry("old_status", null)
+                    .containsEntry("new_status", null)
+                    .containsEntry("occurred_at", java.time.LocalDateTime.of(2026, 9, 14, 9, 0))
+                    .containsEntry("unexcused_minutes_delta", 0)
+                    .containsEntry("excused_minutes_delta", 0));
     assertThat(
             jdbc.queryForObject(
                 "SELECT COUNT(*) FROM attendance_audit WHERE event_type = 'ACCOUNT_RESET'",
@@ -132,6 +153,7 @@ class ClassAccountsIntegrationTest {
                 "SELECT unexcused_minutes_account FROM student WHERE id = 7", Integer.class))
         .isEqualTo(180);
     assertThat(jdbc.queryForList("SELECT * FROM attendance ORDER BY id")).isEqualTo(attendances);
+    assertThat(jdbc.queryForList("SELECT * FROM deletion_date ORDER BY id")).isEqualTo(deadlines);
     assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM raw_scan", Integer.class)).isEqualTo(7);
   }
 
@@ -503,6 +525,14 @@ class ClassAccountsIntegrationTest {
                 "SELECT COUNT(*) FROM deletion_date WHERE delete_after = '2027-02-28'",
                 Integer.class))
         .isEqualTo(1);
+    assertThat(
+            jdbc.queryForObject(
+                "SELECT d.delete_after FROM attendance_audit a"
+                    + " JOIN deletion_date d ON d.id = a.deletion_date_id"
+                    + " WHERE a.student_id = ? AND a.event_type = 'ACCOUNT_RESET'",
+                LocalDate.class,
+                student))
+        .isEqualTo(LocalDate.of(2027, 2, 28));
 
     assertThatThrownBy(() -> classes.changeBlockPlan(classId, first, finished))
         .hasMessage("NEXT_PLAN_FINISHED");
