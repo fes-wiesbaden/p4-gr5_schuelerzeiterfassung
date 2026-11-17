@@ -24,6 +24,10 @@ keytool -list -storetype PKCS12 -keystore "$cert_dir/terminal-server-truststore.
   -storepass changeit -alias attendance-server-ca
 assert_san 'IP Address:192.168.1.10'
 client_certificate_before=$(sha256sum "$cert_dir/terminal-23102003-client.crt")
+proxy_properties_before=$(sha256sum "$cert_dir/terminal-proxy.properties")
+proxy_config_before=$(sha256sum "$cert_dir/terminal-proxy.conf")
+test "$(stat -c '%a' "$cert_dir/terminal-proxy.properties")" = 600
+test "$(stat -c '%a' "$cert_dir/terminal-proxy.conf")" = 600
 
 CERT_DIR="$cert_dir" TLS_HOST=192.168.1.1 /usr/local/bin/generate-certificates
 openssl verify -CAfile "$cert_dir/ca.crt" "$cert_dir/server.crt"
@@ -31,3 +35,5 @@ openssl verify -purpose sslclient -CAfile "$cert_dir/terminal-client-ca.crt" \
   "$cert_dir/terminal-23102003-client.crt"
 assert_san 'IP Address:192.168.1.1'
 test "$client_certificate_before" = "$(sha256sum "$cert_dir/terminal-23102003-client.crt")"
+test "$proxy_properties_before" = "$(sha256sum "$cert_dir/terminal-proxy.properties")"
+test "$proxy_config_before" = "$(sha256sum "$cert_dir/terminal-proxy.conf")"

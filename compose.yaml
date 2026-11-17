@@ -37,6 +37,7 @@ services:
       - ./.local/tls/server.crt:/etc/nginx/tls/server.crt:ro
       - ./.local/tls/server.key:/etc/nginx/tls/server.key:ro
       - ./.local/tls/terminal-client-ca.crt:/etc/nginx/tls/terminal-client-ca.crt:ro
+      - ./.local/tls/terminal-proxy.conf:/etc/nginx/tls/terminal-proxy.conf:ro
     depends_on:
       tls-init:
         condition: service_completed_successfully
