@@ -15,7 +15,7 @@ import javafx.scene.layout.Region;
 import javafx.scene.layout.VBox;
 import javafx.util.Duration;
 
-// Die Oberfläche zeigt nur an. Entschieden wird alles auf dem Server.
+/** Zeigt den Scanstatus ohne personenbezogene Daten oder Bedienelemente an */
 public final class TerminalView {
   private static final DateTimeFormatter UHRZEIT = DateTimeFormatter.ofPattern("HH:mm");
 
@@ -49,11 +49,12 @@ public final class TerminalView {
 
   private String naechsterCode;
 
+  /** Erstellt die Statusanzeige mit der üblichen Rückkehrzeit zur Bereitschaft */
   public TerminalView() {
     this(RUECKKEHR_NACH_BEREIT);
   }
 
-  // Kürzere Dauer für Tests.
+  /** Erstellt die Statusanzeige mit einstellbarer Rückkehrzeit für Tests */
   TerminalView(Duration rueckkehr) {
     zurueckAufBereit = new PauseTransition(rueckkehr);
     root.getStyleClass().add("root");
@@ -70,19 +71,18 @@ public final class TerminalView {
     return root;
   }
 
-  // Jede Rückmeldung läuft ab, damit der nächste Schüler nicht die Anzeige
-  // seines Vorgängers sieht. Offene Scans stehen in der Fußzeile.
+  /** Plant den Statuswechsel im JavaFX-Thread ein und kehrt anschließend zur Bereitschaft zurück */
   public void showState(ScanState state) {
     Platform.runLater(() -> zeige(state, null));
   }
 
-  // Der öffentliche Code darf angezeigt werden, der wirkliche Grund nie (#37).
+  /** Zeigt nur den Speicherfehler oder einen neutralen Ablehnungscode an */
   public void showError(String code) {
     String neutralCode = "LOCAL_STORAGE_FAILED".equals(code) ? code : "SCAN_REJECTED";
     Platform.runLater(() -> zeige(ScanState.ERROR, neutralCode));
   }
 
-  // Das Ergebnis wartet, bis "wird verarbeitet" lange genug zu sehen war.
+  /** Zeigt die Verarbeitung mindestens eine Sekunde und merkt früh eintreffende Ergebnisse vor */
   private void zeige(ScanState state, String code) {
     if (state == ScanState.PROCESSING) {
       naechsterZustand = null;
@@ -100,6 +100,7 @@ public final class TerminalView {
     anzeigen(state, code);
   }
 
+  /** Zeigt das vorgemerkte Ergebnis nach Ablauf der Mindestanzeigezeit */
   private void zeigeGemerkten() {
     if (naechsterZustand == null) {
       return;
@@ -110,6 +111,7 @@ public final class TerminalView {
     anzeigen(state, code);
   }
 
+  /** Zeigt Status und Fehlercode an und startet die Rückkehr zur Bereitschaft */
   private void anzeigen(ScanState state, String code) {
     show(state);
     if (code != null) {
@@ -122,10 +124,12 @@ public final class TerminalView {
     }
   }
 
+  /** Aktualisiert die Terminalnummer im JavaFX-Thread */
   public void showTerminalNumber(int nummer) {
     Platform.runLater(() -> terminalInfo.setText("Terminal " + nummer));
   }
 
+  /** Zeigt die Zahl der noch nicht zugestellten Scans an */
   public void showQueueSize(int offen) {
     String text;
     if (offen == 0) {
@@ -138,6 +142,7 @@ public final class TerminalView {
     Platform.runLater(() -> queueInfo.setText(text));
   }
 
+  /** Setzt Texte, Symbol und Gestaltung für den gewählten Status */
   private void show(ScanState state) {
     symbol.setText(state.symbol());
     headline.setText(state.headline());
@@ -155,6 +160,7 @@ public final class TerminalView {
     stage.getStyleClass().add("state-" + state.name().toLowerCase());
   }
 
+  /** Baut die Kopfzeile mit dem Titel der Anwendung */
   private HBox header() {
     Label titel = new Label("Anwesenheitserfassung");
     titel.getStyleClass().add("header-title");
@@ -165,6 +171,7 @@ public final class TerminalView {
     return leiste;
   }
 
+  /** Baut den Anzeigebereich für Symbol, Status und Hinweis */
   private VBox stageBox() {
     symbol.getStyleClass().add("symbol");
     headline.getStyleClass().add("headline");
@@ -177,6 +184,7 @@ public final class TerminalView {
     return stage;
   }
 
+  /** Baut die Fußzeile mit Terminalnummer und offenen Scans */
   private HBox footer() {
     terminalInfo.setText("Terminal —");
     terminalInfo.getStyleClass().add("footer-text");

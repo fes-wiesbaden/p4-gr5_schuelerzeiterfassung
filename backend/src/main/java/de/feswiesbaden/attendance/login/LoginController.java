@@ -4,6 +4,7 @@ import java.security.Principal;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+/** Stellt die öffentlichen Angaben zum angemeldeten Nutzer bereit */
 @RestController
 public class LoginController {
   private final StaffLoginService staff;
@@ -12,6 +13,7 @@ public class LoginController {
     this.staff = staff;
   }
 
+  /** Liefert Name und Rolle des angemeldeten Nutzers */
   @GetMapping("/api/me")
   public StaffLoginService.AuthUser currentUser(Principal principal) {
     return staff.currentUser(principal.getName());

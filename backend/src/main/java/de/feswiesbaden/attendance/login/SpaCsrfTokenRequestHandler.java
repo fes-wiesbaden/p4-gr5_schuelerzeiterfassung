@@ -9,11 +9,13 @@ import org.springframework.security.web.csrf.CsrfTokenRequestHandler;
 import org.springframework.security.web.csrf.XorCsrfTokenRequestAttributeHandler;
 import org.springframework.util.StringUtils;
 
+/** Verarbeitet CSRF-Tokens aus Anfrageheadern und Formularen */
 public class SpaCsrfTokenRequestHandler implements CsrfTokenRequestHandler {
   private final CsrfTokenRequestHandler plain = new CsrfTokenRequestAttributeHandler();
 
   private final CsrfTokenRequestHandler xor = new XorCsrfTokenRequestAttributeHandler();
 
+  /** Stellt das geschützte CSRF-Token bereit und sorgt dafür, dass das Token-Cookie gesetzt wird */
   @Override
   public void handle(
       HttpServletRequest request, HttpServletResponse response, Supplier<CsrfToken> token) {
@@ -21,6 +23,7 @@ public class SpaCsrfTokenRequestHandler implements CsrfTokenRequestHandler {
     token.get();
   }
 
+  /** Liest das unveränderte Token aus dem Header oder das maskierte Token aus dem Formular */
   @Override
   public String resolveCsrfTokenValue(HttpServletRequest request, CsrfToken token) {
     return (StringUtils.hasText(request.getHeader(token.getHeaderName())) ? plain : xor)

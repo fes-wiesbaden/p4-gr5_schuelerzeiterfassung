@@ -24,8 +24,10 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.CleanupMode;
 import org.junit.jupiter.api.io.TempDir;
 
+/** Prüft Statusanzeige und Datenschutz der Terminaloberfläche */
 class TerminalViewTest {
 
+  /** Startet JavaFX einmal für die Oberflächentests und wartet auf die Bereitschaft */
   @BeforeAll
   static void javafxStarten() throws InterruptedException {
     CountDownLatch bereit = new CountDownLatch(1);
@@ -39,6 +41,7 @@ class TerminalViewTest {
     assertTrue(bereit.await(10, TimeUnit.SECONDS), "JavaFX ist nicht gestartet");
   }
 
+  /** Prüft, dass die Terminalansicht keine bedienbaren Steuerelemente enthält */
   @Test
   void hatKeineBedienelemente() throws InterruptedException {
     Parent ansicht = baueAnsicht();
@@ -50,6 +53,7 @@ class TerminalViewTest {
     }
   }
 
+  /** Prüft den Hinweis zum Auflegen der Karte im Grundzustand */
   @Test
   void zeigtImGrundzustandKarteAuflegen() throws InterruptedException {
     Parent ansicht = baueAnsicht();
@@ -58,6 +62,7 @@ class TerminalViewTest {
     assertEquals("Karte auflegen", ueberschrift.getText());
   }
 
+  /** Prüft die automatische Rückkehr zur Bereitschaft nach einer lokalen Vormerkung */
   @Test
   void kehrtNachVormerkungWiederAufBereitZurueck() throws InterruptedException {
     TerminalView[] ansicht = new TerminalView[1];
@@ -79,6 +84,7 @@ class TerminalViewTest {
     warteAufText(ueberschrift, "Karte auflegen");
   }
 
+  /** Prüft neutrale Rückmeldungen ohne UID und speichert ein bereinigtes Bildschirmbild */
   @Test
   void zeigtNurNeutraleRueckmeldungen(@TempDir(cleanup = CleanupMode.NEVER) Path ordner)
       throws Exception {
@@ -134,8 +140,7 @@ class TerminalViewTest {
     check.get(10, TimeUnit.SECONDS);
   }
 
-  // Die Anzeige wechselt im JavaFX-Thread, also so lange nachsehen, bis der
-  // erwartete Text steht.
+  /** Liest den Text im JavaFX-Thread, bis der erwartete Wert erscheint oder die Wartezeit endet */
   private static void warteAufText(Label label, String erwartet) throws InterruptedException {
     long grenze = System.currentTimeMillis() + 5000;
 
@@ -158,8 +163,7 @@ class TerminalViewTest {
     throw new AssertionError("Anzeige zeigte nie: " + erwartet);
   }
 
-  // JavaFX baut Oberflächen nur im eigenen Thread. Also dort bauen und warten,
-  // bis sie fertig ist.
+  /** Baut die Testansicht im JavaFX-Thread und wartet auf deren Fertigstellung */
   private static Parent baueAnsicht() throws InterruptedException {
     Parent[] ergebnis = new Parent[1];
     CountDownLatch fertig = new CountDownLatch(1);

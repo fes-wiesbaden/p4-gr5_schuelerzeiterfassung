@@ -6,6 +6,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Properties;
 
+/** Lädt die Einstellungen für Kartenleser, Scanpuffer und verschlüsselte Verbindung */
 public record TerminalConfig(
     String serverUrl,
     String serialPort,
@@ -18,6 +19,7 @@ public record TerminalConfig(
 
   private static final String DEFAULT_URL = "https://127.0.0.1:8444/api/scans";
 
+  /** Liest die Einstellungsdatei und ergänzt fehlende Angaben mit Standardwerten */
   public static TerminalConfig load(Path file) {
     Properties werte = new Properties();
 
@@ -44,11 +46,13 @@ public record TerminalConfig(
         werte.getProperty("server.truststore.password", ""));
   }
 
+  /** Verwendet die Umgebungsvariable, falls sie gesetzt und nicht leer ist */
   private static String umgebungOderDatei(String variable, String ausDatei) {
     String ausUmgebung = System.getenv(variable);
     return ausUmgebung == null || ausUmgebung.isBlank() ? ausDatei.trim() : ausUmgebung.trim();
   }
 
+  /** Prüft, ob ohne seriellen Port die Konsole als Kartenleser verwendet wird */
   public boolean usesConsole() {
     return serialPort.isEmpty();
   }

@@ -10,13 +10,12 @@ import javax.net.ssl.KeyManagerFactory;
 import javax.net.ssl.SSLContext;
 import javax.net.ssl.TrustManagerFactory;
 
-// Clientzertifikat für mTLS aus einer PKCS12-Datei; nginx prüft es gegen die
-// Terminal-Client-CA. Für das Serverzertifikat gilt bewusst die
-// JVM-Standardprüfung gegen den lokalen Server-Truststore (#26, #29).
+/** Lädt das Clientzertifikat und die vertrauenswürdigen Serverzertifikate für mTLS */
 public final class TerminalSslContext {
 
   private TerminalSslContext() {}
 
+  /** Lädt beide PKCS12-Dateien für TLS und bricht bei fehlenden Zertifikaten ab */
   public static SSLContext load(
       Path keystore, String keystorePassword, Path truststore, String truststorePassword) {
     if (keystore == null || !Files.isReadable(keystore)) {

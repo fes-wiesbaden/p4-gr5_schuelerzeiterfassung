@@ -8,6 +8,7 @@ import org.springframework.security.core.userdetails.UserDetailsService;
 import org.springframework.security.core.userdetails.UsernameNotFoundException;
 import org.springframework.stereotype.Service;
 
+/** Lädt Mitarbeiterkonten für die Anmeldung und die Nutzeranzeige */
 @Service
 public class StaffLoginService implements UserDetailsService {
   private final StaffRepository staff;
@@ -16,6 +17,7 @@ public class StaffLoginService implements UserDetailsService {
     this.staff = staff;
   }
 
+  /** Lädt Passwort-Hash und Rolle für die Prüfung durch Spring Security */
   @Override
   public UserDetails loadUserByUsername(String username) {
     Staff account = find(username);
@@ -25,6 +27,7 @@ public class StaffLoginService implements UserDetailsService {
         .build();
   }
 
+  /** Liefert den Anzeigenamen und die für das Frontend vorgesehene Rolle */
   public AuthUser currentUser(String username) {
     Staff account = find(username);
     return new AuthUser(
@@ -32,6 +35,7 @@ public class StaffLoginService implements UserDetailsService {
         account.getRole() == Role.ADMINISTRATOR ? "admin" : "lehrkraft");
   }
 
+  /** Sucht das Konto zum Nutzernamen und meldet fehlende Konten mit einem neutralen Fehler */
   private Staff find(String username) {
     return staff
         .findByUsername(username)

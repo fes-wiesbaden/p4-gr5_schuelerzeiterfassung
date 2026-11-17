@@ -12,6 +12,7 @@ import java.time.Duration;
 import java.util.Objects;
 import javax.net.ssl.SSLContext;
 
+/** Sendet Scans an das Backend und ordnet dessen Antworten für die Zustellung ein */
 public final class ScanSender {
   // Wenn der Server keinen Code mitschickt, nehmen wir den Sammelcode aus #37.
   private static final String FALLBACK_CODE = "SCAN_REJECTED";
@@ -24,6 +25,7 @@ public final class ScanSender {
 
   private final URI endpoint;
 
+  /** Erstellt den HTTP-Client mit Verbindungsfrist und dem übergebenen TLS-Kontext */
   public ScanSender(String serverUrl, SSLContext sslContext) {
     this.endpoint = URI.create(serverUrl);
     if (!"https".equalsIgnoreCase(endpoint.getScheme()) || endpoint.getHost() == null) {
@@ -37,6 +39,7 @@ public final class ScanSender {
             .build();
   }
 
+  /** Sendet den Scan und erlaubt bei Verbindungsfehlern oder Unterbrechungen einen neuen Versuch */
   public SendResult send(Scan scan) {
     try {
       HttpRequest anfrage =
@@ -57,6 +60,7 @@ public final class ScanSender {
     }
   }
 
+  /** Liest den bekannten Duplikatcode und verwendet sonst den neutralen Fehlercode */
   static String readCode(String antwortkoerper) {
     if (antwortkoerper == null || antwortkoerper.isBlank()) {
       return FALLBACK_CODE;
@@ -71,9 +75,7 @@ public final class ScanSender {
     }
   }
 
-  // 2xx heißt gebucht. 4xx ist eine endgültige Absage, danach fliegt der Scan
-  // aus der Warteschlange. Bei 5xx ist der Server kaputt, nicht der Scan, also
-  // später nochmal versuchen.
+  /** Wertet Erfolge und Ablehnungen aus und lässt andere Antworten erneut versuchen */
   static SendResult interpret(int status, String code) {
     if (status >= 200 && status < 300) {
       return SendResult.accepted();

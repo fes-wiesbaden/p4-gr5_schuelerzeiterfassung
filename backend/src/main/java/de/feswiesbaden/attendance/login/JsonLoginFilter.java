@@ -14,15 +14,18 @@ import org.springframework.security.core.Authentication;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
 import org.springframework.security.web.servlet.util.matcher.PathPatternRequestMatcher;
 
+/** Liest und prüft die als JSON gesendeten Anmeldedaten */
 public class JsonLoginFilter extends UsernamePasswordAuthenticationFilter {
   private final ObjectMapper mapper;
 
+  /** Bindet den JSON-Filter an POST-Anfragen auf /api/login */
   public JsonLoginFilter(ObjectMapper mapper) {
     this.mapper = mapper;
     setRequiresAuthenticationRequestMatcher(
         PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.POST, "/api/login"));
   }
 
+  /** Prüft Format und Länge der Zugangsdaten und übergibt sie an die Anmeldung */
   @Override
   public Authentication attemptAuthentication(
       HttpServletRequest request, HttpServletResponse response) {

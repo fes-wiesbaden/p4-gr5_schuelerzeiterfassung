@@ -19,6 +19,7 @@ import org.testcontainers.containers.MySQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
+/** Prüft die Migration der Datenbankregeln für Zeiträume mit vorhandenen Daten */
 @Testcontainers
 class TimeIntervalMigrationTest {
   @Container static MySQLContainer<?> mysql = new MySQLContainer<>("mysql:8.0");
@@ -30,6 +31,7 @@ class TimeIntervalMigrationTest {
 
   private JdbcTemplate jdbc;
 
+  /** Erstellt den Datenbankstand vor der Migration und lädt die Beispieldaten */
   @BeforeEach
   void loadVersionTwoWithExistingData() {
     dataSource =
@@ -43,6 +45,7 @@ class TimeIntervalMigrationTest {
     jdbc = new JdbcTemplate(dataSource);
   }
 
+  /** Prüft den Erhalt gültiger Zeiträume einschließlich gleicher Grenzen bei der Migration */
   @Test
   void upgradePreservesOrderedAndEqualIntervals() {
     jdbc.update("UPDATE block_assignment SET ends_on = starts_on WHERE id = 1");
@@ -55,6 +58,7 @@ class TimeIntervalMigrationTest {
     assertThat(TABLES.stream().map(this::rowsOf).toList()).isEqualTo(before);
   }
 
+  /** Prüft den Abbruch bei vertauschten Zeitgrenzen und die Fortsetzung nach deren Korrektur */
   @ParameterizedTest
   @ValueSource(strings = {"block_assignment", "block_plan", "timetable_slot"})
   void upgradeRejectsReversedIntervalsAndResumesAfterCorrection(String table) {
@@ -84,6 +88,7 @@ class TimeIntervalMigrationTest {
     assertThat(TABLES.stream().map(this::rowsOf).toList()).isEqualTo(corrected);
   }
 
+  /** Liest die Tabellenzeilen nach ID sortiert für den Vergleich vor und nach der Migration */
   private List<Map<String, Object>> rowsOf(String table) {
     return jdbc.queryForList("SELECT * FROM " + table + " ORDER BY id");
   }

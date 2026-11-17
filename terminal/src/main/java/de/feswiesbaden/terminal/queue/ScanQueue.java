@@ -11,8 +11,7 @@ import java.nio.file.StandardOpenOption;
 import java.util.ArrayList;
 import java.util.List;
 
-// Ein Scan wird sofort angehängt und erst gelöscht, wenn der Server geantwortet
-// hat. Dadurch geht auch bei einem Absturz nichts verloren.
+/** Speichert offene Scans bis zu einer endgültigen Serverantwort in einer Datei */
 public final class ScanQueue {
   private final Path file;
 
@@ -20,6 +19,7 @@ public final class ScanQueue {
     this.file = file;
   }
 
+  /** Hängt den Scan an die Datei an, damit er nach einem Neustart erneut zugestellt werden kann */
   public synchronized void add(Scan scan) throws IOException {
     Files.writeString(
         file,
@@ -29,6 +29,7 @@ public final class ScanQueue {
         StandardOpenOption.APPEND);
   }
 
+  /** Liest offene Scans und überspringt beschädigte Einträge ohne deren Inhalt zu protokollieren */
   public synchronized List<Scan> pending() throws IOException {
     List<Scan> offen = new ArrayList<>();
 
@@ -45,6 +46,7 @@ public final class ScanQueue {
     return offen;
   }
 
+  /** Schreibt den Puffer ohne den angegebenen Scan neu und ersetzt danach die bisherige Datei */
   public synchronized void remove(String scanId) throws IOException {
     List<String> bleiben = new ArrayList<>();
     for (String zeile : zeilen()) {
@@ -60,10 +62,12 @@ public final class ScanQueue {
     Files.move(neu, file, StandardCopyOption.REPLACE_EXISTING);
   }
 
+  /** Zählt die lesbaren Scans in der Warteschlange */
   public synchronized int size() throws IOException {
     return pending().size();
   }
 
+  /** Liest die nicht leeren Pufferzeilen oder liefert bei fehlender Datei eine leere Liste */
   private List<String> zeilen() throws IOException {
     if (!Files.exists(file)) {
       return List.of();

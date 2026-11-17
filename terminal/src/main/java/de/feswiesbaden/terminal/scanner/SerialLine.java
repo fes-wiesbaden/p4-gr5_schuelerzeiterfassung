@@ -3,15 +3,14 @@ package de.feswiesbaden.terminal.scanner;
 import de.feswiesbaden.terminal.model.Json;
 import java.util.Optional;
 
-// Erwartet genau eine JSON-Zeile vom ESP32 (#29):
-//     {"rfidUid":"04A3B2C1","terminalNumber":23102003}
-// Alles andere wird verworfen, sonst ginge die Startmeldung als Scan durch.
+/** Erkennt Scanmeldungen des ESP32 und verwirft andere Zeilen */
 public final class SerialLine {
 
   private SerialLine() {}
 
   public record Reading(String rfidUid, int terminalNumber) {}
 
+  /** Liest UID und Terminalnummer aus einer JSON-Zeile und verwirft unlesbare oder leere Scans */
   public static Optional<Reading> parse(String zeile) {
     if (zeile == null || zeile.isBlank()) {
       return Optional.empty();

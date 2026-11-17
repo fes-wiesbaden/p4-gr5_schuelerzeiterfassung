@@ -6,6 +6,7 @@ import java.time.LocalDate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+/** Legt Blockpläne mit dem zugehörigen Löschdatum an */
 @Service
 public class BlockPlanService {
   private final BlockPlanRepository plans;
@@ -23,6 +24,7 @@ public class BlockPlanService {
     this.deletionDates = deletionDates;
   }
 
+  /** Prüft die Administratorrechte und speichert einen gültigen Blockplan mit seinem Löschdatum */
   @Transactional
   public Long create(String name, LocalDate startsOn, LocalDate endsOn) {
     authorization.requireAdministrator();

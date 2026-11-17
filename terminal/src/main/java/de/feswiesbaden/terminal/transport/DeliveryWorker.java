@@ -9,7 +9,7 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.function.BiConsumer;
 
-// Eigener Thread, damit die Oberfläche bei langsamer Verbindung nicht einfriert.
+/** Stellt gespeicherte Scans im Hintergrund zu und wiederholt fehlgeschlagene Versuche */
 public final class DeliveryWorker implements AutoCloseable {
   private static final int INTERVAL_SECONDS = 5;
 
@@ -33,14 +33,17 @@ public final class DeliveryWorker implements AutoCloseable {
     this.onResult = onResult;
   }
 
+  /** Startet die Zustellung sofort und danach mit fünf Sekunden Abstand zwischen den Durchläufen */
   public void start() {
     scheduler.scheduleWithFixedDelay(this::drain, 0, INTERVAL_SECONDS, TimeUnit.SECONDS);
   }
 
+  /** Plant einen zusätzlichen Zustellversuch im Hintergrund ein */
   public void deliverNow() {
     scheduler.execute(this::drain);
   }
 
+  /** Sendet offene Scans der Reihe nach und entfernt sie erst nach einer endgültigen Antwort */
   private void drain() {
     try {
       for (Scan scan : List.copyOf(queue.pending())) {
@@ -61,6 +64,7 @@ public final class DeliveryWorker implements AutoCloseable {
     }
   }
 
+  /** Stoppt geplante und laufende Zustellversuche */
   @Override
   public void close() {
     scheduler.shutdownNow();

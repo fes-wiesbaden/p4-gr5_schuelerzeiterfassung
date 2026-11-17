@@ -16,8 +16,10 @@ import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+/** Prüft die Speicherung offener Scans und den Umgang mit beschädigten Puffereinträgen */
 class ScanQueueTest {
 
+  /** Prüft, dass ID, Kartenkennung und Zeitpunkt eines offenen Scans erhalten bleiben */
   @Test
   void behaeltScansBisSieEntferntWerden(@TempDir Path ordner) throws IOException {
     ScanQueue puffer = new ScanQueue(ordner.resolve("puffer.jsonl"));
@@ -33,6 +35,7 @@ class ScanQueueTest {
     assertEquals(0, offen.get(0).capturedAt().getNano());
   }
 
+  /** Prüft, dass das Entfernen eines Scans andere Einträge im Puffer erhält */
   @Test
   void entferntNurDenZugestelltenScan(@TempDir Path ordner) throws IOException {
     ScanQueue puffer = new ScanQueue(ordner.resolve("puffer.jsonl"));
@@ -47,6 +50,7 @@ class ScanQueueTest {
     assertEquals("UID-B", offen.get(0).rfidUid());
   }
 
+  /** Prüft, dass eine neue Warteschlange die zuvor gespeicherten Scans wieder einliest */
   @Test
   void ueberstehtEinenNeustart(@TempDir Path ordner) throws IOException {
     Path datei = ordner.resolve("puffer.jsonl");
@@ -59,6 +63,7 @@ class ScanQueueTest {
     assertEquals("UID-C", nachNeustart.pending().get(0).rfidUid());
   }
 
+  /** Prüft, dass beschädigte Zeilen andere Scans nicht unlesbar machen */
   @Test
   void ueberspringtKaputteZeilenStattAufzugeben(@TempDir Path ordner) throws IOException {
     Path datei = ordner.resolve("puffer.jsonl");
@@ -77,11 +82,13 @@ class ScanQueueTest {
     assertTrue(offen.stream().anyMatch(s -> s.rfidUid().equals("UID-E")));
   }
 
+  /** Prüft eine leere Warteschlange bei noch nicht vorhandener Pufferdatei */
   @Test
   void istLeerWennNochNichtsGescanntWurde(@TempDir Path ordner) throws IOException {
     assertEquals(0, new ScanQueue(ordner.resolve("gibtsnicht.jsonl")).size());
   }
 
+  /** Prüft, dass beschädigte Puffereinträge ohne Ausgabe ihrer Kartenkennung behandelt werden */
   @Test
   void fehlerhafteScansVerratenKeineUidImLog(@TempDir Path ordner) throws IOException {
     String uid = "04A3B2C1";
