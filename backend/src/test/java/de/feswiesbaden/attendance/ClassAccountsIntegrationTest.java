@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.when;
 
+import de.feswiesbaden.attendance.service.AttendanceAccountingService;
 import de.feswiesbaden.attendance.service.BlockPlanService;
 import de.feswiesbaden.attendance.service.RetentionService;
 import de.feswiesbaden.attendance.service.SchoolClassService;
@@ -12,6 +13,7 @@ import de.feswiesbaden.attendance.service.StudentService;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CyclicBarrier;
@@ -45,9 +47,13 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 @Testcontainers
 @Sql("/fixtures/attendance.sql")
 class ClassAccountsIntegrationTest {
-  @Container @ServiceConnection static MySQLContainer<?> mysql = new MySQLContainer<>("mysql:8.0");
+  @Container @ServiceConnection
+  static MySQLContainer<?> mysql =
+      new MySQLContainer<>("mysql:8.0").withUrlParam("connectionTimeZone", "UTC");
 
   @Autowired JdbcTemplate jdbc;
+
+  @Autowired AttendanceAccountingService attendance;
 
   @Autowired SchoolClassService classes;
 
@@ -168,17 +174,17 @@ class ClassAccountsIntegrationTest {
             UsernamePasswordAuthenticationToken.authenticated(username, null, List.of()));
   }
 
-  /** Prüft den Planwechsel nach Abschlussreset bei erhaltener Klasse, Schülern und Lehrkräften */
-  @Test
-  void changesPlanAfterFinalResetAndKeepsClassStudentsAndTeachers() {
-    setTime("2026-12-31T23:00:00Z");
+  /** Prüft den auditierten Abschlussreset durch Admin oder Klassenleitung beim Planwechsel */
+  @ParameterizedTest
+  @CsvSource({"test.admin,3", "test.teacher.a,1"})
+  void changesPlanWithFinalResetAndKeepsClassStudentsAndTeachers(String username, long staffId) {
     Long next = plans.create("Folgeplan", LocalDate.of(2027, 1, 1), LocalDate.of(2027, 12, 31));
-    assertThat(classes.resetAccounts(1L, 1L)).isEqualTo(6);
-    var students = jdbc.queryForList("SELECT * FROM student ORDER BY id");
+    var students = jdbc.queryForList("SELECT id, school_class_id FROM student ORDER BY id");
     var teachers =
         jdbc.queryForList("SELECT * FROM teacher_class ORDER BY staff_id, school_class_id");
     var audits = jdbc.queryForList("SELECT * FROM attendance_audit ORDER BY id");
     setTime("2027-02-01T12:00:00Z");
+    signIn(username);
     classes.changeBlockPlan(1L, 1L, next);
     assertThat(classes.list())
         .contains(new SchoolClassService.ClassView(1L, "26TEST-A", 1L, next, 1L));
@@ -192,10 +198,22 @@ class ClassAccountsIntegrationTest {
                 "SELECT COUNT(*) FROM class_block_assignment WHERE school_class_id IN (2, 3)",
                 Integer.class))
         .isEqualTo(2);
-    assertThat(jdbc.queryForList("SELECT * FROM student ORDER BY id")).isEqualTo(students);
+    assertThat(jdbc.queryForList("SELECT id, school_class_id FROM student ORDER BY id"))
+        .isEqualTo(students);
+    assertThat(
+            jdbc.queryForList(
+                "SELECT id FROM student WHERE school_class_id = 1"
+                    + " AND (unexcused_minutes_account <> 0 OR excused_minutes_account <> 0)"))
+        .isEmpty();
     assertThat(jdbc.queryForList("SELECT * FROM teacher_class ORDER BY staff_id, school_class_id"))
         .isEqualTo(teachers);
-    assertThat(jdbc.queryForList("SELECT * FROM attendance_audit ORDER BY id")).isEqualTo(audits);
+    assertThat(jdbc.queryForList("SELECT * FROM attendance_audit ORDER BY id")).containsAll(audits);
+    assertThat(
+            jdbc.queryForList(
+                "SELECT changed_by_staff_id FROM attendance_audit"
+                    + " WHERE event_type = 'ACCOUNT_RESET' AND deletion_date_id = 1",
+                Long.class))
+        .containsExactly(staffId, staffId, staffId, staffId, staffId, staffId);
   }
 
   /** Prüft die Ablehnung gebuchter Minuten an ungeplanten Tagen trotz passender Kontensumme */
@@ -229,8 +247,8 @@ class ClassAccountsIntegrationTest {
     assertThat(
             jdbc.queryForObject(
                 "SELECT MAX(occurred_at) FROM attendance_audit WHERE event_type = 'ACCOUNT_RESET'",
-                java.sql.Timestamp.class))
-        .isEqualTo(java.sql.Timestamp.valueOf("2026-09-14 08:45:00"));
+                LocalDateTime.class))
+        .isEqualTo(LocalDateTime.parse("2026-09-14T08:45:00"));
   }
 
   /** Prüft, dass Slots ohne Dauer weder den Reset blockieren noch Anwesenheiten erfordern */
@@ -254,11 +272,13 @@ class ClassAccountsIntegrationTest {
         .isZero();
   }
 
-  /** Prüft aktuelle Administratorrechte für Kontenreset und Planwechsel */
+  /** Prüft, dass eine Unterrichtszuordnung allein keinen Reset oder Planwechsel erlaubt */
   @ParameterizedTest
-  @ValueSource(strings = {"test.teacher.a", "test.teacher.b", "test.unknown", "missing"})
-  void bothOperationsRequireCurrentAdministrator(String username) {
+  @ValueSource(strings = {"test.teacher.b", "test.unknown", "missing"})
+  void rejectsUnauthorizedResetAndPlanChange(String username) {
     Long next = nextPlan();
+    jdbc.update("INSERT INTO teacher_class (staff_id, school_class_id) VALUES (2, 1)");
+    setTime("2026-12-31T23:00:00Z");
     if (username.equals("missing")) {
       SecurityContextHolder.clearContext();
     } else {
@@ -267,6 +287,15 @@ class ClassAccountsIntegrationTest {
     assertThatThrownBy(() -> classes.resetAccounts(1L, 1L))
         .isInstanceOf(AccessDeniedException.class);
     assertThatThrownBy(() -> classes.changeBlockPlan(1L, 1L, next))
+        .isInstanceOf(AccessDeniedException.class);
+    assertThat(resetCount()).isZero();
+  }
+
+  /** Prüft, dass auch die Klassenleitung einzelne Kontenresets dem Admin überlassen muss */
+  @Test
+  void rejectsStandaloneResetByClassTeacher() {
+    signIn("test.teacher.a");
+    assertThatThrownBy(() -> classes.resetAccounts(1L, 1L))
         .isInstanceOf(AccessDeniedException.class);
     assertThat(resetCount()).isZero();
   }
@@ -493,14 +522,12 @@ class ClassAccountsIntegrationTest {
     assertThatThrownBy(() -> classes.changeBlockPlan(1L, 1L, next))
         .hasMessage("CURRENT_PLAN_NOT_FINISHED");
     setTime("2026-12-31T23:00:00Z");
-    assertThatThrownBy(() -> classes.changeBlockPlan(1L, 1L, next))
-        .hasMessage("FINAL_CLASS_RESET_REQUIRED");
-    classes.resetAccounts(1L, 1L);
     classes.changeBlockPlan(1L, 1L, next);
+    assertThat(resetCount()).isEqualTo(12);
     assertThatThrownBy(() -> classes.resetAccounts(1L, 1L)).hasMessage("CLASS_PLAN_CHANGED");
   }
 
-  /** Prüft offene Altblöcke, fehlende oder überlappende Folgepläne und nicht geleerte Konten */
+  /** Prüft ungültige Pläne und den Rollback des Resets bei einem fehlgeschlagenen Planwechsel */
   @Test
   void planChangeRejectsUnfinishedOldBlocksAndOverlappingOrMissingNewPlans() {
     Long next = nextPlan();
@@ -517,8 +544,18 @@ class ClassAccountsIntegrationTest {
         plans.create("Ueberlappend", LocalDate.of(2026, 12, 31), LocalDate.of(2027, 12, 31));
     assertThatThrownBy(() -> classes.changeBlockPlan(1L, 1L, overlap))
         .hasMessage("NEXT_PLAN_OVERLAPS_CURRENT_PLAN");
-    assertThatThrownBy(() -> classes.changeBlockPlan(1L, 1L, next))
-        .hasMessage("CLASS_ACCOUNTS_NOT_EMPTY");
+    jdbc.execute(
+        "ALTER TABLE school_class ADD CONSTRAINT test_reject_plan CHECK (block_plan_id = 1)");
+    try {
+      assertThatThrownBy(() -> classes.changeBlockPlan(1L, 1L, next))
+          .isInstanceOf(DataAccessException.class);
+    } finally {
+      jdbc.execute("ALTER TABLE school_class DROP CHECK test_reject_plan");
+    }
+    assertThat(
+            jdbc.queryForObject(
+                "SELECT unexcused_minutes_account FROM student WHERE id = 1", Integer.class))
+        .isEqualTo(180);
     assertThat(resetCount()).isZero();
   }
 
@@ -531,10 +568,13 @@ class ClassAccountsIntegrationTest {
     Long added = students.create(1L, "Test", "Nachaufnahme", LocalDate.of(2008, 1, 1));
     jdbc.update("UPDATE student SET created_at = '2027-01-01 00:01:00' WHERE id = ?", added);
     setTime("2027-01-01T00:02:00Z");
-    assertThatThrownBy(() -> classes.changeBlockPlan(1L, 1L, next))
-        .hasMessage("FINAL_CLASS_RESET_REQUIRED");
-    assertThat(classes.resetAccounts(1L, 1L)).isEqualTo(7);
     classes.changeBlockPlan(1L, 1L, next);
+    assertThat(
+            jdbc.queryForList(
+                "SELECT student_id FROM attendance_audit WHERE student_id = ? AND event_type = 'ACCOUNT_RESET'",
+                Long.class,
+                added))
+        .containsExactly(added);
   }
 
   /** Prüft die Ablehnung eines beendeten Folgeplans auch bei gemeinsamem Löschdatum */
@@ -591,19 +631,54 @@ class ClassAccountsIntegrationTest {
     Long next = nextPlan();
     setTime("2027-06-29T22:00:00Z");
     assertThat(retention.deleteHistory()).isEqualTo(11);
-    assertThat(classes.resetAccounts(1L, 1L)).isEqualTo(6);
+    signIn("test.teacher.a");
+    classes.changeBlockPlan(1L, 1L, next);
     assertThat(
             jdbc.queryForObject(
                 "SELECT delete_after FROM deletion_date WHERE id = 1", LocalDate.class))
         .isEqualTo(LocalDate.of(2027, 6, 30));
-    assertThat(retention.deleteHistory()).isEqualTo(6);
     assertThat(resetCount()).isZero();
-    classes.changeBlockPlan(1L, 1L, next);
+    assertThat(
+            jdbc.queryForObject(
+                "SELECT unexcused_minutes_account FROM student WHERE id = 1", Integer.class))
+        .isZero();
     assertThat(
             jdbc.queryForObject(
                 "SELECT COUNT(*) FROM attendance WHERE student_id IN (1,2,3,4,5,6)", Integer.class))
         .isZero();
     assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM raw_scan", Integer.class)).isEqualTo(7);
+  }
+
+  /** Prüft Scan und Tagesabschluss, wenn der Wechsel am ersten Unterrichtstag erfolgt */
+  @Test
+  void booksFirstDayAfterThePlanChange() {
+    Long old = plans.create("August-A", LocalDate.of(2026, 8, 1), LocalDate.of(2026, 8, 27));
+    var firstDay = LocalDate.of(2026, 8, 31);
+    Long next = plans.create("August-B", firstDay, firstDay);
+    Long classId = classes.create("26Wechsel", 1L, old, 1L);
+    Long scanned = students.create(classId, "Test", "Scan", LocalDate.of(2008, 1, 1));
+    Long absent = students.create(classId, "Test", "Ohne Scan", LocalDate.of(2008, 1, 1));
+    jdbc.update(
+        "UPDATE student SET created_at = '2026-08-01 00:00:00' WHERE school_class_id = ?", classId);
+    setTime("2026-08-31T05:00:00Z");
+    classes.changeBlockPlan(classId, old, next);
+    jdbc.update(
+        "INSERT INTO block_assignment (id, block_plan_id, starts_on, ends_on) VALUES (3, ?, ?, ?)",
+        next,
+        firstDay,
+        firstDay);
+    jdbc.update("INSERT INTO class_block_assignment VALUES (?, 3)", classId);
+    setTime("2026-08-31T05:40:00Z");
+    assertThat(attendance.recordScan(scanned, 9001, Instant.parse("2026-08-31T05:40:00Z")))
+        .isTrue();
+    setTime("2026-08-31T08:45:00Z");
+    attendance.closeDueDays();
+    assertThat(
+            jdbc.queryForObject(
+                "SELECT unexcused_minutes_account FROM student WHERE id = ?",
+                Integer.class,
+                absent))
+        .isEqualTo(180);
   }
 
   /** Prüft die Resetsperre bei fehlender Historie vor Ablauf der Aufbewahrungsfrist */

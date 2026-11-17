@@ -12,10 +12,6 @@ const route = useRoute()
 
 const sidebarOpen = ref(false)
 
-const visibleAdministrationItems = computed(() =>
-  auth.isAdmin ? administrationNavItems : []
-)
-
 const roleLabel = computed(() => {
   switch (auth.user?.role) {
     case 'admin':
@@ -92,26 +88,17 @@ function handleSidebarKeydown(event: KeyboardEvent) {
         @keydown="handleSidebarKeydown"
       >
         <nav aria-label="Hauptnavigation">
-          <ul class="app-nav">
-            <li v-for="item in mainNavItems" :key="item.routeName">
-              <RouterLink
-                :to="{ name: item.routeName }"
-                class="app-nav__link"
-                active-class="app-nav__link--active"
-              >
-                <i class="pi" :class="item.icon" aria-hidden="true" />
-                <span>{{ item.label }}</span>
-              </RouterLink>
-            </li>
-          </ul>
-
-          <template v-if="visibleAdministrationItems.length">
-            <p class="app-nav__section-label">Administration</p>
+          <template
+            v-for="(items, index) in auth.isAdmin
+              ? [mainNavItems, administrationNavItems]
+              : [mainNavItems]"
+            :key="index"
+          >
+            <p v-if="index === 1" class="app-nav__section-label">
+              Administration
+            </p>
             <ul class="app-nav">
-              <li
-                v-for="item in visibleAdministrationItems"
-                :key="item.routeName"
-              >
+              <li v-for="item in items" :key="item.routeName">
                 <RouterLink
                   :to="{ name: item.routeName }"
                   class="app-nav__link"

@@ -26,6 +26,8 @@ public class SchoolClassService {
 
   private final DeletionDateService deletionDates;
 
+  private final RetentionService retention;
+
   private final Clock clock;
 
   public SchoolClassService(
@@ -34,12 +36,14 @@ public class SchoolClassService {
       AttendanceAccountingRepository accounting,
       AttendanceAccountingService verification,
       DeletionDateService deletionDates,
+      RetentionService retention,
       Clock clock) {
     this.classes = classes;
     this.authorization = authorization;
     this.accounting = accounting;
     this.verification = verification;
     this.deletionDates = deletionDates;
+    this.retention = retention;
     this.clock = clock;
   }
 
@@ -93,30 +97,42 @@ public class SchoolClassService {
   @Transactional
   public int resetAccounts(Long classId, Long expectedPlanId) {
     var actor = authorization.requireAdministrator();
-    var plan = lockExpectedPlan(classId, expectedPlanId);
+    return resetAccounts(lockExpectedPlan(classId, expectedPlanId), actor.id(), false);
+  }
+
+  private int resetAccounts(ClassPlan plan, Long actorId, boolean requireStudents) {
     var deadline = deletionDates.getOrCreate(plan.endsOn());
-    var accounts = accounting.lockAccounts(classId);
-    var now = LocalDateTime.ofInstant(clock.instant(), ZoneOffset.UTC);
+    var accounts = accounting.lockAccounts(plan.classId());
+    if (requireStudents && accounts.isEmpty()) {
+      throw new IllegalStateException("CLASS_HAS_NO_STUDENTS");
+    }
+    var now =
+        LocalDateTime.ofInstant(clock.instant(), ZoneOffset.UTC).truncatedTo(ChronoUnit.SECONDS);
     verification.requireNoRemainingSlots(plan, now);
-    verification.completeDays(
-        plan, accounts, deadline.getId(), now.truncatedTo(ChronoUnit.SECONDS));
-    accounts = accounting.lockAccounts(classId);
-    verification.requireFullyAccounted(plan, accounts, now);
+    if (verification.completeDays(plan, accounts, deadline.getId(), now) > 0) {
+      accounts = accounting.lockAccounts(plan.classId());
+    }
+    verification.requireFullyAccounted(plan, accounts, deadline.getId(), now);
     for (var account : accounts) {
-      accounting.reset(account, actor.id(), deadline.getId(), now.truncatedTo(ChronoUnit.SECONDS));
+      accounting.reset(account, actorId, deadline.getId(), now);
+    }
+    var today = AttendanceAccountingService.berlinDate(now);
+    if (!today.isBefore(deadline.getDeleteAfter())) {
+      retention.deleteDueAccountResets(plan.classId(), deadline.getId(), today);
     }
     return accounts.size();
   }
 
   /**
-   * Wechselt als Administrator nach Ende des bisherigen Plans und seiner Blöcke auf einen
-   * Folgeplan. Die Klasse muss Schüler haben, deren Fehlminutenkonten leer sind. Solange die
-   * bisherige Historie aufbewahrt wird, sind außerdem vollständige Abrechnung und ein
-   * abschließender Reset erforderlich. Die bisherigen Blockzuordnungen werden beim Wechsel entfernt
+   * Setzt als Administrator oder zuständige Klassenleitung nach Ende des bisherigen Plans und
+   * seiner Blöcke die Konten zurück und aktiviert den Folgeplan in derselben Transaktion
    */
   @Transactional
   public void changeBlockPlan(Long classId, Long expectedPlanId, Long nextPlanId) {
-    authorization.requireAdministrator();
+    var actor = authorization.currentStaff();
+    if (!actor.administrator()) {
+      authorization.requireClassManagement(classId, actor);
+    }
     var plan = lockExpectedPlan(classId, expectedPlanId);
     var now = LocalDateTime.ofInstant(clock.instant(), ZoneOffset.UTC);
     var today = AttendanceAccountingService.berlinDate(now);
@@ -133,16 +149,7 @@ public class SchoolClassService {
     if (nextPlan.endsOn().isBefore(today)) {
       throw new IllegalArgumentException("NEXT_PLAN_FINISHED");
     }
-    var deadline = deletionDates.getOrCreate(plan.endsOn());
-    var accounts = accounting.lockAccounts(classId);
-    if (accounts.isEmpty()) {
-      throw new IllegalStateException("CLASS_HAS_NO_STUDENTS");
-    }
-    if (accounts.stream().anyMatch(account -> account.unexcused() != 0 || account.excused() != 0)) {
-      throw new IllegalStateException("CLASS_ACCOUNTS_NOT_EMPTY");
-    }
-    verification.requireFullyAccounted(plan, accounts, now);
-    verification.requireFinalReset(plan, accounts, deadline.getId(), now);
+    resetAccounts(plan, actor.id(), true);
     classes.replacePlan(classId, nextPlanId);
   }
 

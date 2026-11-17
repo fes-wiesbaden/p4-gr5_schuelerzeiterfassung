@@ -50,6 +50,21 @@ public class RetentionRepository {
         today);
   }
 
+  /** Löscht fällige Resetprotokolle der Klasse für die bereits gesperrte Löschfrist */
+  public void deleteDueAccountResets(Long classId, Long deletionDateId, LocalDate today) {
+    jdbc.update(
+        """
+        DELETE a FROM attendance_audit a
+        JOIN student s ON s.id = a.student_id
+        JOIN deletion_date d ON d.id = a.deletion_date_id
+        WHERE s.school_class_id = ? AND d.id = ? AND d.delete_after <= ?
+          AND a.event_type = 'ACCOUNT_RESET' AND a.attendance_id IS NULL
+        """,
+        classId,
+        deletionDateId,
+        today);
+  }
+
   /** Löscht die Anwesenheit nach dem Entfernen ihrer Protokollverweise */
   public void deleteAttendance(Long attendanceId) {
     jdbc.update("DELETE FROM attendance WHERE id = ?", attendanceId);

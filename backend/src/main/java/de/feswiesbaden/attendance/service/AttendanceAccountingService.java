@@ -122,7 +122,7 @@ public class AttendanceAccountingService {
         students
             .findClassId(studentId, false)
             .orElseThrow(() -> new IllegalArgumentException("STUDENT_NOT_FOUND"));
-    authorization.requireClassAccess(classId);
+    authorization.requireClassAccess(classId, actor);
     if (status == null
         || !validTime(occurredAt)
         || !occurredAt.atZone(BERLIN).toLocalDate().equals(date)) {
@@ -186,7 +186,7 @@ public class AttendanceAccountingService {
     var slots = accounting.findSlots(plan.timetableId());
     int changed = 0;
     for (Account original : accounts) {
-      var history = history(original, now);
+      var history = history(plan, original, deletionDateId, now);
       var account = original;
       var start = firstAccountingDate(plan, account, history.resetDay());
       var today = berlinDate(now);
@@ -253,7 +253,7 @@ public class AttendanceAccountingService {
     if (account == null || !retained(plan, now) || date.isBefore(berlinDate(account.createdAt()))) {
       return null;
     }
-    var history = history(account, now);
+    var history = history(plan, account, deadline.getId(), now);
     if (!date.isAfter(history.resetDay())) {
       return null;
     }
@@ -391,13 +391,24 @@ public class AttendanceAccountingService {
   }
 
   /**
-   * Lädt Tagesanwesenheiten und Änderungsprotokolle und prüft ihre Übereinstimmung mit den Konten.
-   * Für die Kontensummen zählen nur Protokolle nach dem zuletzt eingefügten Kontenreset.
-   * Tagesanwesenheiten am oder vor dessen Berliner Datum dürfen nicht mehr korrigiert werden
+   * Prüft die Anwesenheiten und Protokolle des aktuellen Plans gegen die Konten. Der letzte Reset
+   * dieses Plans sperrt seinen Berliner Tag und alle früheren Tage des Plans.
    */
-  private History history(Account account, LocalDateTime now) {
-    var attendances = accounting.findAttendances(account.id());
-    var audits = accounting.findAudits(account.id());
+  private History history(ClassPlan plan, Account account, Long deletionDateId, LocalDateTime now) {
+    var attendances =
+        accounting.findAttendances(account.id()).stream()
+            .filter(
+                day -> !day.date().isBefore(plan.startsOn()) && !day.date().isAfter(plan.endsOn()))
+            .toList();
+    var attendanceIds = attendances.stream().map(DayAttendance::id).collect(Collectors.toSet());
+    var audits =
+        accounting.findAudits(account.id()).stream()
+            .filter(
+                audit ->
+                    audit.attendanceId() == null
+                        ? deletionDateId.equals(audit.deletionDateId())
+                        : attendanceIds.contains(audit.attendanceId()))
+            .toList();
     if (audits.stream().anyMatch(audit -> audit.occurredAt().isAfter(now))) {
       throw new IllegalStateException("INVALID_ATTENDANCE_HISTORY");
     }
@@ -414,7 +425,6 @@ public class AttendanceAccountingService {
             .max(Comparator.comparing(Audit::id));
     long resetId = reset.map(Audit::id).orElse(0L);
     LocalDate resetDay = reset.map(audit -> berlinDate(audit.occurredAt())).orElse(LocalDate.MIN);
-    var attendanceIds = attendances.stream().map(DayAttendance::id).collect(Collectors.toSet());
     if (audits.stream()
         .anyMatch(audit -> audit.id() > resetId && !attendanceIds.contains(audit.attendanceId()))) {
       throw new IllegalStateException("CLASS_NOT_FULLY_ACCOUNTED");
@@ -463,11 +473,12 @@ public class AttendanceAccountingService {
   }
 
   /**
-   * Verlangt beendete heutige Slots, nichtnegative Konten und eine vollständige Tagesabrechnung.
-   * Nach Ablauf der Aufbewahrungsfrist entfällt die Prüfung der dann gelöschten Historie. Der
-   * Aufrufer muss Klasse, Löschdatum und Schüler in derselben Transaktion gesperrt haben
+   * Prüft nach Ende der heutigen Slots die Konten und Tagesabrechnung. Nach Ablauf der
+   * Aufbewahrungsfrist entfällt die Prüfung der Historie. Der Aufrufer hält die Sperren für Klasse,
+   * Löschdatum und Schüler
    */
-  void requireFullyAccounted(ClassPlan plan, List<Account> accounts, LocalDateTime now) {
+  void requireFullyAccounted(
+      ClassPlan plan, List<Account> accounts, Long deletionDateId, LocalDateTime now) {
     var periods = accounting.findPeriods(plan.classId());
     var slots = accounting.findSlots(plan.timetableId());
     requirePlanPeriods(plan, periods);
@@ -475,12 +486,11 @@ public class AttendanceAccountingService {
     if (accounts.stream().anyMatch(account -> account.unexcused() < 0 || account.excused() < 0)) {
       throw new IllegalStateException("CLASS_NOT_FULLY_ACCOUNTED");
     }
-    requireNoRemainingSlots(plan, now);
-    if (!today.isBefore(plan.endsOn().plusMonths(6))) {
+    if (!retained(plan, now)) {
       return;
     }
     for (Account account : accounts) {
-      var history = history(account, now);
+      var history = history(plan, account, deletionDateId, now);
       var start = firstAccountingDate(plan, account, history.resetDay());
       for (LocalDate date = start; !date.isAfter(today); date = date.plusDays(1)) {
         var daySlots = slotsFor(plan, periods, slots, date);
@@ -574,35 +584,6 @@ public class AttendanceAccountingService {
       }
     }
     return new Contribution(unexcused / 60, excused / 60);
-  }
-
-  /**
-   * Verlangt für jeden Schüler einen Reset mit dem Löschdatum des bisherigen Plans. Der Reset muss
-   * nach dem letzten Berliner Plantag und frühestens zur neuesten Schüleranlage der Klasse erfolgt
-   * sein. Nach Ablauf der Aufbewahrungsfrist entfällt dieser Nachweis
-   */
-  void requireFinalReset(
-      ClassPlan plan, List<Account> accounts, Long deletionDateId, LocalDateTime now) {
-    if (!berlinDate(now).isBefore(plan.endsOn().plusMonths(6))) {
-      return;
-    }
-    var latestEnrollment =
-        accounts.stream().map(Account::createdAt).max(Comparator.naturalOrder()).orElseThrow();
-    for (Account account : accounts) {
-      boolean reset =
-          accounting.findAudits(account.id()).stream()
-              .anyMatch(
-                  audit ->
-                      audit.type() == AuditEventType.ACCOUNT_RESET
-                          && audit.attendanceId() == null
-                          && audit.deletionDateId().equals(deletionDateId)
-                          && berlinDate(audit.occurredAt()).isAfter(plan.endsOn())
-                          && !audit.occurredAt().isBefore(latestEnrollment)
-                          && !audit.occurredAt().isAfter(now));
-      if (!reset) {
-        throw new IllegalStateException("FINAL_CLASS_RESET_REQUIRED");
-      }
-    }
   }
 
   /** Prüft, ob der Status zum entschuldigten Minutenkonto beiträgt */

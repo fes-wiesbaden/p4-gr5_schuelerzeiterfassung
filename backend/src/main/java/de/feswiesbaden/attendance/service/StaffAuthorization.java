@@ -34,8 +34,7 @@ class StaffAuthorization {
   }
 
   /** Verlangt Zugriff über Administratorrolle, Klassenleitung oder Unterrichtszuordnung */
-  void requireClassAccess(Long classId) {
-    var actor = currentStaff();
+  void requireClassAccess(Long classId, StaffIdentity actor) {
     if (!classes.isAccessible(classId, actor.id(), actor.administrator())) {
       throw new AccessDeniedException("CLASS_ACCESS_DENIED");
     }
@@ -51,11 +50,10 @@ class StaffAuthorization {
   }
 
   /** Sperrt die Klasse und verlangt Administratorrechte oder die zugewiesene Klassenleitung */
-  void requireStudentManagement(Long classId) {
-    var actor = currentStaff();
+  void requireClassManagement(Long classId, StaffIdentity actor) {
     var teacher = classes.lockClassTeacher(classId);
     if (teacher.isEmpty() || (!actor.administrator() && !teacher.get().equals(actor.id()))) {
-      throw new AccessDeniedException("STUDENT_MANAGEMENT_DENIED");
+      throw new AccessDeniedException("CLASS_MANAGEMENT_DENIED");
     }
   }
 }

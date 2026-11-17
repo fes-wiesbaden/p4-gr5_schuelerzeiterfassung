@@ -32,6 +32,13 @@ export const useAuthStore = defineStore('auth', () => {
     errorMessage.value = ''
 
     try {
+      if (!sessionChecked.value) {
+        await loadCurrentUser()
+        if (!sessionChecked.value) {
+          errorMessage.value = SERVER_UNREACHABLE
+          return false
+        }
+      }
       const response = await postJson('/api/login', { username, password })
 
       if (!response.ok) {
@@ -85,10 +92,10 @@ export const useAuthStore = defineStore('auth', () => {
     try {
       const response = await getJson('/api/me')
       user.value = response.ok ? ((await response.json()) as AuthUser) : null
+      sessionChecked.value = response.ok || response.status === 401
     } catch {
       user.value = null
-    } finally {
-      sessionChecked.value = true
+      sessionChecked.value = false
     }
   }
 

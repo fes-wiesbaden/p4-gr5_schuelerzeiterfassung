@@ -48,4 +48,9 @@ public class RetentionService {
     }
     return audits;
   }
+
+  /** Entfernt beim Nachholen eines Resets fällige Resetprotokolle in derselben Transaktion */
+  void deleteDueAccountResets(Long classId, Long deletionDateId, LocalDate today) {
+    retention.deleteDueAccountResets(classId, deletionDateId, today);
+  }
 }

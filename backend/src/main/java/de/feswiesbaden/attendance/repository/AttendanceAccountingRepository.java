@@ -139,7 +139,7 @@ public class AttendanceAccountingRepository {
                 row.getObject("attendance_id", Long.class),
                 row.getLong("deletion_date_id"),
                 AuditEventType.valueOf(row.getString("event_type")),
-                row.getTimestamp("occurred_at").toLocalDateTime(),
+                row.getObject("occurred_at", LocalDateTime.class),
                 row.getString("new_status") == null
                     ? null
                     : AttendanceStatus.valueOf(row.getString("new_status")),
@@ -220,7 +220,7 @@ public class AttendanceAccountingRepository {
         row.getLong("id"),
         row.getInt("unexcused_minutes_account"),
         row.getInt("excused_minutes_account"),
-        row.getTimestamp("created_at").toLocalDateTime());
+        row.getObject("created_at", LocalDateTime.class));
   }
 
   /**

@@ -92,17 +92,13 @@ router.beforeEach(async (to) => {
     return auth.isLoggedIn ? { name: 'live-anwesenheit' } : true
   }
 
-  if (to.meta.public) {
-    return true
-  }
-
   // Das gewünschte Ziel wird gemerkt, damit es nach der Anmeldung direkt
   // aufgerufen werden kann
   if (!auth.isLoggedIn) {
     return { name: 'login', query: { weiter: to.fullPath } }
   }
 
-  if (to.meta.adminOnly && !auth.isAdmin) {
+  if (!to.matched.length || (to.meta.adminOnly && !auth.isAdmin)) {
     return { name: 'live-anwesenheit' }
   }
 })

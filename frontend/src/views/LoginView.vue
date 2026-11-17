@@ -16,8 +16,7 @@ const passwordVisible = ref(false)
 
 async function handleSubmit() {
   passwordVisible.value = false
-  const erfolgreich = await auth.login(username.value, password.value)
-  if (!erfolgreich) {
+  if (!(await auth.login(username.value, password.value))) {
     password.value = ''
     return
   }
