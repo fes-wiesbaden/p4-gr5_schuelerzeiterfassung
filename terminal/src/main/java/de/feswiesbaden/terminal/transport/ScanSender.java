@@ -14,18 +14,21 @@ import javax.net.ssl.SSLContext;
 
 /** Sendet Scans an das Backend und ordnet dessen Antworten für die Zustellung ein */
 public final class ScanSender {
-  // Wenn der Server keinen Code mitschickt, nehmen wir den Sammelcode aus #37.
+  // Unbekannte oder fehlende Antwortcodes werden durch einen festen, neutralen Code ersetzt
   private static final String FALLBACK_CODE = "SCAN_REJECTED";
 
-  // Der Scan wurde schon einmal angenommen. Gebucht ist gebucht, also zeigen
-  // wir das dem Schüler als Erfolg (Issue #26).
+  // Das Backend kennt diese Scan-ID bereits. Die Zustellung gilt dann als abgeschlossen
+  // und wird wie ein Erfolg angezeigt. Der Code allein belegt keine Anwesenheitsbuchung
   private static final String ALREADY_RECEIVED = "SCAN_ALREADY_RECEIVED";
 
   private final HttpClient client;
 
   private final URI endpoint;
 
-  /** Erstellt den HTTP-Client mit Verbindungsfrist und dem übergebenen TLS-Kontext */
+  /**
+   * Verlangt eine HTTPS-Adresse mit Host und einen TLS-Kontext und setzt fünf Sekunden
+   * Verbindungsfrist
+   */
   public ScanSender(String serverUrl, SSLContext sslContext) {
     this.endpoint = URI.create(serverUrl);
     if (!"https".equalsIgnoreCase(endpoint.getScheme()) || endpoint.getHost() == null) {
@@ -39,7 +42,10 @@ public final class ScanSender {
             .build();
   }
 
-  /** Sendet den Scan und erlaubt bei Verbindungsfehlern oder Unterbrechungen einen neuen Versuch */
+  /**
+   * Sendet den Scan als JSON mit zehn Sekunden Anfragefrist. Ein-/Ausgabefehler und Unterbrechungen
+   * liefern RETRY. Bei Unterbrechung bleibt das Interrupt-Flag gesetzt
+   */
   public SendResult send(Scan scan) {
     try {
       HttpRequest anfrage =
@@ -60,7 +66,10 @@ public final class ScanSender {
     }
   }
 
-  /** Liest den bekannten Duplikatcode und verwendet sonst den neutralen Fehlercode */
+  /**
+   * Übernimmt aus dem JSON-Feld code ausschließlich SCAN_ALREADY_RECEIVED. Fehlende oder andere
+   * Codes und unlesbares JSON ergeben den neutralen Code SCAN_REJECTED
+   */
   static String readCode(String antwortkoerper) {
     if (antwortkoerper == null || antwortkoerper.isBlank()) {
       return FALLBACK_CODE;
@@ -75,7 +84,11 @@ public final class ScanSender {
     }
   }
 
-  /** Wertet Erfolge und Ablehnungen aus und lässt andere Antworten erneut versuchen */
+  /**
+   * Wertet HTTP 2xx als ACCEPTED und HTTP 4xx als endgültige Ablehnung. Die Ausnahme
+   * SCAN_ALREADY_RECEIVED gilt auch bei HTTP 4xx als ACCEPTED. Alle übrigen HTTP-Statuswerte
+   * ergeben RETRY und lassen den Scan in der Warteschlange
+   */
   static SendResult interpret(int status, String code) {
     if (status >= 200 && status < 300) {
       return SendResult.accepted();

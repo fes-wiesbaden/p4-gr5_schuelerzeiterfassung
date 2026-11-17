@@ -17,6 +17,7 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
 
+/** Speichert Schüler mit Klasse, Kartenkennung und getrennten Fehlminutenkonten */
 @Entity
 @Table(name = "student")
 @Getter

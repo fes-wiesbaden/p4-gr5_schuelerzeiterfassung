@@ -21,7 +21,11 @@ public class RfidUidService {
     this.authorization = authorization;
   }
 
-  /** Prüft Administratorrechte und UID-Format und ordnet die Karte dem Schüler zu */
+  /**
+   * Verlangt Administratorrechte und eine UID aus 8, 14 oder 20 Hexzeichen in Großschreibung.
+   * Ordnet die Kennung dem Schüler zu. Gehört sie bereits einem anderen Schüler, wird die Zuordnung
+   * abgelehnt
+   */
   @Transactional
   public void assign(Long studentId, String uid) {
     authorization.requireAdministrator();

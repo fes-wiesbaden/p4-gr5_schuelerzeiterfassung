@@ -4,7 +4,7 @@ import java.security.Principal;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RestController;
 
-/** Stellt die öffentlichen Angaben zum angemeldeten Nutzer bereit */
+/** Stellt Anzeigenamen und Rolle für den angemeldeten Mitarbeiter bereit */
 @RestController
 public class LoginController {
   private final StaffLoginService staff;

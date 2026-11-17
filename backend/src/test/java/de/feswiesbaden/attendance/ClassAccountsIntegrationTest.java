@@ -40,6 +40,7 @@ import org.testcontainers.containers.MySQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
+/** Prüft klassenweise Kontenresets und Blockplanwechsel mit MySQL */
 @SpringBootTest(properties = "attendance.retention.scheduling.enabled=false")
 @Testcontainers
 @Sql("/fixtures/attendance.sql")
@@ -60,6 +61,7 @@ class ClassAccountsIntegrationTest {
 
   @MockitoBean Clock clock;
 
+  /** Meldet den Testadministrator an und setzt die Testuhr auf einen festen Zeitpunkt */
   @BeforeEach
   void prepare() {
     signIn("test.admin");
@@ -68,6 +70,7 @@ class ClassAccountsIntegrationTest {
         .thenAnswer(invocation -> Clock.fixed(clock.instant(), invocation.getArgument(0)));
   }
 
+  /** Entfernt den Sicherheitskontext und die Testdaten in der Reihenfolge ihrer Abhängigkeiten */
   @AfterEach
   void cleanup() {
     SecurityContextHolder.clearContext();
@@ -92,6 +95,7 @@ class ClassAccountsIntegrationTest {
     }
   }
 
+  /** Prüft wiederholte Klassenresets mit einem Audit je Schüler einschließlich leerer Konten */
   @Test
   void resetsTheClassRepeatedlyAndAuditsEveryStudentIncludingEmptyAccounts() {
     var attendances = jdbc.queryForList("SELECT * FROM attendance ORDER BY id");
@@ -157,12 +161,14 @@ class ClassAccountsIntegrationTest {
     assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM raw_scan", Integer.class)).isEqualTo(7);
   }
 
+  /** Setzt den angegebenen Testmitarbeiter als authentifizierten Benutzer */
   private void signIn(String username) {
     SecurityContextHolder.getContext()
         .setAuthentication(
             UsernamePasswordAuthenticationToken.authenticated(username, null, List.of()));
   }
 
+  /** Prüft den Planwechsel nach Abschlussreset bei erhaltener Klasse, Schülern und Lehrkräften */
   @Test
   void changesPlanAfterFinalResetAndKeepsClassStudentsAndTeachers() {
     setTime("2026-12-31T23:00:00Z");
@@ -192,6 +198,7 @@ class ClassAccountsIntegrationTest {
     assertThat(jdbc.queryForList("SELECT * FROM attendance_audit ORDER BY id")).isEqualTo(audits);
   }
 
+  /** Prüft die Ablehnung gebuchter Minuten an ungeplanten Tagen trotz passender Kontensumme */
   @Test
   void rejectsBookedMinutesOnAnUnplannedDayInsteadOfTrustingTheAccountBalance() {
     setTime("2026-09-15T16:00:00Z");
@@ -213,6 +220,7 @@ class ClassAccountsIntegrationTest {
         .isZero();
   }
 
+  /** Prüft sekundengenaue Resetzeiten für die unmittelbare Wiederholung */
   @Test
   void storesResetTimeAtDatabasePrecisionForImmediateRepeat() {
     setTime("2026-09-14T08:45:00.900Z");
@@ -225,6 +233,7 @@ class ClassAccountsIntegrationTest {
         .isEqualTo(java.sql.Timestamp.valueOf("2026-09-14 08:45:00"));
   }
 
+  /** Prüft, dass Slots ohne Dauer weder den Reset blockieren noch Anwesenheiten erfordern */
   @Test
   void zeroLengthSlotsNeitherBlockResetNorRequireAttendance() {
     jdbc.update("INSERT INTO timetable (id, name) VALUES (3, 'Nullzeit')");
@@ -245,6 +254,7 @@ class ClassAccountsIntegrationTest {
         .isZero();
   }
 
+  /** Prüft aktuelle Administratorrechte für Kontenreset und Planwechsel */
   @ParameterizedTest
   @ValueSource(strings = {"test.teacher.a", "test.teacher.b", "test.unknown", "missing"})
   void bothOperationsRequireCurrentAdministrator(String username) {
@@ -261,6 +271,7 @@ class ClassAccountsIntegrationTest {
     assertThat(resetCount()).isZero();
   }
 
+  /** Prüft fehlende Klassen und inzwischen geänderte Pläne ohne Änderung der Konten */
   @Test
   void rejectsMissingClassesAndStaleExpectedPlansWithoutChangingAccounts() {
     assertThatThrownBy(() -> classes.resetAccounts(999L, 1L)).hasMessage("CLASS_NOT_FOUND");
@@ -274,6 +285,7 @@ class ClassAccountsIntegrationTest {
     assertThat(resetCount()).isZero();
   }
 
+  /** Prüft die Resetsperre vor dem Ende aller heutigen Slots */
   @ParameterizedTest
   @ValueSource(strings = {"2026-09-14T05:29:59Z", "2026-09-14T07:01:00Z", "2026-09-14T08:44:59Z"})
   void rejectsResetBeforeAllOfTodaysSlotsHaveEnded(String now) {
@@ -282,6 +294,7 @@ class ClassAccountsIntegrationTest {
     assertThat(resetCount()).isZero();
   }
 
+  /** Prüft die Ablehnung unvollständiger oder widersprüchlicher Tagesabrechnungen */
   @ParameterizedTest
   @ValueSource(
       strings = {
@@ -313,6 +326,7 @@ class ClassAccountsIntegrationTest {
     assertThat(resetCount()).isZero();
   }
 
+  /** Prüft das Nachholen fehlender Tagesbuchungen innerhalb des Kontenresets */
   @ParameterizedTest
   @ValueSource(strings = {"missing_attendance", "partial_total"})
   void completesMissingAccountingBeforeResetInsteadOfWaitingForTheNightJob(String missing) {
@@ -339,6 +353,7 @@ class ClassAccountsIntegrationTest {
         .isEqualTo(-180);
   }
 
+  /** Prüft für jeden Status die beim Kontenreset protokollierten Minutenabzüge */
   @ParameterizedTest
   @CsvSource({
     "ANWESEND,0,0",
@@ -379,6 +394,7 @@ class ClassAccountsIntegrationTest {
         .isEqualTo(-excused);
   }
 
+  /** Prüft die Reihenfolge zeitgleicher Statusereignisse anhand ihrer Audit-ID */
   @Test
   void resolvesSameTimestampStatusEventsByTheirAuditId() {
     jdbc.update(
@@ -390,6 +406,7 @@ class ClassAccountsIntegrationTest {
     assertThat(classes.resetAccounts(1L, 1L)).isEqualTo(6);
   }
 
+  /** Prüft die Ablehnung nachträglicher Buchungen am bereits zurückgesetzten Tag */
   @Test
   void rejectsLaterBookingsOnTheResetDayAndDoesNotRebookEarlierDays() {
     assertThat(classes.resetAccounts(1L, 1L)).isEqualTo(6);
@@ -408,6 +425,7 @@ class ClassAccountsIntegrationTest {
         .isEqualTo(180);
   }
 
+  /** Prüft Tagesabschluss und anschließenden Reset für einen späteren geplanten Tag */
   @Test
   void aLaterResetFirstBooksTheNewPlannedDayAndThenResetsItsMinutes() {
     classes.resetAccounts(1L, 1L);
@@ -427,6 +445,10 @@ class ClassAccountsIntegrationTest {
         .isEqualTo(-180);
   }
 
+  /**
+   * Prüft, dass die Abrechnung mit dem ganzen Berliner Erstellungstag des Schülerdatensatzes
+   * beginnt
+   */
   @ParameterizedTest
   @CsvSource({"2026-09-14T08:45:00,true", "2026-09-14T22:30:00,false"})
   void expectedDaysStartWithTheWholeBerlinEnrollmentDay(
@@ -444,6 +466,7 @@ class ClassAccountsIntegrationTest {
         .isEqualTo(monday ? -180 : 0);
   }
 
+  /** Prüft das Zurückrollen aller Konten und Audits bei einem Fehler am zweiten Schüler */
   @Test
   void auditFailureOnTheSecondStudentRollsBackEveryAccountAndAudit() {
     var accounts = jdbc.queryForList("SELECT * FROM student ORDER BY id");
@@ -461,6 +484,7 @@ class ClassAccountsIntegrationTest {
     }
   }
 
+  /** Prüft Planende und einen abschließenden Reset nach dem letzten Berliner Plantag */
   @Test
   void planChangeNeedsPlanEndAndAFinalResetAfterThatBerlinDay() {
     Long next = nextPlan();
@@ -476,6 +500,7 @@ class ClassAccountsIntegrationTest {
     assertThatThrownBy(() -> classes.resetAccounts(1L, 1L)).hasMessage("CLASS_PLAN_CHANGED");
   }
 
+  /** Prüft offene Altblöcke, fehlende oder überlappende Folgepläne und nicht geleerte Konten */
   @Test
   void planChangeRejectsUnfinishedOldBlocksAndOverlappingOrMissingNewPlans() {
     Long next = nextPlan();
@@ -497,6 +522,7 @@ class ClassAccountsIntegrationTest {
     assertThat(resetCount()).isZero();
   }
 
+  /** Prüft den erneuten Abschlussreset nach einer späteren Schüleraufnahme */
   @Test
   void aNewStudentAfterFinalResetRequiresAnotherClassReset() {
     Long next = nextPlan();
@@ -511,6 +537,7 @@ class ClassAccountsIntegrationTest {
     classes.changeBlockPlan(1L, 1L, next);
   }
 
+  /** Prüft die Ablehnung eines beendeten Folgeplans auch bei gemeinsamem Löschdatum */
   @Test
   void rejectsFinishedTargetWithSharedRetentionDate() {
     Long first = plans.create("August-A", LocalDate.of(2026, 8, 1), LocalDate.of(2026, 8, 30));
@@ -542,6 +569,7 @@ class ClassAccountsIntegrationTest {
         .containsExactly(first);
   }
 
+  /** Prüft den Wechsel auf einen noch laufenden Folgeplan mit bereits vergangenem Beginn */
   @ParameterizedTest
   @ValueSource(strings = {"2027-01-02", "2027-12-31"})
   void acceptsRunningTargetWithPastStartDate(LocalDate endsOn) {
@@ -557,6 +585,7 @@ class ClassAccountsIntegrationTest {
         .containsExactly(next);
   }
 
+  /** Prüft Reset und Planwechsel nach Ablauf der Historie bei unveränderter Löschfrist */
   @Test
   void expiredHistoryIsUnnecessaryForResetAndPlanChangeWithoutExtendingRetention() {
     Long next = nextPlan();
@@ -577,6 +606,7 @@ class ClassAccountsIntegrationTest {
     assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM raw_scan", Integer.class)).isEqualTo(7);
   }
 
+  /** Prüft die Resetsperre bei fehlender Historie vor Ablauf der Aufbewahrungsfrist */
   @Test
   void missingHistoryBeforeRetentionExpiryStillPreventsReset() {
     setTime("2027-06-29T21:59:59Z");
@@ -586,6 +616,7 @@ class ClassAccountsIntegrationTest {
     assertThat(resetCount()).isZero();
   }
 
+  /** Prüft den wirkungslosen Reset und den abgelehnten Planwechsel einer leeren Klasse */
   @Test
   void anEmptyClassCanResetButCannotChangePlan() {
     setTime("2026-12-31T23:00:00Z");
@@ -596,11 +627,13 @@ class ClassAccountsIntegrationTest {
     assertThat(resetCount()).isZero();
   }
 
+  /** Zählt die gespeicherten Kontenreset-Audits */
   private int resetCount() {
     return jdbc.queryForObject(
         "SELECT COUNT(*) FROM attendance_audit WHERE event_type = 'ACCOUNT_RESET'", Integer.class);
   }
 
+  /** Prüft vollständige Schüleraudits für jeden von zwei parallelen Klassenresets */
   @Test
   void concurrentResetsEachAuditTheWholeClass() throws Exception {
     var barrier = new CyclicBarrier(2);
@@ -618,6 +651,9 @@ class ClassAccountsIntegrationTest {
         .containsExactly(2, 2, 2, 2, 2, 2);
   }
 
+  /**
+   * Prüft das Warten auf eine parallele Aufnahme und den Reset einschließlich des neuen Schülers
+   */
   @Test
   void resetWaitsForConcurrentEnrollmentAndIncludesTheNewStudent() throws Exception {
     setTime("2026-12-31T23:00:00Z");
@@ -680,6 +716,7 @@ class ClassAccountsIntegrationTest {
     }
   }
 
+  /** Startet einen Klassenreset nach der gemeinsamen Freigabe beider Testthreads */
   private int resetTogether(CyclicBarrier barrier) throws Exception {
     signIn("test.admin");
     try {
@@ -690,10 +727,12 @@ class ClassAccountsIntegrationTest {
     }
   }
 
+  /** Legt einen festen Folgeplan für den Planwechseltest an */
   private Long nextPlan() {
     return plans.create("Folgeplan", LocalDate.of(2027, 1, 1), LocalDate.of(2027, 12, 31));
   }
 
+  /** Setzt den aktuellen Zeitpunkt der Testuhr */
   private void setTime(String instant) {
     when(clock.instant()).thenReturn(Instant.parse(instant));
   }

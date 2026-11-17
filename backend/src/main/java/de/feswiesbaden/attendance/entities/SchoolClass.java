@@ -19,6 +19,7 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
 
+/** Verknüpft eine Klasse mit Lehrkräften, aktuellem Blockplan, Blöcken und Stundenplan */
 @Entity
 @Table(name = "school_class")
 @Getter

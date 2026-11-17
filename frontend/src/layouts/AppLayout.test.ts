@@ -12,7 +12,8 @@ describe('AppLayout Navigation', () => {
   beforeEach(async () => {
     setActivePinia(createPinia())
 
-    // Ohne angemeldeten Nutzer schickt der Router auf die Anmeldeseite.
+    // Simuliert eine bereits geprüfte Anmeldung, damit der Test die Navigation
+    // ohne Backend-Anfrage oder Weiterleitung zur Anmeldeseite aufbauen kann
     const auth = useAuthStore()
     auth.user = { name: 'A. Muster', role: 'admin' }
     auth.sessionChecked = true

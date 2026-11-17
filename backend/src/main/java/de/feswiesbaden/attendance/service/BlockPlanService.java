@@ -24,7 +24,11 @@ public class BlockPlanService {
     this.deletionDates = deletionDates;
   }
 
-  /** Prüft die Administratorrechte und speichert einen gültigen Blockplan mit seinem Löschdatum */
+  /**
+   * Prüft Administratorrechte, Name und Zeitraum und liefert die ID des angelegten Blockplans. Das
+   * berechnete Löschdatum wird in derselben Transaktion separat angelegt oder wiederverwendet. Der
+   * Blockplan speichert keinen Verweis darauf
+   */
   @Transactional
   public Long create(String name, LocalDate startsOn, LocalDate endsOn) {
     authorization.requireAdministrator();

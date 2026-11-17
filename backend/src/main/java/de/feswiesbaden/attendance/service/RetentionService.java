@@ -32,7 +32,11 @@ public class RetentionService {
     return retention.deleteRawScansThrough(cutoff);
   }
 
-  /** Löscht fällige Protokolle samt Anwesenheiten und liefert die Zahl gelöschter Protokolle */
+  /**
+   * Löscht fällige Änderungsprotokolle und die darüber ermittelten Tagesanwesenheiten. Konten,
+   * Stammdaten und Löschdatumszeilen bleiben bestehen. Der Rückgabewert zählt gelöschte Protokolle,
+   * einschließlich Kontenresets ohne Tagesanwesenheit
+   */
   @Transactional
   public int deleteHistory() {
     LocalDate today = LocalDate.now(clock.withZone(BERLIN));

@@ -1,6 +1,6 @@
 // RFID-Leser für das JavaFX-Terminal (Issue #29).
 //
-// Der ESP32 liest eine Karte und schickt pro Scan GENAU EINE JSON-Zeile in
+// Der ESP32 liest die Kartenkennung und sendet je ausgegebenem Scan eine JSON-Zeile in
 // UTF-8 über USB-Seriell an die JavaFX-Anwendung:
 //
 //     {"rfidUid":"04A3B2C1","terminalNumber":23102003}
@@ -8,8 +8,9 @@
 // Kein WLAN, kein NTP, kein TLS. Die gesicherte Verbindung baut allein JavaFX
 // zum Server auf. Der ESP32 hängt nur am Kabel.
 //
-// Es gibt keine Rückmeldung übers Kabel: läuft JavaFX gerade nicht, ist dieser
-// Scan weg. So ist es in #29 festgelegt.
+// JavaFX bestätigt den Empfang nicht über das Kabel. Der ESP32 speichert keine
+// offenen Scans und wiederholt keine unbestätigten Übertragungen. Ohne laufenden
+// JavaFX-Leser ist deshalb keine spätere Zustellung gewährleistet.
 //
 // Zeilen, die mit "#" beginnen, sind Meldungen für Menschen und werden von
 // JavaFX verworfen.
@@ -19,22 +20,20 @@
 //     MOSI   -> GPIO 23    MISO -> GPIO 19
 //     RST    -> GPIO 22    3V3 und GND entsprechend
 //
-// Benötigte Bibliothek: MFRC522 von GithubCommunity.
+// Benötigte Bibliothek: MFRC522 von GithubCommunity
 
 #include <SPI.h>
 #include <MFRC522.h>
 
-// Fest eingebaute Nummer dieses Terminals. Beim Aufspielen anpassen.
+// Fest eingebaute Nummer dieses Terminals. Beim Aufspielen anpassen
 const int TERMINAL_NUMBER = 23102003;
 
 const uint8_t PIN_SS = 5;
 const uint8_t PIN_RST = 22;
 const long BAUD = 115200;
 
-// Dieselbe Karte soll nicht dauernd melden, solange sie aufliegt. Eine
-// vergessene Karte erzeugte bei 1,5 Sekunden rund 13 Meldungen in 45
-// Sekunden und damit ebenso viele Rohscans. 30 Sekunden reichen, weil
-// Anwesenheit ohnehin nur beim ersten gueltigen Scan gebucht wird.
+// Unterdrückt die erneut erkannte, zuletzt gesendete UID bis mehr als 30 Sekunden
+// nach ihrer letzten Ausgabe. Eine andere UID wird ohne diese Wartezeit gesendet
 const unsigned long REPEAT_BLOCK_MS = 30000;
 
 MFRC522 reader(PIN_SS, PIN_RST);
@@ -51,10 +50,9 @@ void setup() {
   SPI.begin();
   reader.PCD_Init();
 
-  // Selbsttest: Ein angeschlossener RC522 meldet in VersionReg 0x91 oder 0x92.
-  // Steht dort 0x00 oder 0xFF, antwortet der Leser nicht und die Verkabelung
-  // stimmt nicht. Ohne diese Meldung sieht ein toter Leser aus wie eine Karte,
-  // die einfach nicht erkannt wird.
+  // Liest das Versionsregister als Verbindungskontrolle, nicht als vollständigen Selbsttest.
+  // 0x00 und 0xFF lösen den Hinweis auf eine fehlende Leserantwort aus. Alle anderen
+  // Werte werden als Bereitschaft gemeldet. Eine Verkabelungsprüfung erfolgt nicht automatisch
   byte version = reader.PCD_ReadRegister(MFRC522::VersionReg);
 
   Serial.print("# RC522 VersionReg 0x");
@@ -67,6 +65,7 @@ void setup() {
   }
 }
 
+// Wandelt jedes UID-Byte in genau zwei Hexzeichen um und verwendet Großbuchstaben
 String uidToHex(MFRC522::Uid uid) {
   String hex = "";
   for (byte i = 0; i < uid.size; i++) {
@@ -90,7 +89,7 @@ void loop() {
 
   if (uid != lastUid || jetzt - lastSeenAt > REPEAT_BLOCK_MS) {
     // JSON von Hand zusammenbauen. Die UID ist reines Hex, da muss nichts
-    // maskiert werden.
+    // maskiert werden
     Serial.print("{\"rfidUid\":\"");
     Serial.print(uid);
     Serial.print("\",\"terminalNumber\":");

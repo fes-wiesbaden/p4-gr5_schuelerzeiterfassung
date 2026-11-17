@@ -56,7 +56,7 @@ class ScanQueueTest {
     Path datei = ordner.resolve("puffer.jsonl");
     new ScanQueue(datei).add(Scan.of("UID-C", 3));
 
-    // Neue Instanz steht für einen Neustart der Anwendung.
+    // Neue Instanz steht für einen Neustart der Anwendung
     ScanQueue nachNeustart = new ScanQueue(datei);
 
     assertEquals(1, nachNeustart.size());

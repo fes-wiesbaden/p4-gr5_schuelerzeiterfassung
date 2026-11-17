@@ -13,6 +13,7 @@ import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+/** Verwaltet berechtigte Klassenzugriffe, Klassenanlage, Kontenresets und Planwechsel */
 @Service
 public class SchoolClassService {
   private final SchoolClassRepository classes;
@@ -42,6 +43,7 @@ public class SchoolClassService {
     this.clock = clock;
   }
 
+  /** Liefert die für den angemeldeten Mitarbeiter zugänglichen Klassen */
   @Transactional(readOnly = true)
   public List<ClassView> list() {
     var actor = authorization.currentStaff();
@@ -57,6 +59,7 @@ public class SchoolClassService {
         .toList();
   }
 
+  /** Prüft die Klassendaten und weist anlegende Lehrkräfte selbst als Klassenleitung zu */
   @Transactional
   public Long create(String classCode, Long classTeacherId, Long blockPlanId, Long timetableId) {
     var actor = authorization.currentStaff();
@@ -81,6 +84,12 @@ public class SchoolClassService {
     }
   }
 
+  /**
+   * Setzt als Administrator beide Fehlminutenkonten aller Klassenschüler zurück. Offene
+   * Tagesabrechnungen werden vorher nachgeholt. Noch laufende oder spätere heutige Slots verhindern
+   * den Reset. Jeder Schüler erhält ein ACCOUNT_RESET-Protokoll, auch bei leeren Konten. Der
+   * Rückgabewert ist die Zahl der zurückgesetzten Schüler
+   */
   @Transactional
   public int resetAccounts(Long classId, Long expectedPlanId) {
     var actor = authorization.requireAdministrator();
@@ -99,6 +108,12 @@ public class SchoolClassService {
     return accounts.size();
   }
 
+  /**
+   * Wechselt als Administrator nach Ende des bisherigen Plans und seiner Blöcke auf einen
+   * Folgeplan. Die Klasse muss Schüler haben, deren Fehlminutenkonten leer sind. Solange die
+   * bisherige Historie aufbewahrt wird, sind außerdem vollständige Abrechnung und ein
+   * abschließender Reset erforderlich. Die bisherigen Blockzuordnungen werden beim Wechsel entfernt
+   */
   @Transactional
   public void changeBlockPlan(Long classId, Long expectedPlanId, Long nextPlanId) {
     authorization.requireAdministrator();
@@ -131,6 +146,10 @@ public class SchoolClassService {
     classes.replacePlan(classId, nextPlanId);
   }
 
+  /**
+   * Sperrt Klasse und aktuellen Blockplan und vergleicht dessen ID mit der vom Aufrufer erwarteten
+   * ID
+   */
   private ClassPlan lockExpectedPlan(Long classId, Long expectedPlanId) {
     var plan =
         classes
@@ -142,6 +161,7 @@ public class SchoolClassService {
     return plan;
   }
 
+  /** Enthält die sichtbaren Klassendaten mit Klassenleitung und Planverweisen */
   public record ClassView(
       Long id, String classCode, Long classTeacherId, Long blockPlanId, Long timetableId) {}
 }

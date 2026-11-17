@@ -31,6 +31,11 @@ import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionTemplate;
 
+/**
+ * Berechnet Fehlminuten aus geplanten Unterrichtszeiten (Slots) und dem zeitlichen Statusverlauf.
+ * Scans, Statuskorrekturen und Tagesabschlüsse verwenden denselben Abgleich mit den bereits
+ * protokollierten Buchungen, damit Minuten nicht doppelt gebucht werden
+ */
 @Service
 public class AttendanceAccountingService {
   static final ZoneId BERLIN = ZoneId.of("Europe/Berlin");
@@ -68,7 +73,14 @@ public class AttendanceAccountingService {
     this.transactions = new TransactionTemplate(transactions);
   }
 
-  // Aufruf nach Identitäts-/UID-Prüfung in der gemeinsamen Rohscan-Transaktion (#26/#30).
+  /**
+   * Verarbeitet einen Scan nur in einem passenden Slot und zugeordneten Block. Nur ABWESEND und
+   * BETRIEBLICH_ENTSCHULDIGT dürfen zu ANWESEND wechseln. Abgelehnte Scans ändern weder
+   * Tagesanwesenheit noch Fehlminutenkonten. Der Rückgabewert true bedeutet, dass gebucht wurde.
+   *
+   * <p>Der Aufrufer muss zuvor Terminalidentität und Kartenkennung prüfen und den Rohscan in
+   * derselben Transaktion speichern
+   */
   @Transactional
   public boolean recordScan(Long studentId, int terminalId, Instant scannedAt) {
     if (!validTime(scannedAt)) {
@@ -96,6 +108,12 @@ public class AttendanceAccountingService {
         .changed();
   }
 
+  /**
+   * Korrigiert einen Status ab dem angegebenen Zeitpunkt im Berliner Kalendertag. Spätere
+   * Statusereignisse bleiben wirksam. Prüft Klassenrechte, Tageszugehörigkeit und eine nicht
+   * zukünftige, sekundengenaue Ereigniszeit. Liefert true, wenn ein Statuswechsel oder eine
+   * Änderung der Fehlminuten gebucht wurde
+   */
   @Transactional
   public boolean correctStatus(
       Long studentId, LocalDate date, AttendanceStatus status, Instant occurredAt) {
@@ -127,6 +145,11 @@ public class AttendanceAccountingService {
         .changed();
   }
 
+  /**
+   * Rechnet beendete geplante Unterrichtstage je Schüler ab, je Klasse in einer eigenen
+   * Transaktion. Fehler einer Klasse verhindern die übrigen Klassen nicht. Der Rückgabewert zählt
+   * Tagesanwesenheiten, für die eine neue Buchung entstanden ist
+   */
   public int closeDueDays() {
     int changed = 0;
     for (Long classId : accounting.findClassesToClose(berlinDate(now()))) {
@@ -149,7 +172,11 @@ public class AttendanceAccountingService {
     return changed;
   }
 
-  // Klasse, Löschfrist und Schüler sind bereits durch den Aufrufer gesperrt.
+  /**
+   * Rechnet geplante Tage ab, deren letzter Slot bereits beendet ist, und zählt neue
+   * Tagesbuchungen. Der Aufrufer muss Klasse, Löschdatum und Schüler in derselben Transaktion
+   * gesperrt haben
+   */
   int completeDays(ClassPlan plan, List<Account> accounts, Long deletionDateId, LocalDateTime now) {
     if (!retained(plan, now)) {
       return 0;
@@ -203,6 +230,11 @@ public class AttendanceAccountingService {
     return changed;
   }
 
+  /**
+   * Lädt und sperrt die Abrechnungsdaten eines geplanten Schülertags. Liefert null bei fehlendem
+   * Schüler, ungeplantem Tag, abgelaufener Aufbewahrungsfrist oder einem Tag vor der Schüleranlage
+   * beziehungsweise am oder vor dem letzten Berliner Resettag
+   */
   private Day lockDay(Long studentId, LocalDate date) {
     var classId = students.findClassId(studentId, false).orElse(null);
     if (classId == null) {
@@ -243,6 +275,11 @@ public class AttendanceAccountingService {
         now);
   }
 
+  /**
+   * Berechnet beide Fehlminutensummen des Tages und zieht die bereits protokollierten Summen ab.
+   * Nur diese Differenzen werden auf die Konten gebucht. Ein Statuswechsel wird auch ohne
+   * Minutenänderung protokolliert. Ohne Status- oder Minutenänderung entsteht keine Buchung
+   */
   private Booking reconcile(Day day, Change change) {
     var events = new ArrayList<>(day.audits());
     boolean statusChange = change.before() != change.after();
@@ -299,24 +336,34 @@ public class AttendanceAccountingService {
     return new Booking(account, true);
   }
 
+  /**
+   * Prüft, ob ein Zeitpunkt angegeben ist, keine Sekundenbruchteile hat und nicht in der Zukunft
+   * liegt
+   */
   private boolean validTime(Instant time) {
     return time != null && time.getNano() == 0 && !time.isAfter(clock.instant());
   }
 
+  /** Liefert die aktuelle UTC-Zeit auf ganze Sekunden gekürzt */
   private LocalDateTime now() {
     return LocalDateTime.ofInstant(clock.instant().truncatedTo(ChronoUnit.SECONDS), ZoneOffset.UTC);
   }
 
+  /**
+   * Prüft, ob der aktuelle Berliner Tag vor dem Löschdatum sechs Kalendermonate nach Planende liegt
+   */
   private static boolean retained(ClassPlan plan, LocalDateTime now) {
     return berlinDate(now).isBefore(plan.endsOn().plusMonths(6));
   }
 
+  /** Verlangt, dass alle zugeordneten Blöcke zum aktuellen Klassenplan gehören */
   private static void requirePlanPeriods(ClassPlan plan, List<Period> periods) {
     if (periods.stream().anyMatch(period -> !period.planId().equals(plan.planId()))) {
       throw new IllegalStateException("INVALID_CLASS_BLOCK_ASSIGNMENT");
     }
   }
 
+  /** Liefert die Slots des Wochentags innerhalb des Plans und eines zugeordneten Blocks */
   private static List<Slot> slotsFor(
       ClassPlan plan, List<Period> periods, List<Slot> slots, LocalDate date) {
     if (date.isBefore(plan.startsOn()) || date.isAfter(plan.endsOn()) || !active(periods, date)) {
@@ -325,6 +372,11 @@ public class AttendanceAccountingService {
     return slots.stream().filter(slot -> slot.weekday() == date.getDayOfWeek()).toList();
   }
 
+  /**
+   * Ermittelt den späteren Tag aus Planbeginn und dem Berliner Datum der Anlage des
+   * Schülerdatensatzes. Gab es einen Kontenreset, beginnt die Abrechnung frühestens am Folgetag des
+   * Resets
+   */
   private static LocalDate firstAccountingDate(
       ClassPlan plan, Account account, LocalDate resetDay) {
     var start = plan.startsOn();
@@ -338,6 +390,11 @@ public class AttendanceAccountingService {
     return start;
   }
 
+  /**
+   * Lädt Tagesanwesenheiten und Änderungsprotokolle und prüft ihre Übereinstimmung mit den Konten.
+   * Für die Kontensummen zählen nur Protokolle nach dem zuletzt eingefügten Kontenreset.
+   * Tagesanwesenheiten am oder vor dessen Berliner Datum dürfen nicht mehr korrigiert werden
+   */
   private History history(Account account, LocalDateTime now) {
     var attendances = accounting.findAttendances(account.id());
     var audits = accounting.findAudits(account.id());
@@ -393,6 +450,10 @@ public class AttendanceAccountingService {
     return new History(byDate, byAttendance, resetDay);
   }
 
+  /**
+   * Liefert den letzten Status bis einschließlich des angegebenen UTC-Zeitpunkts. Bei gleicher
+   * Ereigniszeit gewinnt die höhere Audit-ID. Ohne Statusereignis gilt ABWESEND
+   */
   private static AttendanceStatus statusAt(List<Audit> audits, LocalDateTime at) {
     return audits.stream()
         .filter(audit -> audit.status() != null && !audit.occurredAt().isAfter(at))
@@ -401,7 +462,11 @@ public class AttendanceAccountingService {
         .orElse(AttendanceStatus.ABWESEND);
   }
 
-  // Aufruf in der Klassentransaktion, nachdem Klasse, Löschfrist und Schüler gesperrt wurden.
+  /**
+   * Verlangt beendete heutige Slots, nichtnegative Konten und eine vollständige Tagesabrechnung.
+   * Nach Ablauf der Aufbewahrungsfrist entfällt die Prüfung der dann gelöschten Historie. Der
+   * Aufrufer muss Klasse, Löschdatum und Schüler in derselben Transaktion gesperrt haben
+   */
   void requireFullyAccounted(ClassPlan plan, List<Account> accounts, LocalDateTime now) {
     var periods = accounting.findPeriods(plan.classId());
     var slots = accounting.findSlots(plan.timetableId());
@@ -440,6 +505,10 @@ public class AttendanceAccountingService {
     }
   }
 
+  /**
+   * Verweigert den Vorgang, solange ein geplanter Slot des heutigen Berliner Tages noch nicht
+   * beendet ist
+   */
   void requireNoRemainingSlots(ClassPlan plan, LocalDateTime now) {
     var periods = accounting.findPeriods(plan.classId());
     requirePlanPeriods(plan, periods);
@@ -451,6 +520,15 @@ public class AttendanceAccountingService {
     }
   }
 
+  /**
+   * Berechnet Fehlminuten bis zum UTC-Zeitpunkt through für den Berliner Kalendertag date. Nur Zeit
+   * innerhalb der Slots zählt. Pausen und spätere Slotanteile bleiben unberücksichtigt. ABWESEND
+   * erhöht unentschuldigte Minuten, die drei Entschuldigungsstatus erhöhen entschuldigte Minuten.
+   * ANWESEND und BETRIEB erzeugen keine Fehlminuten.
+   *
+   * <p>Die Sekunden werden je Konto über alle Slots summiert und erst danach auf ganze Minuten
+   * abgerundet
+   */
   static Contribution calculate(
       LocalDate date, List<Slot> slots, List<Audit> audits, LocalDateTime through) {
     var events =
@@ -498,6 +576,11 @@ public class AttendanceAccountingService {
     return new Contribution(unexcused / 60, excused / 60);
   }
 
+  /**
+   * Verlangt für jeden Schüler einen Reset mit dem Löschdatum des bisherigen Plans. Der Reset muss
+   * nach dem letzten Berliner Plantag und frühestens zur neuesten Schüleranlage der Klasse erfolgt
+   * sein. Nach Ablauf der Aufbewahrungsfrist entfällt dieser Nachweis
+   */
   void requireFinalReset(
       ClassPlan plan, List<Account> accounts, Long deletionDateId, LocalDateTime now) {
     if (!berlinDate(now).isBefore(plan.endsOn().plusMonths(6))) {
@@ -522,32 +605,42 @@ public class AttendanceAccountingService {
     }
   }
 
+  /** Prüft, ob der Status zum entschuldigten Minutenkonto beiträgt */
   private static boolean excused(AttendanceStatus status) {
     return status == AttendanceStatus.ENTSCHULDIGT
         || status == AttendanceStatus.MIT_ATTEST_ENTSCHULDIGT
         || status == AttendanceStatus.BETRIEBLICH_ENTSCHULDIGT;
   }
 
+  /** Prüft, ob der Tag einschließlich der Grenzen in einem zugeordneten Block liegt */
   private static boolean active(List<Period> periods, LocalDate date) {
     return periods.stream()
         .anyMatch(period -> !date.isBefore(period.startsOn()) && !date.isAfter(period.endsOn()));
   }
 
+  /** Wandelt eine UTC-Zeit in den Berliner Kalendertag um */
   static LocalDate berlinDate(LocalDateTime utc) {
     return utc.atOffset(ZoneOffset.UTC).atZoneSameInstant(BERLIN).toLocalDate();
   }
 
+  /** Enthält die berechneten unentschuldigten und entschuldigten Tagesminuten */
   record Contribution(long unexcused, long excused) {}
 
+  /**
+   * Enthält Tagesanwesenheiten, deren Änderungsprotokolle und den Berliner Tag des letzten
+   * Kontenresets
+   */
   private record History(
       Map<LocalDate, DayAttendance> attendances,
       Map<Long, List<Audit>> byAttendance,
       LocalDate resetDay) {
+    /** Liefert die Protokolle einer Tagesanwesenheit oder eine leere Liste */
     List<Audit> dayAudits(DayAttendance attendance) {
       return attendance == null ? List.of() : byAttendance.getOrDefault(attendance.id(), List.of());
     }
   }
 
+  /** Bündelt die gesperrten Abrechnungsdaten eines Schülers für einen Tag */
   private record Day(
       ClassPlan plan,
       Account account,
@@ -558,6 +651,10 @@ public class AttendanceAccountingService {
       List<Audit> audits,
       LocalDateTime now) {}
 
+  /**
+   * Beschreibt das auslösende Ereignis mit vorherigem und neuem Status, UTC-Zeit und optionalem
+   * Akteur. Bei reinen Minutenbuchungen können beide Statuswerte null sein
+   */
   private record Change(
       AuditEventType type,
       AttendanceStatus before,
@@ -566,5 +663,9 @@ public class AttendanceAccountingService {
       Long staffId,
       Integer terminalId) {}
 
+  /**
+   * Enthält die resultierenden Fehlminutenkonten und gibt an, ob ein Änderungsprotokoll geschrieben
+   * wurde
+   */
   private record Booking(Account account, boolean changed) {}
 }

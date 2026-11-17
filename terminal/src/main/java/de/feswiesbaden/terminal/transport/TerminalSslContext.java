@@ -10,12 +10,18 @@ import javax.net.ssl.KeyManagerFactory;
 import javax.net.ssl.SSLContext;
 import javax.net.ssl.TrustManagerFactory;
 
-/** Lädt das Clientzertifikat und die vertrauenswürdigen Serverzertifikate für mTLS */
+/**
+ * Erstellt den TLS-Kontext aus Client-Schlüsselmaterial und vertrauenswürdigen Serverzertifikaten
+ */
 public final class TerminalSslContext {
 
   private TerminalSslContext() {}
 
-  /** Lädt beide PKCS12-Dateien für TLS und bricht bei fehlenden Zertifikaten ab */
+  /**
+   * Lädt Client-KeyStore und Server-Truststore als PKCS12-Dateien und erstellt daraus den
+   * TLS-Kontext. Fehlende oder unlesbare Dateien sowie Lade- und Initialisierungsfehler brechen den
+   * Vorgang ab
+   */
   public static SSLContext load(
       Path keystore, String keystorePassword, Path truststore, String truststorePassword) {
     if (keystore == null || !Files.isReadable(keystore)) {

@@ -8,6 +8,7 @@ import org.springframework.security.authentication.AnonymousAuthenticationToken;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Component;
 
+/** Prüft Mitarbeiterrechte anhand der aktuellen Rolle und Klassenzuordnung */
 @Component
 class StaffAuthorization {
   private final StaffAccessRepository staff;
@@ -19,6 +20,7 @@ class StaffAuthorization {
     this.classes = classes;
   }
 
+  /** Liefert den authentifizierten Mitarbeiter mit seiner aktuell gespeicherten Rolle */
   StaffIdentity currentStaff() {
     var authentication = SecurityContextHolder.getContext().getAuthentication();
     if (authentication == null
@@ -31,6 +33,7 @@ class StaffAuthorization {
         .orElseThrow(() -> new AccessDeniedException("STAFF_REQUIRED"));
   }
 
+  /** Verlangt Zugriff über Administratorrolle, Klassenleitung oder Unterrichtszuordnung */
   void requireClassAccess(Long classId) {
     var actor = currentStaff();
     if (!classes.isAccessible(classId, actor.id(), actor.administrator())) {
@@ -38,6 +41,7 @@ class StaffAuthorization {
     }
   }
 
+  /** Verlangt die aktuelle Administratorrolle und liefert den Mitarbeiter */
   StaffIdentity requireAdministrator() {
     var actor = currentStaff();
     if (!actor.administrator()) {
@@ -46,6 +50,7 @@ class StaffAuthorization {
     return actor;
   }
 
+  /** Sperrt die Klasse und verlangt Administratorrechte oder die zugewiesene Klassenleitung */
   void requireStudentManagement(Long classId) {
     var actor = currentStaff();
     var teacher = classes.lockClassTeacher(classId);

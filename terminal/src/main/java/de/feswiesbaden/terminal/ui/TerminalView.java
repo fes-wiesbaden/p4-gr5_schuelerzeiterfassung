@@ -22,7 +22,7 @@ public final class TerminalView {
   private static final Duration RUECKKEHR_NACH_BEREIT = Duration.seconds(2);
 
   // "Wird verarbeitet" würde sonst nur aufblitzen: die Antwort kommt oft schon
-  // nach gut hundert Millisekunden.
+  // nach gut hundert Millisekunden
   private static final Duration MINDESTENS_VERARBEITEN = Duration.seconds(1);
 
   private final BorderPane root = new BorderPane();
@@ -49,7 +49,7 @@ public final class TerminalView {
 
   private String naechsterCode;
 
-  /** Erstellt die Statusanzeige mit der üblichen Rückkehrzeit zur Bereitschaft */
+  /** Erstellt die Statusanzeige mit zwei Sekunden Rückkehrzeit zur Bereitschaft */
   public TerminalView() {
     this(RUECKKEHR_NACH_BEREIT);
   }
@@ -67,16 +67,23 @@ public final class TerminalView {
     show(ScanState.READY);
   }
 
+  /** Liefert den Wurzelknoten der Terminalansicht zum Einfügen in eine JavaFX-Szene */
   public BorderPane node() {
     return root;
   }
 
-  /** Plant den Statuswechsel im JavaFX-Thread ein und kehrt anschließend zur Bereitschaft zurück */
+  /**
+   * Plant den Statuswechsel im JavaFX-Thread ein. Jeder Zustand außer READY startet eine
+   * automatische Rückkehr zur Bereitschaft nach der eingestellten Rückkehrzeit
+   */
   public void showState(ScanState state) {
     Platform.runLater(() -> zeige(state, null));
   }
 
-  /** Zeigt nur den Speicherfehler oder einen neutralen Ablehnungscode an */
+  /**
+   * Zeigt LOCAL_STORAGE_FAILED unverändert an und ersetzt jeden anderen Fehlercode durch
+   * SCAN_REJECTED
+   */
   public void showError(String code) {
     String neutralCode = "LOCAL_STORAGE_FAILED".equals(code) ? code : "SCAN_REJECTED";
     Platform.runLater(() -> zeige(ScanState.ERROR, neutralCode));

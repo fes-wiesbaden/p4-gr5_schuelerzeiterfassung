@@ -28,13 +28,13 @@ public final class SerialScanSource implements ScanSource {
     this.baudRate = baudRate;
   }
 
-  /** Öffnet den seriellen Port, startet das Board und liest im Hintergrund */
+  /** Öffnet den seriellen Port, sendet einen Resetimpuls und startet den Hintergrundleser */
   @Override
   public void start(Consumer<Reading> onScan) {
     port = SerialPort.getCommPort(portName);
     port.setBaudRate(baudRate);
-    // Ohne Timeout meldet der Datenstrom sein Ende, sobald einmal nichts
-    // anliegt. Der Ablauf wird unten abgefangen.
+    // Höchstens eine Sekunde auf Daten warten. Ein Timeout wird in read abgefangen,
+    // damit der Leser auch während längerer Pausen zwischen Karten weiterläuft
     port.setComPortTimeouts(SerialPort.TIMEOUT_READ_BLOCKING, READ_TIMEOUT_MS, 0);
 
     if (!port.openPort()) {
@@ -78,7 +78,7 @@ public final class SerialScanSource implements ScanSource {
           }
           SerialLine.parse(zeile).ifPresent(onScan);
         } catch (SerialPortTimeoutException pause) {
-          // Pause zwischen zwei Karten, kein Grund aufzugeben.
+          // Pause zwischen zwei Karten, kein Grund aufzugeben
           continue;
         }
       }

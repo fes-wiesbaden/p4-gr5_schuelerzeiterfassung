@@ -31,6 +31,7 @@ import org.testcontainers.containers.MySQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
+/** Prüft Rollen, Klassenrechte und Schülerverwaltung mit MySQL */
 @SpringBootTest(properties = "attendance.retention.scheduling.enabled=false")
 @Testcontainers
 @Sql("/fixtures/attendance.sql")
@@ -50,6 +51,7 @@ class Issue23IntegrationTest {
 
   @Autowired ObjectMapper mapper;
 
+  /** Entfernt den Sicherheitskontext und die Testdaten in der Reihenfolge ihrer Abhängigkeiten */
   @AfterEach
   void cleanup() {
     SecurityContextHolder.clearContext();
@@ -74,6 +76,9 @@ class Issue23IntegrationTest {
     }
   }
 
+  /**
+   * Prüft die Klassensicht anhand von Klassenleitung, Unterrichtszuordnung und Administratorrolle
+   */
   @Test
   void listsOnlyClassesAuthorizedByClassTeacherOrTeachingAssignment() {
     jdbc.update("DELETE FROM teacher_class WHERE staff_id = 1 AND school_class_id = 1");
@@ -88,12 +93,14 @@ class Issue23IntegrationTest {
         .containsExactly(1L, 2L, 3L);
   }
 
+  /** Setzt den angegebenen Testmitarbeiter als authentifizierten Benutzer */
   private void signIn(String username) {
     SecurityContextHolder.getContext()
         .setAuthentication(
             UsernamePasswordAuthenticationToken.authenticated(username, null, List.of()));
   }
 
+  /** Prüft die Schülerverwaltung durch die Klassenleitung ohne zusätzliche Unterrichtszuordnung */
   @Test
   void classTeacherManagesStudentNamesAndBirthDateWithoutTeachingAssignment() {
     jdbc.update("DELETE FROM teacher_class WHERE staff_id = 1");
@@ -114,6 +121,7 @@ class Issue23IntegrationTest {
     assertThat(students.list(1L)).extracting(StudentService.StudentView::id).doesNotContain(id);
   }
 
+  /** Prüft Klassenanlage mit vorhandenen Plänen und serverseitig bestimmter Klassenleitung */
   @Test
   void createsClassesWithExistingPlansAndServerControlledClassTeacher() {
     signIn("test.teacher.b");
@@ -138,6 +146,7 @@ class Issue23IntegrationTest {
         .contains(new SchoolClassService.ClassView(other, "Admin-Klasse", 1L, 1L, 2L));
   }
 
+  /** Prüft, dass die gespeicherte Rolle auch bei veralteten Sitzungsrechten maßgeblich bleibt */
   @Test
   void usesCurrentPersistedRoleInsteadOfStaleAdministratorAuthorities() {
     SecurityContextHolder.getContext()
@@ -156,6 +165,7 @@ class Issue23IntegrationTest {
     assertThatThrownBy(() -> uids.remove(1L)).isInstanceOf(AccessDeniedException.class);
   }
 
+  /** Prüft Leserechte zugeordneter Lehrkräfte ohne Rechte zur Schülerverwaltung */
   @Test
   void teachingTeacherReadsButCannotManageStudents() {
     jdbc.update("INSERT INTO teacher_class (staff_id, school_class_id) VALUES (2, 1)");
@@ -171,6 +181,7 @@ class Issue23IntegrationTest {
     assertThat(students.list(1L)).hasSize(6);
   }
 
+  /** Prüft die Ablehnung fremder Klassen und Schüler ohne Datenänderung */
   @Test
   void rejectsAccessToForeignClassAndStudents() {
     signIn("test.teacher.b");
@@ -186,6 +197,10 @@ class Issue23IntegrationTest {
     assertThat(students.list(1L)).hasSize(6);
   }
 
+  /**
+   * Prüft, dass alle Verwaltungszugriffe einen authentifizierten gespeicherten Mitarbeiter
+   * verlangen
+   */
   @ParameterizedTest
   @ValueSource(strings = {"missing", "anonymous", "unauthenticated", "unknown"})
   void requiresAnAuthenticatedPersistedStaffMember(String principal) {
@@ -222,6 +237,9 @@ class Issue23IntegrationTest {
         .isInstanceOf(AccessDeniedException.class);
   }
 
+  /**
+   * Prüft klassenübergreifende Schülerverwaltung bei unveränderter Karte, Klasse und Minutenkonten
+   */
   @Test
   void administratorManagesStudentsAcrossClassesWithoutChangingUidClassOrAccounts() {
     signIn("test.admin");
@@ -245,6 +263,10 @@ class Issue23IntegrationTest {
     assertThat(students.list(3L)).hasSize(1);
   }
 
+  /**
+   * Prüft die Ablehnung einer Schülerlöschung mit Anwesenheits- oder Audithistorie ohne
+   * Datenverlust
+   */
   @ParameterizedTest
   @ValueSource(strings = {"attendance", "audit"})
   void rejectsDeletionWithAttendanceOrAuditHistoryWithoutDataLoss(String history) {
@@ -269,6 +291,7 @@ class Issue23IntegrationTest {
     assertThat(jdbc.queryForList("SELECT * FROM attendance_audit ORDER BY id")).isEqualTo(audits);
   }
 
+  /** Prüft unzulässige Klassenleitungen durch fremde, fehlende oder ungeeignete Mitarbeiter */
   @Test
   void cannotChooseForeignClassTeacherOrUseAdministratorAsClassTeacher() {
     signIn("test.teacher.a");
@@ -281,6 +304,7 @@ class Issue23IntegrationTest {
     assertThat(classes.list()).hasSize(3);
   }
 
+  /** Prüft Klassenkennung und vorhandene Pläne vor dem Speichern einer neuen Klasse */
   @Test
   void validatesClassCodeAndExistingPlansWithoutWriting() {
     signIn("test.admin");
@@ -297,6 +321,7 @@ class Issue23IntegrationTest {
     assertThat(classes.list()).hasSize(3);
   }
 
+  /** Prüft ungültige Schülerdaten und fehlende Schüler ohne Änderung gespeicherter Daten */
   @Test
   void validatesStudentNamesAndBirthDateWithoutChangingStoredData() {
     signIn("test.teacher.a");
@@ -321,6 +346,7 @@ class Issue23IntegrationTest {
     assertThat(students.list(1L)).hasSize(6);
   }
 
+  /** Prüft Schüleransichten und Fehlermeldungen auf den Schutz der Kartenkennungen */
   @Test
   void studentViewsExposeNoUidAndFailuresDoNotLogIt(CapturedOutput output) throws Exception {
     signIn("test.teacher.a");

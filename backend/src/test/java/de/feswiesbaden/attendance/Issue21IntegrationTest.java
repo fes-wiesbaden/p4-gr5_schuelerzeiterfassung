@@ -146,7 +146,7 @@ class Issue21IntegrationTest {
     assertThat(count("block_plan")).isEqualTo(1);
   }
 
-  /** Prüft die Ablehnung fehlender Mitarbeiter und Schüler */
+  /** Prüft die Ablehnung einer fehlenden Anmeldung und nicht vorhandener Schüler */
   @Test
   void rejectsMissingActorAndStudent() {
     SecurityContextHolder.clearContext();
@@ -325,7 +325,10 @@ class Issue21IntegrationTest {
     assertThat(retention.deleteHistory()).isZero();
   }
 
-  /** Prüft, dass ein noch benötigter Anwesenheitsverweis den gesamten Löschlauf zurückrollt */
+  /**
+   * Prüft, dass ein noch nicht fälliges Audit die Löschung seiner Anwesenheit verhindert und der
+   * gesamte Löschlauf ohne Teiländerungen zurückgesetzt wird
+   */
   @Test
   void nonDueAuditReferenceRollsBackEntireHistoryDeletion() {
     jdbc.update("INSERT INTO deletion_date (id, delete_after) VALUES (2, '2027-07-01')");

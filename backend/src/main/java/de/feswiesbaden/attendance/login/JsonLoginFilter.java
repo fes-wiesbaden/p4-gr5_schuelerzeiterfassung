@@ -25,7 +25,11 @@ public class JsonLoginFilter extends UsernamePasswordAuthenticationFilter {
         PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.POST, "/api/login"));
   }
 
-  /** Prüft Format und Länge der Zugangsdaten und übergibt sie an die Anmeldung */
+  /**
+   * Prüft JSON-Inhaltstyp, Pflichtfelder und Längengrenzen und lässt Spring Security die
+   * Zugangsdaten prüfen. Ungültige Eingaben erhalten HTTP 400, ein unzulässiger Inhaltstyp HTTP
+   * 415. In diesen Fällen wird keine Authentifizierung gestartet
+   */
   @Override
   public Authentication attemptAuthentication(
       HttpServletRequest request, HttpServletResponse response) {

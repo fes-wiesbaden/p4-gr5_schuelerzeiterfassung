@@ -20,6 +20,7 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
 
+/** Speichert den aktuellen Tagesstatus eines Schülers je Berliner Kalendertag */
 @Entity
 @Table(
     name = "attendance",

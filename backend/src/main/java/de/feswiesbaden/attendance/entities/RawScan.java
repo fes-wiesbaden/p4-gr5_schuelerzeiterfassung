@@ -14,6 +14,10 @@ import org.hibernate.annotations.Immutable;
 import org.hibernate.annotations.JdbcTypeCode;
 import org.hibernate.type.SqlTypes;
 
+/**
+ * Speichert Kartenkennung und UTC-Zeitpunkte eines Rohscans unter seiner eindeutigen Scan-ID. Ein
+ * Rohscan belegt den Empfang, unabhängig von einer fachlichen Anwesenheitsbuchung
+ */
 @Entity
 @Table(name = "raw_scan")
 @Immutable

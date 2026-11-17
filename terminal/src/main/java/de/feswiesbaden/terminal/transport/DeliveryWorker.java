@@ -33,7 +33,10 @@ public final class DeliveryWorker implements AutoCloseable {
     this.onResult = onResult;
   }
 
-  /** Startet die Zustellung sofort und danach mit fünf Sekunden Abstand zwischen den Durchläufen */
+  /**
+   * Plant den ersten Durchlauf sofort und weitere Durchläufe fünf Sekunden nach Ende des vorherigen
+   * ein
+   */
   public void start() {
     scheduler.scheduleWithFixedDelay(this::drain, 0, INTERVAL_SECONDS, TimeUnit.SECONDS);
   }
@@ -43,7 +46,11 @@ public final class DeliveryWorker implements AutoCloseable {
     scheduler.execute(this::drain);
   }
 
-  /** Sendet offene Scans der Reihe nach und entfernt sie erst nach einer endgültigen Antwort */
+  /**
+   * Sendet lesbare Scans in Dateireihenfolge und entfernt jeden nach einer endgültigen Antwort.
+   * Beim ersten RETRY endet der Durchlauf. Dieser und alle späteren Scans bleiben für den nächsten
+   * Versuch stehen
+   */
   private void drain() {
     try {
       for (Scan scan : List.copyOf(queue.pending())) {
@@ -64,7 +71,10 @@ public final class DeliveryWorker implements AutoCloseable {
     }
   }
 
-  /** Stoppt geplante und laufende Zustellversuche */
+  /**
+   * Verwirft wartende Aufträge und fordert den Abbruch eines laufenden Zustellversuchs per
+   * Interrupt an
+   */
   @Override
   public void close() {
     scheduler.shutdownNow();

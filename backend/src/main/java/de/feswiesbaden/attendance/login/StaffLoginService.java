@@ -27,7 +27,7 @@ public class StaffLoginService implements UserDetailsService {
         .build();
   }
 
-  /** Liefert den Anzeigenamen und die für das Frontend vorgesehene Rolle */
+  /** Liefert Vor- und Nachnamen sowie die Frontend-Rolle admin oder lehrkraft */
   public AuthUser currentUser(String username) {
     Staff account = find(username);
     return new AuthUser(

@@ -23,7 +23,11 @@ import javax.net.ssl.TrustManagerFactory;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+/** Prüft die erneute HTTPS-Zustellung gespeicherter Scans in Warteschlangenreihenfolge */
 class DeliveryWorkerTest {
+  /**
+   * Prüft den erneuten Versand des ältesten gespeicherten Scans vor einem neu hinzugefügten Scan
+   */
   @Test
   void retriesTheOldestPersistedScanBeforeSendingANewOne(@TempDir Path directory) throws Exception {
     var tls = tls(directory);
@@ -77,6 +81,7 @@ class DeliveryWorkerTest {
     }
   }
 
+  /** Erstellt einen lokalen TLS-Kontext mit Testzertifikat für den HTTPS-Testserver */
   private SSLContext tls(Path directory) throws Exception {
     var storePath = directory.resolve("server.p12");
     var keytool = Path.of(System.getProperty("java.home"), "bin", "keytool").toString();

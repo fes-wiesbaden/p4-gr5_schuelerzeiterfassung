@@ -50,7 +50,10 @@ class MySqlIntegrationTest {
         .doesNotContain("source", "block_plan_id");
   }
 
-  /** Prüft mehrere Kontenrücksetzungen für denselben Schüler mit gleichem Löschdatum */
+  /**
+   * Prüft, dass die Datenbank mehrere Reset-Protokolle je Schüler und Löschdatum ohne
+   * Anwesenheitsverweis erlaubt
+   */
   @Test
   void multipleResetsCanShareStudentAndDeletionDate() {
     jdbc.update(

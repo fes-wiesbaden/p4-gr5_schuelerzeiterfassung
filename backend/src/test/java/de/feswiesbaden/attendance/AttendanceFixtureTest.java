@@ -17,7 +17,7 @@ import org.testcontainers.containers.MySQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
-/** Prüft ob die Beispieldaten zum Anwesenheitsmodell passen */
+/** Prüft, ob die direkt geladenen SQL-Beispieldaten zum Anwesenheitsmodell passen */
 @SpringBootTest
 @Testcontainers
 @Transactional
@@ -160,7 +160,10 @@ class AttendanceFixtureTest {
         .isEqualTo(1);
   }
 
-  /** Prüft die Testkennungen und ob Scans zu den Berliner Unterrichtszeiten passen */
+  /**
+   * Prüft synthetische Kennungen, Scanzeitpunkte und die Planung der als SCAN protokollierten
+   * Buchungen
+   */
   @Test
   void scansHaveSyntheticValuesAndMatchBerlinScheduling() {
     assertThat(count("SELECT COUNT(*) FROM raw_scan")).isEqualTo(7);
@@ -180,7 +183,7 @@ class AttendanceFixtureTest {
                   OR scanned_at > created_at
                 """))
         .isZero();
-    // Beide festgelegten Montage liegen in der Berliner Sommerzeit (UTC+02:00).
+    // Beide festgelegten Montage liegen in der Berliner Sommerzeit (UTC+02:00)
     assertThat(
             count(
                 """
@@ -220,7 +223,7 @@ class AttendanceFixtureTest {
         .isEqualTo(2);
   }
 
-  /** Prüft dass eine doppelte Scan-ID die gespeicherten Anwesenheitsdaten nicht verändert */
+  /** Prüft die Datenbankablehnung einer doppelten Scan-ID bei unveränderten Anwesenheitsdaten */
   @Test
   void duplicateScanIdIsRejectedByDatabaseWithoutChangingSnapshot() {
     assertThatThrownBy(

@@ -9,6 +9,7 @@ import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+/** Verwaltet Schülerdaten mit Klassenrechten und Schutz bestehender Historie */
 @Service
 public class StudentService {
   private final StudentRepository students;
@@ -20,18 +21,21 @@ public class StudentService {
     this.authorization = authorization;
   }
 
+  /** Liefert die Schüler einer zugänglichen Klasse ohne Kartenkennungen */
   @Transactional(readOnly = true)
   public List<StudentView> list(Long classId) {
     authorization.requireClassAccess(classId);
     return students.findByClassId(classId).stream().map(this::view).toList();
   }
 
+  /** Liefert die Daten eines zugänglichen Schülers ohne Kartenkennung */
   @Transactional(readOnly = true)
   public StudentView get(Long studentId) {
     authorization.requireClassAccess(classOf(studentId));
     return view(students.findById(studentId));
   }
 
+  /** Legt als Administrator oder Klassenlehrkraft einen Schüler mit leeren Minutenkonten an */
   @Transactional
   public Long create(Long classId, String firstName, String lastName, LocalDate birthDate) {
     authorization.requireStudentManagement(classId);
@@ -46,6 +50,7 @@ public class StudentService {
     return student.getId();
   }
 
+  /** Prüft Verwaltungsrechte und ändert Namen und Geburtsdatum des Schülers */
   @Transactional
   public void update(Long studentId, String firstName, String lastName, LocalDate birthDate) {
     lockManagedStudent(studentId);
@@ -53,6 +58,10 @@ public class StudentService {
     students.update(studentId, firstName.strip(), lastName.strip(), birthDate);
   }
 
+  /**
+   * Löscht den Schüler nach Prüfung der Verwaltungsrechte. Verweise aus Tagesanwesenheiten oder
+   * Änderungsprotokollen verhindern die Löschung
+   */
   @Transactional
   public void delete(Long studentId) {
     lockManagedStudent(studentId);
@@ -63,6 +72,7 @@ public class StudentService {
     }
   }
 
+  /** Verlangt einen angemeldeten Mitarbeiter und ermittelt die Klasse eines vorhandenen Schülers */
   private Long classOf(Long studentId) {
     authorization.currentStaff();
     return students
@@ -70,6 +80,7 @@ public class StudentService {
         .orElseThrow(() -> new IllegalArgumentException("STUDENT_NOT_FOUND"));
   }
 
+  /** Prüft Verwaltungsrechte und sperrt den Schüler bei unveränderter Klassenzuordnung */
   private void lockManagedStudent(Long studentId) {
     Long classId = classOf(studentId);
     authorization.requireStudentManagement(classId);
@@ -78,6 +89,7 @@ public class StudentService {
     }
   }
 
+  /** Prüft Pflichtangaben und Längengrenzen der Schülerstammdaten */
   private void validate(String firstName, String lastName, LocalDate birthDate) {
     if (firstName == null
         || firstName.isBlank()
@@ -90,6 +102,7 @@ public class StudentService {
     }
   }
 
+  /** Erstellt aus den gelesenen Schülerdaten ein Antwortobjekt ohne Kartenkennung */
   private StudentView view(StudentData student) {
     return new StudentView(
         student.id(),
@@ -101,6 +114,7 @@ public class StudentService {
         student.excusedMinutes());
   }
 
+  /** Enthält sichtbare Schülerstammdaten, Klasse und getrennte Minutenkonten */
   public record StudentView(
       Long id,
       String firstName,

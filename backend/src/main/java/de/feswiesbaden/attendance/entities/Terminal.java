@@ -13,6 +13,7 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
 
+/** Ordnet eine feste Terminal-ID eindeutig einem Raum zu */
 @Entity
 @Table(name = "terminal")
 @Getter

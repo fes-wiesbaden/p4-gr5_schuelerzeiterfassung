@@ -76,7 +76,8 @@ class TimeIntervalMigrationTest {
 
     assertThat(TABLES.stream().map(this::rowsOf).toList()).isEqualTo(before);
 
-    // Korrektur nur synthetischer Testdaten; die Migration selbst verändert keine Daten.
+    // Nur der Test korrigiert die ungültigen Beispieldaten. Die Migration fügt
+    // Datenbankregeln hinzu und korrigiert keine bestehenden Fachdatensätze
     String correction =
         table.equals("timetable_slot") ? "end_time = start_time" : "ends_on = starts_on";
     jdbc.update("UPDATE " + table + " SET " + correction + " WHERE id = 1");

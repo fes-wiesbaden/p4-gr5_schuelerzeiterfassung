@@ -47,7 +47,7 @@ class TerminalViewTest {
     Parent ansicht = baueAnsicht();
 
     for (Node knoten : ansicht.lookupAll("*")) {
-      // Label ist zwar ein Control, kann man aber nicht bedienen.
+      // Label ist zwar ein Control, kann man aber nicht bedienen
       boolean bedienbar = knoten instanceof Control && !(knoten instanceof Label);
       assertFalse(bedienbar, "Bedienelement gefunden: " + knoten);
     }
@@ -84,7 +84,10 @@ class TerminalViewTest {
     warteAufText(ueberschrift, "Karte auflegen");
   }
 
-  /** Prüft neutrale Rückmeldungen ohne UID und speichert ein bereinigtes Bildschirmbild */
+  /**
+   * Prüft, dass ein als Fehlercode übergebener UID-Testwert nicht angezeigt wird, und speichert
+   * anschließend ein Bildschirmbild der geprüften Fehleransicht
+   */
   @Test
   void zeigtNurNeutraleRueckmeldungen(@TempDir(cleanup = CleanupMode.NEVER) Path ordner)
       throws Exception {

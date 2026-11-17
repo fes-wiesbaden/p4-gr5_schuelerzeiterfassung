@@ -9,8 +9,7 @@ import router from './router'
 import './styles.css'
 import 'primeicons/primeicons.css'
 
-// Aura bringt Gruen als Grundfarbe mit. Das Gestaltungskonzept nutzt das
-// Dunkelblau der Seitenleiste, deshalb wird die Farbskala hier ersetzt.
+// Verwendet für die Primärfarbe dieselbe dunkelblaue Farbskala wie für die Seitenleiste
 const AttendanceTheme = definePreset(Aura, {
   semantic: {
     primary: {

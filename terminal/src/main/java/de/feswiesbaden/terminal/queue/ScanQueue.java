@@ -29,7 +29,10 @@ public final class ScanQueue {
         StandardOpenOption.APPEND);
   }
 
-  /** Liest offene Scans und überspringt beschädigte Einträge ohne deren Inhalt zu protokollieren */
+  /**
+   * Liest Scans in Dateireihenfolge. Nicht als Scan lesbare Zeilen werden mit einem neutralen
+   * Fehlercode übersprungen. Die Datei selbst wird dabei nicht verändert
+   */
   public synchronized List<Scan> pending() throws IOException {
     List<Scan> offen = new ArrayList<>();
 
@@ -37,16 +40,17 @@ public final class ScanQueue {
       try {
         offen.add(Json.mapper().readValue(zeile, Scan.class));
       } catch (IOException kaputt) {
-        // Eine kaputte Zeile überspringen, sonst wäre der ganze Puffer verloren.
-        // Jackson-Fehlermeldungen können RFID-UIDs enthalten; nur Fehlercodes
-        // protokollieren.
+        // Andere lesbare Zeilen bleiben zustellbar. Die Jackson-Fehlermeldung wird nicht
+        // ausgegeben, weil sie die Kartenkennung aus der fehlerhaften Zeile enthalten kann
         System.err.println("Puffereintrag übersprungen: INVALID_QUEUE_ENTRY");
       }
     }
     return offen;
   }
 
-  /** Schreibt den Puffer ohne den angegebenen Scan neu und ersetzt danach die bisherige Datei */
+  /**
+   * Entfernt alle Dateizeilen, die die angegebene Scan-ID enthalten, und erhält die übrigen Zeilen
+   */
   public synchronized void remove(String scanId) throws IOException {
     List<String> bleiben = new ArrayList<>();
     for (String zeile : zeilen()) {
@@ -55,8 +59,8 @@ public final class ScanQueue {
       }
     }
 
-    // Erst in eine neue Datei schreiben und dann umbenennen, damit der Puffer
-    // nie halb geschrieben auf der Platte liegt.
+    // Erst die Ersatzdatei vollständig schreiben. Scheitert das Schreiben, bleibt
+    // die bisherige Warteschlangendatei erhalten. Erst danach wird sie ersetzt
     Path neu = file.resolveSibling(file.getFileName() + ".tmp");
     Files.write(neu, bleiben, StandardCharsets.UTF_8);
     Files.move(neu, file, StandardCopyOption.REPLACE_EXISTING);

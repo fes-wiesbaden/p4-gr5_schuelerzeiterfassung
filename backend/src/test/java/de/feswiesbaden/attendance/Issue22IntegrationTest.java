@@ -64,7 +64,7 @@ class Issue22IntegrationTest {
 
   private String hash;
 
-  /** Legt vor jedem Test eine Lehrkraft und einen Administrator mit BCrypt-Passwort an */
+  /** Legt vor jedem Test eine Lehrkraft und einen Administrator mit BCrypt-Passwort-Hash an */
   @BeforeEach
   void createAccounts() {
     hash = encoder.encode(PASSWORD);
@@ -319,7 +319,7 @@ class Issue22IntegrationTest {
     return client;
   }
 
-  /** Prüft die Sicherheitseinstellungen des angegebenen Cookies */
+  /** Prüft Path, Secure, SameSite=Strict und den erwarteten HttpOnly-Status des Antwortcookies */
   private void assertCookie(HttpResponse<String> response, String name, boolean httpOnly) {
     String header =
         response.headers().allValues("Set-Cookie").stream()
@@ -368,14 +368,17 @@ class Issue22IntegrationTest {
       return send(path, body, type, token);
     }
 
-    /** Sendet die Testanfrage, übernimmt Cookies und prüft auf Weiterleitungen */
+    /**
+     * Sendet die Testanfrage, aktualisiert gespeicherte Cookies und verlangt eine Antwort ohne
+     * Weiterleitung
+     */
     private HttpResponse<String> send(String path, String body, String type, String token)
         throws Exception {
       var request =
           HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + port + path))
               .timeout(Duration.ofSeconds(15));
-      // Direktes HTTP nur im Test, produktive Clients senden diese Cookies ausschließlich über
-      // HTTPS
+      // Der lokale Test sendet Cookies ausdrücklich als Header über HTTP.
+      // Browser würden Cookies mit Secure-Attribut nur über HTTPS senden
       if (!cookies.isEmpty()) {
         request.header(
             "Cookie",

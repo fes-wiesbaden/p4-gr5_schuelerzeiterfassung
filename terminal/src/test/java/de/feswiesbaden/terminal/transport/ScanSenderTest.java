@@ -12,6 +12,7 @@ import org.junit.jupiter.params.provider.ValueSource;
 /** Prüft die Einordnung von Serverantworten für die Scanzustellung */
 class ScanSenderTest {
 
+  /** Prüft die Ablehnung von Zieladressen ohne HTTPS-Schema oder Host */
   @ParameterizedTest
   @ValueSource(
       strings = {
@@ -25,19 +26,21 @@ class ScanSenderTest {
         IllegalArgumentException.class, () -> new ScanSender(adresse, SSLContext.getDefault()));
   }
 
+  /** Prüft, dass der Sender ohne TLS-Kontext nicht erstellt werden kann */
   @Test
   void verlangtEinenTlsKontext() {
     assertThrows(
         NullPointerException.class, () -> new ScanSender("https://127.0.0.1/api/scans", null));
   }
 
+  /** Prüft die Erstellung mit HTTPS-Adresse und TLS-Kontext, ohne eine Verbindung aufzubauen */
   @Test
   void akzeptiertHttpsMitTlsKontext() {
     assertDoesNotThrow(
         () -> new ScanSender("https://127.0.0.1/api/scans", SSLContext.getDefault()));
   }
 
-  /** Prüft, dass HTTP-Erfolgsantworten als angenommener Scan gelten */
+  /** Prüft, dass der Sender HTTP 200 und 201 als ACCEPTED einordnet */
   @Test
   void zweihundertIstEineErfolgreicheBuchung() {
     assertEquals(SendResult.Status.ACCEPTED, ScanSender.interpret(200, null).status());

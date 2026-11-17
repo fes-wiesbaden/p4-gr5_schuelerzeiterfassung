@@ -8,6 +8,10 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.support.GeneratedKeyHolder;
 import org.springframework.stereotype.Repository;
 
+/**
+ * Liest Klassenzuordnungen und Planungsdaten und speichert Klassen und Planwechsel. Die Services
+ * müssen die übergebenen Mitarbeiter-IDs und Administratorrechte zuvor ermitteln
+ */
 @Repository
 public class SchoolClassRepository {
   private static final String CLASS_ACCESS =
@@ -22,6 +26,10 @@ public class SchoolClassRepository {
     this.jdbc = jdbc;
   }
 
+  /**
+   * Liefert eigene und zugeordnete Klassen des Mitarbeiters. Bei administrator=true werden alle
+   * Klassen zurückgegeben
+   */
   public List<ClassData> findAccessible(Long staffId, boolean administrator) {
     return jdbc.query(
         "SELECT c.id, c.class_code, c.class_teacher_id, c.block_plan_id, c.timetable_id"
@@ -40,6 +48,10 @@ public class SchoolClassRepository {
         staffId);
   }
 
+  /**
+   * Prüft, ob die Klasse existiert und über Administratorstatus, Klassenleitung oder Lehrzuordnung
+   * zugänglich ist
+   */
   public boolean isAccessible(Long classId, Long staffId, boolean administrator) {
     return !jdbc.queryForList(
             "SELECT c.id FROM school_class c WHERE c.id = ? AND " + CLASS_ACCESS,
@@ -51,6 +63,9 @@ public class SchoolClassRepository {
         .isEmpty();
   }
 
+  /**
+   * Sperrt den Klassendatensatz und liefert die ID der Klassenlehrkraft, falls die Klasse existiert
+   */
   public Optional<Long> lockClassTeacher(Long classId) {
     return jdbc
         .queryForList(
@@ -61,22 +76,26 @@ public class SchoolClassRepository {
         .findFirst();
   }
 
+  /** Prüft, ob der Mitarbeiter als Lehrkraft gespeichert ist */
   public boolean hasTeacher(Long staffId) {
     return !jdbc.queryForList(
             "SELECT id FROM staff WHERE id = ? AND role = 'LEHRKRAFT'", Long.class, staffId)
         .isEmpty();
   }
 
+  /** Prüft, ob der Blockplan existiert */
   public boolean hasBlockPlan(Long planId) {
     return !jdbc.queryForList("SELECT id FROM block_plan WHERE id = ?", Long.class, planId)
         .isEmpty();
   }
 
+  /** Prüft, ob der Stundenplan existiert */
   public boolean hasTimetable(Long timetableId) {
     return !jdbc.queryForList("SELECT id FROM timetable WHERE id = ?", Long.class, timetableId)
         .isEmpty();
   }
 
+  /** Speichert eine Klasse mit Lehrkraft und Plänen und liefert ihre erzeugte ID */
   public Long insert(String classCode, Long classTeacherId, Long blockPlanId, Long timetableId) {
     var key = new GeneratedKeyHolder();
     jdbc.update(
@@ -96,6 +115,7 @@ public class SchoolClassRepository {
     return key.getKey().longValue();
   }
 
+  /** Sperrt Klasse und aktuellen Blockplan und liefert deren Planungsdaten */
   public Optional<ClassPlan> lockPlan(Long classId) {
     return jdbc
         .query(
@@ -113,6 +133,7 @@ public class SchoolClassRepository {
         .findFirst();
   }
 
+  /** Lädt Beginn und Ende des Blockplans mit Lesesperre */
   public Optional<PlanDates> lockPlanDates(Long planId) {
     return jdbc
         .query(
@@ -124,6 +145,7 @@ public class SchoolClassRepository {
         .findFirst();
   }
 
+  /** Prüft, ob der Blockplan Blöcke enthält, deren Enddatum am angegebenen Tag oder danach liegt */
   public boolean hasUnfinishedBlocks(Long planId, LocalDate today) {
     return !jdbc.queryForList(
             "SELECT id FROM block_assignment WHERE block_plan_id = ? AND ends_on >= ? FOR UPDATE",
@@ -133,16 +155,20 @@ public class SchoolClassRepository {
         .isEmpty();
   }
 
+  /** Entfernt die bisherigen Blockzuordnungen und ersetzt den aktuellen Blockplan */
   public void replacePlan(Long classId, Long planId) {
     jdbc.update("DELETE FROM class_block_assignment WHERE school_class_id = ?", classId);
     jdbc.update("UPDATE school_class SET block_plan_id = ? WHERE id = ?", planId, classId);
   }
 
+  /** Enthält Klassen-, Blockplan- und Stundenplan-ID sowie Beginn und Ende des Blockplans */
   public record ClassPlan(
       Long classId, Long planId, Long timetableId, LocalDate startsOn, LocalDate endsOn) {}
 
+  /** Enthält Beginn und Ende eines Blockplans */
   public record PlanDates(LocalDate startsOn, LocalDate endsOn) {}
 
+  /** Enthält Klassenkennung, Klassenlehrkraft und aktuelle Planverweise */
   public record ClassData(
       Long id, String classCode, Long classTeacherId, Long blockPlanId, Long timetableId) {}
 }

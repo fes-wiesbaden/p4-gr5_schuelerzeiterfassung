@@ -8,9 +8,13 @@ public final class SerialLine {
 
   private SerialLine() {}
 
+  /** Enthält die übertragene Kartenkennung und Terminalnummer, noch ohne Scan-ID oder Zeitpunkt */
   public record Reading(String rfidUid, int terminalNumber) {}
 
-  /** Liest UID und Terminalnummer aus einer JSON-Zeile und verwirft unlesbare oder leere Scans */
+  /**
+   * Liest Kartenkennung und Terminalnummer aus JSON und verwirft unlesbare Zeilen oder leere
+   * Kennungen. Das UID-Format und die Gültigkeit der Terminalnummer werden hier nicht geprüft
+   */
   public static Optional<Reading> parse(String zeile) {
     if (zeile == null || zeile.isBlank()) {
       return Optional.empty();
@@ -23,7 +27,7 @@ public final class SerialLine {
       }
       return Optional.of(gelesen);
     } catch (Exception keinScan) {
-      // Absichtlich keine Ausgabe: sonst stünde die Zeile samt UID im Log.
+      // Absichtlich keine Ausgabe: sonst stünde die Zeile samt UID im Log
       return Optional.empty();
     }
   }

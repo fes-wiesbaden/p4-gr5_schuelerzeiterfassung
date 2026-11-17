@@ -44,6 +44,7 @@ import org.testcontainers.containers.MySQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
+/** Prüft Tagesstatus, Minutenabrechnung und unveränderliche Audits mit MySQL */
 @SpringBootTest
 @Testcontainers
 @Sql("/fixtures/attendance.sql")
@@ -66,6 +67,7 @@ class AttendanceAccountingIntegrationTest {
 
   @MockitoBean Clock clock;
 
+  /** Leert die Tagesabrechnung und setzt Mitarbeiter und Testuhr auf feste Ausgangswerte */
   @BeforeEach
   void prepare() {
     jdbc.update("DELETE FROM attendance_audit");
@@ -77,6 +79,7 @@ class AttendanceAccountingIntegrationTest {
         .thenAnswer(invocation -> Clock.fixed(clock.instant(), invocation.getArgument(0)));
   }
 
+  /** Entfernt den Sicherheitskontext und die Testdaten in der Reihenfolge ihrer Abhängigkeiten */
   @AfterEach
   void cleanup() {
     SecurityContextHolder.clearContext();
@@ -101,6 +104,7 @@ class AttendanceAccountingIntegrationTest {
     }
   }
 
+  /** Prüft Minutenkonten und Auditfelder für jeden Tagesstatus */
   @ParameterizedTest
   @CsvSource({
     "ANWESEND,0,0",
@@ -132,6 +136,9 @@ class AttendanceAccountingIntegrationTest {
         .containsEntry("excused_minutes_delta", excused);
   }
 
+  /**
+   * Prüft Statuswechsel mit Null-Deltas, unveränderte ältere Audits und wirkungslose Wiederholungen
+   */
   @ParameterizedTest
   @CsvSource({
     "ANWESEND,ABWESEND,180,0",
@@ -173,6 +180,7 @@ class AttendanceAccountingIntegrationTest {
     assertThat(jdbc.queryForList("SELECT * FROM attendance_audit ORDER BY id")).isEqualTo(audits);
   }
 
+  /** Prüft den Abschluss geplanter Tage und die Wiederholung ohne zusätzliche Buchungen */
   @Test
   void closesOnlyExpectedDaysAndRepeatsWithoutAnyNewBooking() {
     assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM attendance", Integer.class)).isZero();
@@ -193,6 +201,7 @@ class AttendanceAccountingIntegrationTest {
     assertThat(jdbc.queryForList("SELECT * FROM attendance_audit ORDER BY id")).isEqualTo(audits);
   }
 
+  /** Prüft, dass nur vergangene Slotanteile und keine Pausen gebucht werden */
   @Test
   void neverBooksFutureSlotPartsOrPausesDuringTheCurrentDay() {
     var at = Instant.parse("2026-09-14T06:00:00Z");
@@ -219,6 +228,7 @@ class AttendanceAccountingIntegrationTest {
         .isEqualTo(2);
   }
 
+  /** Prüft die Addition von Slotanteilen und die getrennte Abrundung beider Minutenkonten */
   @ParameterizedTest
   @CsvSource({"ABWESEND,1", "BETRIEBLICH_ENTSCHULDIGT,0"})
   void addsPartialMinutesAcrossSlotsAndRoundsEachAccountSeparately(
@@ -231,6 +241,7 @@ class AttendanceAccountingIntegrationTest {
     assertAccount(1, unexcused, 0);
   }
 
+  /** Prüft rückwirkendes Entschuldigen bei Erhalt späterer Scans und bestehender Audits */
   @Test
   void excusesOnlyTheAffectedIntervalAndKeepsLaterScansAndAudits() {
     scan(1, "2026-09-14T07:15:00Z");
@@ -256,6 +267,10 @@ class AttendanceAccountingIntegrationTest {
         .isEqualTo("ANWESEND");
   }
 
+  /**
+   * Prüft verspätet zugestellte Scans anhand ihrer ursprünglichen Zeit und späterer
+   * Statusereignisse
+   */
   @Test
   void insertsEarlierScansByTheirOriginalTimeWithoutOverwritingLaterEvents() {
     assertThat(scan(1, "2026-09-14T07:15:00Z")).isTrue();
@@ -276,6 +291,7 @@ class AttendanceAccountingIntegrationTest {
         .isEqualTo(java.sql.Timestamp.valueOf("2026-09-14 05:30:00"));
   }
 
+  /** Prüft die unveränderten Tages- und Kontendaten bei Scans mit unzulässigem Ausgangsstatus */
   @ParameterizedTest
   @EnumSource(
       value = AttendanceStatus.class,
@@ -291,6 +307,10 @@ class AttendanceAccountingIntegrationTest {
     assertThat(jdbc.queryForList("SELECT * FROM attendance_audit ORDER BY id")).isEqualTo(audits);
   }
 
+  /**
+   * Prüft die Ablehnung ungültiger Scanzeiten, Terminalräume und Blockzuordnungen ohne neue
+   * Anwesenheit
+   */
   @Test
   void rejectsInvalidScanTimesRoomsAndBlocksWithoutCreatingAnAttendance() {
     assertThat(scan(1, "2026-09-14T05:29:59Z")).isFalse();
@@ -305,6 +325,7 @@ class AttendanceAccountingIntegrationTest {
         .isZero();
   }
 
+  /** Prüft Klassenrechte, Berliner Tagesgrenzen und das Verbot zukünftiger Korrekturzeiten */
   @Test
   void enforcesStaffAccessAndTheAffectedBerlinDay() {
     signIn("test.teacher.b");
@@ -344,6 +365,9 @@ class AttendanceAccountingIntegrationTest {
     assertAccount(1, 0, 180);
   }
 
+  /**
+   * Prüft vergangene Tageskorrekturen und den protokollierten Akteur für alle berechtigten Rollen
+   */
   @ParameterizedTest
   @CsvSource({"test.teacher.a,1", "test.teacher.b,2", "test.admin,3"})
   void permitsPastDayCorrectionsForClassTeacherAssignedTeacherAndAdministrator(
@@ -366,6 +390,7 @@ class AttendanceAccountingIntegrationTest {
         .containsEntry("created_at", LocalDateTime.ofInstant(clock.instant(), ZoneOffset.UTC));
   }
 
+  /** Prüft nachgeholte Tagesabschlüsse beim Reset und die Sperre des gesamten Berliner Resettags */
   @ParameterizedTest
   @ValueSource(strings = {"2026-09-14T09:00:00Z", "2026-09-15T09:00:00Z"})
   void resetCompletesMissingDaysAtomicallyAndLocksItsWholeBerlinDay(String correctionTime) {
@@ -409,6 +434,10 @@ class AttendanceAccountingIntegrationTest {
         .isEqualTo(7);
   }
 
+  /**
+   * Prüft, dass die Löschung abgelaufener Historie Konten erhält und spätere Aufrufe keine Historie
+   * neu anlegen
+   */
   @Test
   void neverRecreatesExpiredHistoryOrResetsAccountsDuringRetention() {
     accounting.closeDueDays();
@@ -420,6 +449,7 @@ class AttendanceAccountingIntegrationTest {
     assertAccount(1, 180, 0);
   }
 
+  /** Prüft das Zurückrollen von Anwesenheit und Konto bei einem Fehler im Audit */
   @ParameterizedTest
   @ValueSource(strings = {"SCAN", "STATUS_CHANGE"})
   void failedAuditRollsBackTheNewAttendanceAndAccount(String eventType) {
@@ -448,6 +478,9 @@ class AttendanceAccountingIntegrationTest {
     }
   }
 
+  /**
+   * Prüft das Zurückrollen einer fehlerhaften Klasse und den unabhängigen Abschluss der nächsten
+   */
   @Test
   void failedClassCloseRollsBackThatClassAndStillProcessesTheNextClass() {
     jdbc.execute(
@@ -465,6 +498,7 @@ class AttendanceAccountingIntegrationTest {
     assertAccount(1, 180, 0);
   }
 
+  /** Prüft genau einen akzeptierten parallelen Scan und Tagesabschlüsse ohne Doppelbuchung */
   @Test
   void concurrentScansAcceptExactlyOneAndConcurrentCloseNeverDoubleBooks() throws Exception {
     var barrier = new CyclicBarrier(2);
@@ -495,10 +529,14 @@ class AttendanceAccountingIntegrationTest {
         .isEqualTo(1);
   }
 
+  /** Ruft die Scanabrechnung für Terminal 9001 auf und liefert, ob der Testscan angenommen wurde */
   private boolean scan(long student, String at) {
     return accounting.recordScan(student, 9001, Instant.parse(at));
   }
 
+  /**
+   * Prüft konsistente Konten und Audits bei gleichzeitigem nachträglichem Scan und Tagesabschluss
+   */
   @Test
   void concurrentLateScanAndCloseReachTheSameAuditedAccount() throws Exception {
     var barrier = new CyclicBarrier(2);
@@ -531,6 +569,7 @@ class AttendanceAccountingIntegrationTest {
         .isEqualTo(1);
   }
 
+  /** Prüft, dass ein wartender Scan nach Fristablauf keine gelöschte Historie neu anlegt */
   @Test
   void scanWaitingForRetentionCannotRecreateHistoryWhenTheDeadlineExpires() throws Exception {
     accounting.closeDueDays();
@@ -575,6 +614,7 @@ class AttendanceAccountingIntegrationTest {
         .isZero();
   }
 
+  /** Prüft beide gespeicherten Minutenkonten des Testschülers */
   private void assertAccount(long student, int unexcused, int excused) {
     assertThat(
             jdbc.queryForMap(
@@ -584,10 +624,12 @@ class AttendanceAccountingIntegrationTest {
         .containsEntry("excused_minutes_account", excused);
   }
 
+  /** Setzt den aktuellen Zeitpunkt der Testuhr */
   private void setTime(String now) {
     when(clock.instant()).thenReturn(Instant.parse(now));
   }
 
+  /** Setzt den angegebenen Testmitarbeiter als authentifizierten Benutzer */
   private void signIn(String username) {
     SecurityContextHolder.getContext()
         .setAuthentication(

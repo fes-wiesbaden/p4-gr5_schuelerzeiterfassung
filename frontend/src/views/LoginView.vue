@@ -22,7 +22,7 @@ async function handleSubmit() {
     return
   }
 
-  // Wer vorher auf eine geschuetzte Seite wollte, kommt dorthin zurueck.
+  // Das vom Router im Parameter weiter gespeicherte Ziel nach erfolgreicher Anmeldung öffnen
   const ziel = route.query.weiter
   if (typeof ziel === 'string') {
     router.replace(ziel)

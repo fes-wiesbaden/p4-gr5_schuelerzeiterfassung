@@ -69,6 +69,8 @@ public class SecurityConfig {
     var provider = new DaoAuthenticationProvider(staff);
     provider.setPasswordEncoder(encoder);
     var context = new HttpSessionSecurityContextRepository();
+    // Der Browser muss das CSRF-Token für den Anfrageheader lesen können.
+    // Das Sitzungscookie wird davon getrennt als HttpOnly konfiguriert
     var csrf = CookieCsrfTokenRepository.withHttpOnlyFalse();
     csrf.setCookieCustomizer(cookie -> cookie.secure(true).sameSite("Strict").path("/"));
     var csrfHandler = new SpaCsrfTokenRequestHandler();
@@ -83,7 +85,10 @@ public class SecurityConfig {
                 new ChangeSessionIdAuthenticationStrategy(),
                 new RegisterSessionAuthenticationStrategy(sessions),
                 csrfAuthentication)) {
-          /** Verarbeitet Sitzungswechsel nacheinander und verhindert doppelte aktive Sitzungen */
+          /**
+           * Führt Sitzungsprüfung, ID-Wechsel und Registrierung bei parallelen Anmeldungen
+           * nacheinander aus
+           */
           @Override
           public synchronized void onAuthentication(
               Authentication authentication,

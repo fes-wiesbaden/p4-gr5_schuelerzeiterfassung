@@ -15,7 +15,10 @@ public class SpaCsrfTokenRequestHandler implements CsrfTokenRequestHandler {
 
   private final CsrfTokenRequestHandler xor = new XorCsrfTokenRequestAttributeHandler();
 
-  /** Stellt das geschützte CSRF-Token bereit und sorgt dafür, dass das Token-Cookie gesetzt wird */
+  /**
+   * Stellt das maskierte CSRF-Token als Anfrageattribut bereit. Fordert das Token sofort an, damit
+   * bei fehlendem Token-Cookie eines erzeugt wird
+   */
   @Override
   public void handle(
       HttpServletRequest request, HttpServletResponse response, Supplier<CsrfToken> token) {
