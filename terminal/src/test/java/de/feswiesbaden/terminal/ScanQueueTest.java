@@ -30,6 +30,7 @@ class ScanQueueTest {
     assertEquals("TEST-UID-001", offen.get(0).rfidUid());
     assertEquals(scan.scanId(), offen.get(0).scanId());
     assertEquals(scan.capturedAt(), offen.get(0).capturedAt());
+    assertEquals(0, offen.get(0).capturedAt().getNano());
   }
 
   @Test
