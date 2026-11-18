@@ -36,6 +36,10 @@ public class RawScan {
   private String rfidUid;
 
   @NotNull
+  @Column(name="terminal_id", nullable = false)
+  private Long terminalId;
+
+  @NotNull
   @Column(name = "scanned_at", nullable = false)
   private LocalDateTime scannedAt;
 

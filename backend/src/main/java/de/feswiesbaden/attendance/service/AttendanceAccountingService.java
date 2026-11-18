@@ -1,7 +1,9 @@
 package de.feswiesbaden.attendance.service;
 
+import de.feswiesbaden.attendance.dtos.RawScanDTO;
 import de.feswiesbaden.attendance.enums.AttendanceStatus;
 import de.feswiesbaden.attendance.enums.AuditEventType;
+import de.feswiesbaden.attendance.enums.ScanResult;
 import de.feswiesbaden.attendance.repository.AttendanceAccountingRepository;
 import de.feswiesbaden.attendance.repository.AttendanceAccountingRepository.Account;
 import de.feswiesbaden.attendance.repository.AttendanceAccountingRepository.Audit;
@@ -19,10 +21,7 @@ import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.time.temporal.ChronoUnit;
-import java.util.ArrayList;
-import java.util.Comparator;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 import java.util.stream.Collectors;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -82,30 +81,38 @@ public class AttendanceAccountingService {
    * derselben Transaktion speichern
    */
   @Transactional
-  public boolean recordScan(Long studentId, int terminalId, Instant scannedAt) {
-    if (!validTime(scannedAt)) {
-      return false;
+  public ScanResult recordScan(RawScanDTO scan) {
+
+    Optional<Long> studentIdOptional = students.findByUUID(scan.rfidUid());
+    if(studentIdOptional.isEmpty()){
+      return ScanResult.ERROR;
     }
-    var at = LocalDateTime.ofInstant(scannedAt, ZoneOffset.UTC);
+    Long studentId = studentIdOptional.get();
+
+    if (!validTime(Instant.from(scan.scannedAt()))) {
+      return ScanResult.ERROR;
+    }
+    var at = LocalDateTime.ofInstant(Instant.from(scan.scannedAt()), ZoneOffset.UTC);
     var day = lockDay(studentId, berlinDate(at));
     if (day == null
         || !accounting.matchesTerminalSlot(
             day.plan().timetableId(),
-            terminalId,
+            scan.terminalId(),
             day.date(),
-            scannedAt.atZone(BERLIN).toLocalTime())) {
-      return false;
+            scan.scannedAt().atZone(BERLIN).toLocalTime())) {
+      return ScanResult.FORBIDDEN;
     }
     var before = statusAt(day.audits(), at);
     if (before != AttendanceStatus.ABWESEND
         && before != AttendanceStatus.BETRIEBLICH_ENTSCHULDIGT) {
-      return false;
+      return ScanResult.FORBIDDEN;
     }
-    return reconcile(
+    reconcile(
             day,
             new Change(
-                AuditEventType.SCAN, before, AttendanceStatus.ANWESEND, at, null, terminalId))
-        .changed();
+                AuditEventType.SCAN, before, AttendanceStatus.ANWESEND, at, null, scan.terminalId()));
+
+    return ScanResult.SUCCESS;
   }
 
   /**
@@ -642,7 +649,7 @@ public class AttendanceAccountingService {
       AttendanceStatus after,
       LocalDateTime at,
       Long staffId,
-      Integer terminalId) {}
+      Long terminalId) {}
 
   /**
    * Enthält die resultierenden Fehlminutenkonten und gibt an, ob ein Änderungsprotokoll geschrieben

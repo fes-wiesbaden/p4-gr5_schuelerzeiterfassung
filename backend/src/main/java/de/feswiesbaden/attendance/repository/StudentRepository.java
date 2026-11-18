@@ -33,6 +33,13 @@ public class StudentRepository {
         STUDENT_COLUMNS + " WHERE school_class_id = ? ORDER BY id", this::data, classId);
   }
 
+  /** Liefert die ID eines Schülers anhand der ID des Chips */
+  public Optional<Long> findByUUID(String uuid) {
+    return jdbc.query("SELECT id FROM student WHERE rfid_uid = ?",
+            rs -> rs.next() ? Optional.of(rs.getLong("id")) : Optional.empty(),
+            uuid);
+  }
+
   /** Lädt die Daten eines vorhandenen Schülers ohne Kartenkennung */
   public StudentData findById(Long studentId) {
     return jdbc.query(STUDENT_COLUMNS + " WHERE id = ?", this::data, studentId).getFirst();

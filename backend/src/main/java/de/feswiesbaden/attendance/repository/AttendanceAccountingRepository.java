@@ -72,7 +72,7 @@ public class AttendanceAccountingRepository {
    * zählt zum Slot, das Ende nicht. Die Blockzuordnung wird hier nicht geprüft
    */
   public boolean matchesTerminalSlot(
-      Long timetableId, int terminalId, LocalDate date, LocalTime time) {
+      Long timetableId, Long terminalId, LocalDate date, LocalTime time) {
     return !jdbc.queryForList(
             "SELECT s.id FROM timetable_slot s JOIN terminal t ON t.room_id = s.room_id"
                 + " WHERE s.timetable_id = ? AND t.terminal_id = ? AND s.weekday = ?"
@@ -183,7 +183,7 @@ public class AttendanceAccountingRepository {
       AttendanceStatus status,
       Audit audit,
       Long staffId,
-      Integer terminalId,
+      Long terminalId,
       LocalDateTime now) {
     jdbc.update(
         "INSERT INTO attendance_audit (student_id, attendance_id, deletion_date_id, event_type,"
