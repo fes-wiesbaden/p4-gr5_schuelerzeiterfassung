@@ -30,11 +30,7 @@ defineProps<{
       <tbody>
         <tr v-for="row in rows" :key="String(row[rowKey])">
           <td v-for="column in columns" :key="column.field">
-            <slot
-              :name="`cell-${column.field}`"
-              :row="row"
-              :value="row[column.field]"
-            >
+            <slot :name="`cell-${column.field}`" :value="row[column.field]">
               {{ row[column.field] }}
             </slot>
           </td>

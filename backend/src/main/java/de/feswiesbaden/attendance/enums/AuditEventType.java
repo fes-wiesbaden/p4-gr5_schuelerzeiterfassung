@@ -1,5 +1,6 @@
 package de.feswiesbaden.attendance.enums;
 
+/** Unterscheidet Scan, Statuskorrektur, Tagesabschluss und Kontenreset im Protokoll */
 public enum AuditEventType {
   SCAN,
   STATUS_CHANGE,

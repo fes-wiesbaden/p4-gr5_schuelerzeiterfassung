@@ -305,7 +305,8 @@ auch den manuellen Reset eines bereits leeren Kontos nachzuweisen.
 
 `new_status` gilt ab `occurred_at` bis zum nächsten Ereignis, bei gleichem
 Zeitpunkt sortiert nach Audit-`id`. `old_status` dokumentiert den bei
-Erstellung bekannten Zustand, wird aber nicht zur Minutenberechnung benutzt.
+Erstellung bekannten Status vor diesem Ereignis, wird aber nicht zur
+Minutenberechnung benutzt.
 So bleibt ein rückdatiertes Audit unveränderlich und die Berechnung folgt
 allein der Ereignisreihenfolge.
 
@@ -356,8 +357,8 @@ ohne abgeschlossene Fachverarbeitung hinterließe und der Retry blockiert wäre.
 
 ### Scan
 
-1. JavaFX erzeugt UUIDv4 und UTC-Scanzeit und sendet sie mit UID und
-   Terminal-ID per HTTPS/mTLS.
+1. JavaFX erzeugt UUIDv4 und sekundengenaue UTC-Scanzeit und sendet sie mit
+   UID und Terminal-ID per HTTPS/mTLS.
 2. Das Backend lehnt vorhandene Scan-IDs vor der Fachlogik neutral ab und
    legt sonst den `raw_scan` innerhalb der gemeinsamen Transaktion an.
 3. Persistiertes Terminal und verifizierte Clientidentität müssen zur
@@ -365,8 +366,8 @@ ohne abgeschlossene Fachverarbeitung hinterließe und der Retry blockiert wäre.
 4. Die Scanzeit muss in einem Slot liegen. Der Slot muss zum Stundenplan der
    aktuellen Schülerklasse gehören; der aktive Block muss ihr über
    `class_block_assignment` zugeordnet sein.
-5. Nur `ABWESEND` oder `BETRIEBLICH_ENTSCHULDIGT` darf der Scan auf
-   `ANWESEND` setzen. Jeder andere Status, einschließlich `ANWESEND`, wird
+5. Ein Scan setzt nur `ABWESEND` oder `BETRIEBLICH_ENTSCHULDIGT` zum
+   Scanzeitpunkt auf `ANWESEND`. Jeder andere Status, einschließlich `ANWESEND`, wird
    abgelehnt; Schüler dürfen ihren Status nicht selbst korrigieren.
 6. Attendance, Audit und Kontodelta werden durch den gemeinsamen Abgleich
    gespeichert. Das Terminal erhält nur eine neutrale Antwort ohne UID,
@@ -375,6 +376,11 @@ ohne abgeschlossene Fachverarbeitung hinterließe und der Retry blockiert wäre.
 Scans in Pausen, außerhalb eines Slots, in einem falschen Raum oder ohne
 eindeutige aktive Zuordnung sind ungültig. `scanned_at` darf nicht nach dem
 Backend-Eingangszeitpunkt liegen.
+
+Gepufferte Scans werden pro Terminal vor frischen Scans zugestellt.
+Verschiedene Terminals können dennoch eine vertauschte Ankunftsreihenfolge
+verursachen. Ein früherer gültiger Scan darf die Ankunft rückwirkend
+korrigieren; spätere Statusereignisse bleiben wirksam.
 
 ### Statuswechsel und Minutenabgleich
 
@@ -386,7 +392,7 @@ Minuten.
 Jeder Scan, Lehrerwechsel und Tagesabschluss verwendet dieselbe
 transaktionale Abgleichsfunktion:
 
-1. Attendance und Student sperren.
+1. Klasse, Löschfrist, Student und Attendance in dieser Reihenfolge sperren.
 2. Statusereignisse nach `occurred_at`, dann Audit-`id`, laden. Vor dem ersten
    Ereignis gilt `ABWESEND`.
 3. Abrechnungsgrenze als Minimum aus Backend-Zeitpunkt und Ende des letzten
@@ -421,30 +427,36 @@ eine Attendance angelegt. Ohne Statusereignis gilt der ganze Tag als
 `ABWESEND` und alle geplanten Minuten werden unentschuldigt gebucht.
 
 Ein Tag ist offen, wenn eine erwartete Attendance fehlt oder Soll und
-auditierte Deltas abweichen. Der regelmäßige und beim Start ausgeführte
-Nachholjob verarbeitet nur offene, bereits beendete Tage. Es gibt keinen
-separaten Abschlussmarker: Der Soll-Ist-Abgleich ist selbst idempotent und
+auditierte Deltas abweichen. Der Nachholjob läuft um 00:15 Uhr Europe/Berlin
+und beim Backendstart. Er verarbeitet nur offene, bereits beendete Tage des
+aktuellen Klassenplans ab dem Berliner Anlagetag des Schülers. Tage bis
+einschließlich des letzten Resettags und abgelaufene Aufbewahrungsfristen
+bleiben ausgeschlossen. Es gibt keinen separaten Abschlussmarker:
+Der Soll-Ist-Abgleich ist selbst idempotent und
 verhindert einen zweiten Kontoeffekt.
 
 ### Kontenreset und Retention
 
-Ein Administrator startet den Reset ausdrücklich für eine Klasse und einen
-Blockplan. Es gibt keinen automatischen Reset, keinen berechneten
-Resetzeitpunkt und keinen Reset-Nachholjob.
+Ein Administrator kann einen einzelnen Reset für eine Klasse und einen
+Blockplan starten. Den Abschlussreset löst ein Administrator oder die
+zuständige Klassenleitung mit dem Blockplanwechsel aus.
 
 Mehrere manuelle Kontenresets sind innerhalb eines Blockplans möglich. Das
-Backend sperrt die betroffenen Schüler und setzt beide Konten in einer
-Transaktion auf `0`. Je Schüler und Reset entsteht ein
+Backend holt fehlende Tagesabrechnungen vor dem Reset nach und setzt beide
+Konten in derselben Transaktion auf `0`. Verbleibende Unterrichtsslots am
+aktuellen Tag verhindern den Reset. Je Schüler und Reset entsteht ein
 `attendance_audit` mit `event_type = ACCOUNT_RESET`, dem auslösenden
-`changed_by_staff_id`, leerer `attendance_id`, der Löschfrist des aktuellen
-Plans und negativen bisherigen Kontoständen. Bei bereits leeren Konten sind
+`changed_by_staff_id`, leerer `attendance_id`, der Löschfrist des
+zurückgesetzten Plans und negativen bisherigen Kontoständen. Bei bereits leeren Konten sind
 beide Deltas `0`; der Audit dokumentiert auch diesen Reset. Mehrere Resets
 im selben Plan verwenden dieselbe Löschfrist und ändern sie nicht.
-Attendances vor dem jeweils letzten Reset sind nicht mehr korrigierbar, sonst
-könnten alte Deltas wieder in das geleerte Konto gelangen.
+Der letzte Berliner Resettag sperrt die Attendances des zurückgesetzten Plans
+bis einschließlich dieses Tages. Der Folgeplan kann am selben Berliner Tag
+beginnen.
 
-Für den Planwechsel müssen alle Blöcke beendet, alle Tage abgeglichen und
-ein abschließender Reset durchgeführt sein. Die Klasse und ihre
+Nach Ende aller Blöcke erfolgen Abschlussreset und Planwechsel in derselben
+Transaktion. Ist die Löschfrist des alten Plans bereits erreicht, werden die
+fälligen Resetprotokolle in dieser Transaktion gelöscht. Die Klasse und ihre
 Schülerzuordnungen bleiben bestehen.
 
 Der Rohscan-Job läuft stündlich und löscht Scans ab einem Alter von `14`

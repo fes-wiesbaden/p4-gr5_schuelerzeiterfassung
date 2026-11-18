@@ -36,23 +36,28 @@ import org.springframework.security.web.csrf.CsrfLogoutHandler;
 import org.springframework.security.web.session.ConcurrentSessionFilter;
 import org.springframework.security.web.session.HttpSessionEventPublisher;
 
+/** Legt Anmeldung, Sitzungen und CSRF-Schutz für das Backend fest */
 @Configuration
 public class SecurityConfig {
+  /** Erstellt den BCrypt-Encoder mit Kostenfaktor 12 */
   @Bean
   PasswordEncoder passwordEncoder() {
     return new BCryptPasswordEncoder(12);
   }
 
+  /** Verwaltet die aktiven Sitzungen der angemeldeten Nutzer */
   @Bean
   SessionRegistry sessionRegistry() {
     return new SessionRegistryImpl();
   }
 
+  /** Meldet beendete Sitzungen an Spring Security */
   @Bean
   HttpSessionEventPublisher httpSessionEventPublisher() {
     return new HttpSessionEventPublisher();
   }
 
+  /** Richtet Zugriffsregeln, Anmeldung, Abmeldung und den Schutz der Sitzungen ein */
   @Bean
   SecurityFilterChain securityFilterChain(
       HttpSecurity http,
@@ -64,6 +69,8 @@ public class SecurityConfig {
     var provider = new DaoAuthenticationProvider(staff);
     provider.setPasswordEncoder(encoder);
     var context = new HttpSessionSecurityContextRepository();
+    // Der Browser muss das CSRF-Token für den Anfrageheader lesen können.
+    // Das Sitzungscookie wird davon getrennt als HttpOnly konfiguriert
     var csrf = CookieCsrfTokenRepository.withHttpOnlyFalse();
     csrf.setCookieCustomizer(cookie -> cookie.secure(true).sameSite("Strict").path("/"));
     var csrfHandler = new SpaCsrfTokenRequestHandler();
@@ -78,7 +85,10 @@ public class SecurityConfig {
                 new ChangeSessionIdAuthenticationStrategy(),
                 new RegisterSessionAuthenticationStrategy(sessions),
                 csrfAuthentication)) {
-          // ponytail: globale Registrierungssperre; bei Login-Engpässen pro Benutzer sperren.
+          /**
+           * Führt Sitzungsprüfung, ID-Wechsel und Registrierung bei parallelen Anmeldungen
+           * nacheinander aus
+           */
           @Override
           public synchronized void onAuthentication(
               Authentication authentication,

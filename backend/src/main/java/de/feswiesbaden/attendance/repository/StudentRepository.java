@@ -11,6 +11,7 @@ import java.util.Optional;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 
+/** Liest und ändert Schülerdaten, Klassenzuordnungen und Kartenkennungen */
 @Repository
 public class StudentRepository {
   private static final String STUDENT_COLUMNS =
@@ -26,15 +27,18 @@ public class StudentRepository {
     this.entityManager = entityManager;
   }
 
+  /** Liefert die Schüler einer Klasse ohne Kartenkennungen nach ID sortiert */
   public List<StudentData> findByClassId(Long classId) {
     return jdbc.query(
         STUDENT_COLUMNS + " WHERE school_class_id = ? ORDER BY id", this::data, classId);
   }
 
+  /** Lädt die Daten eines vorhandenen Schülers ohne Kartenkennung */
   public StudentData findById(Long studentId) {
     return jdbc.query(STUDENT_COLUMNS + " WHERE id = ?", this::data, studentId).getFirst();
   }
 
+  /** Liefert die Klassen-ID des Schülers. Bei lock=true wird sein Datensatz zusätzlich gesperrt */
   public Optional<Long> findClassId(Long studentId, boolean lock) {
     return jdbc
         .queryForList(
@@ -45,11 +49,13 @@ public class StudentRepository {
         .findFirst();
   }
 
+  /** Speichert einen neuen Schüler mit Verweis auf die angegebene Klasse */
   public void insert(Student student, Long classId) {
     student.setSchoolClass(entityManager.getReference(SchoolClass.class, classId));
     entityManager.persist(student);
   }
 
+  /** Ändert Namen und Geburtsdatum des Schülers */
   public void update(Long studentId, String firstName, String lastName, LocalDate birthDate) {
     jdbc.update(
         "UPDATE student SET first_name = ?, last_name = ?, birth_date = ? WHERE id = ?",
@@ -59,14 +65,17 @@ public class StudentRepository {
         studentId);
   }
 
+  /** Löscht den Schüler, sofern keine Datenbankverweise die Löschung verhindern */
   public void delete(Long studentId) {
     jdbc.update("DELETE FROM student WHERE id = ?", studentId);
   }
 
+  /** Setzt oder entfernt die Kartenkennung und liefert die Zahl betroffener Zeilen */
   public int updateUid(Long studentId, String uid) {
     return jdbc.update("UPDATE student SET rfid_uid = ? WHERE id = ?", uid, studentId);
   }
 
+  /** Liest Stammdaten, Klassen-ID und beide Fehlminutenkonten aus dem SQL-Abfrageergebnis */
   private StudentData data(ResultSet row, int index) throws SQLException {
     return new StudentData(
         row.getLong("id"),
@@ -78,6 +87,7 @@ public class StudentRepository {
         row.getInt("excused_minutes_account"));
   }
 
+  /** Enthält Schülerstammdaten, Klasse und Minutenkonten ohne Kartenkennung */
   public record StudentData(
       Long id,
       String firstName,

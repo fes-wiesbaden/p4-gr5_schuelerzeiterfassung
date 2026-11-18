@@ -5,9 +5,10 @@ import com.fasterxml.jackson.databind.SerializationFeature;
 import com.fasterxml.jackson.databind.json.JsonMapper;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 
-// Eine einzige Jackson-Einstellung für Puffer, Serverantwort und ESP32-Zeile.
-// Zeitpunkte werden als ISO-8601 geschrieben, damit der Puffer lesbar bleibt
-// und der Server dieselbe Schreibweise bekommt.
+/**
+ * Stellt gemeinsame JSON-Einstellungen mit ISO-8601-Zeitpunkten für Empfang, Queue und Versand
+ * bereit
+ */
 public final class Json {
   private static final ObjectMapper MAPPER =
       JsonMapper.builder()
@@ -17,6 +18,7 @@ public final class Json {
 
   private Json() {}
 
+  /** Liefert den gemeinsam konfigurierten JSON-Mapper */
   public static ObjectMapper mapper() {
     return MAPPER;
   }

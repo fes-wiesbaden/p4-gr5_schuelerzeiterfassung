@@ -6,6 +6,7 @@ import java.util.List;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 
+/** Löscht alte Rohscans sowie fällige Änderungsprotokolle und deren Tagesanwesenheiten */
 @Repository
 public class RetentionRepository {
   private final JdbcTemplate jdbc;
@@ -14,16 +15,20 @@ public class RetentionRepository {
     this.jdbc = jdbc;
   }
 
+  /** Löscht Rohscans bis einschließlich der angegebenen Empfangszeit und liefert deren Anzahl */
   public int deleteRawScansThrough(LocalDateTime cutoff) {
     return jdbc.update("DELETE FROM raw_scan WHERE created_at <= ?", cutoff);
   }
 
+  /** Sperrt alle bis zum angegebenen Tag fälligen Löschfristen */
   public void lockDueDeletionDates(LocalDate today) {
-    // Referenzierte Fristen sperren, damit parallel angelegte Audits die Löschung nicht umgehen.
+    // Neue Buchungen sperren dieselben Fristen. Die Löschung darf sich nicht mit ihnen
+    // überschneiden
     jdbc.queryForList(
         "SELECT id FROM deletion_date WHERE delete_after <= ? FOR UPDATE", Long.class, today);
   }
 
+  /** Liefert die unterschiedlichen Anwesenheits-IDs aus fälligen Protokollen */
   public List<Long> findDueAttendanceIds(LocalDate today) {
     return jdbc.queryForList(
         """
@@ -35,6 +40,7 @@ public class RetentionRepository {
         today);
   }
 
+  /** Löscht fällige Protokolle und liefert deren Anzahl */
   public int deleteDueAudits(LocalDate today) {
     return jdbc.update(
         """
@@ -44,6 +50,22 @@ public class RetentionRepository {
         today);
   }
 
+  /** Löscht fällige Resetprotokolle der Klasse für die bereits gesperrte Löschfrist */
+  public void deleteDueAccountResets(Long classId, Long deletionDateId, LocalDate today) {
+    jdbc.update(
+        """
+        DELETE a FROM attendance_audit a
+        JOIN student s ON s.id = a.student_id
+        JOIN deletion_date d ON d.id = a.deletion_date_id
+        WHERE s.school_class_id = ? AND d.id = ? AND d.delete_after <= ?
+          AND a.event_type = 'ACCOUNT_RESET' AND a.attendance_id IS NULL
+        """,
+        classId,
+        deletionDateId,
+        today);
+  }
+
+  /** Löscht die Anwesenheit nach dem Entfernen ihrer Protokollverweise */
   public void deleteAttendance(Long attendanceId) {
     jdbc.update("DELETE FROM attendance WHERE id = ?", attendanceId);
   }

@@ -16,6 +16,7 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
 
+/** Beschreibt einen Blockzeitraum innerhalb eines Blockplans */
 @Entity
 @Table(name = "block_assignment")
 @Getter

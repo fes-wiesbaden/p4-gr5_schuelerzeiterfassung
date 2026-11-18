@@ -8,6 +8,7 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.scheduling.annotation.EnableScheduling;
 import org.springframework.scheduling.annotation.Scheduled;
 
+/** Startet die geplante Löschung abgelaufener Scans und Anwesenheitsdaten */
 @Configuration
 @EnableScheduling
 @ConditionalOnProperty(
@@ -23,6 +24,7 @@ public class RetentionJobs {
     this.retention = retention;
   }
 
+  /** Löscht stündlich alte Rohscans und protokolliert das Ergebnis */
   @Scheduled(cron = "0 0 * * * *", zone = "UTC")
   public void deleteRawScans() {
     try {
@@ -32,6 +34,7 @@ public class RetentionJobs {
     }
   }
 
+  /** Löscht um Berliner Mitternacht fällige Anwesenheitsdaten und Änderungsprotokolle */
   @Scheduled(cron = "0 0 0 * * *", zone = "Europe/Berlin")
   public void deleteHistory() {
     try {

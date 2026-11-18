@@ -8,6 +8,7 @@ import org.springframework.security.authentication.AnonymousAuthenticationToken;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Component;
 
+/** Prüft Mitarbeiterrechte anhand der aktuellen Rolle und Klassenzuordnung */
 @Component
 class StaffAuthorization {
   private final StaffAccessRepository staff;
@@ -19,6 +20,7 @@ class StaffAuthorization {
     this.classes = classes;
   }
 
+  /** Liefert den authentifizierten Mitarbeiter mit seiner aktuell gespeicherten Rolle */
   StaffIdentity currentStaff() {
     var authentication = SecurityContextHolder.getContext().getAuthentication();
     if (authentication == null
@@ -31,13 +33,14 @@ class StaffAuthorization {
         .orElseThrow(() -> new AccessDeniedException("STAFF_REQUIRED"));
   }
 
-  void requireClassAccess(Long classId) {
-    var actor = currentStaff();
+  /** Verlangt Zugriff über Administratorrolle, Klassenleitung oder Unterrichtszuordnung */
+  void requireClassAccess(Long classId, StaffIdentity actor) {
     if (!classes.isAccessible(classId, actor.id(), actor.administrator())) {
       throw new AccessDeniedException("CLASS_ACCESS_DENIED");
     }
   }
 
+  /** Verlangt die aktuelle Administratorrolle und liefert den Mitarbeiter */
   StaffIdentity requireAdministrator() {
     var actor = currentStaff();
     if (!actor.administrator()) {
@@ -46,11 +49,11 @@ class StaffAuthorization {
     return actor;
   }
 
-  void requireStudentManagement(Long classId) {
-    var actor = currentStaff();
+  /** Sperrt die Klasse und verlangt Administratorrechte oder die zugewiesene Klassenleitung */
+  void requireClassManagement(Long classId, StaffIdentity actor) {
     var teacher = classes.lockClassTeacher(classId);
     if (teacher.isEmpty() || (!actor.administrator() && !teacher.get().equals(actor.id()))) {
-      throw new AccessDeniedException("STUDENT_MANAGEMENT_DENIED");
+      throw new AccessDeniedException("CLASS_MANAGEMENT_DENIED");
     }
   }
 }

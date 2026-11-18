@@ -17,6 +17,7 @@ import org.testcontainers.containers.MySQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
+/** Prüft, ob die direkt geladenen SQL-Beispieldaten zum Anwesenheitsmodell passen */
 @SpringBootTest
 @Testcontainers
 @Transactional
@@ -26,6 +27,7 @@ class AttendanceFixtureTest {
 
   @Autowired JdbcTemplate jdbc;
 
+  /** Prüft 90-Minuten-Unterrichtszeiten, Blockzuordnungen und fehlende Überschneidungen */
   @Test
   void schedulesHaveNinetyMinuteSlotsAndSeparatedBlocks() {
     assertThat(count("SELECT COUNT(*) FROM school_class")).isEqualTo(3);
@@ -77,6 +79,7 @@ class AttendanceFixtureTest {
         .isZero();
   }
 
+  /** Vergleicht Tagesstatus, Minutenkonten und Zahl der Protokolle mit den erwarteten Beispielen */
   @ParameterizedTest
   @CsvSource({
     "1, ABWESEND, 180, 0, 1",
@@ -104,6 +107,7 @@ class AttendanceFixtureTest {
         .isEqualTo(auditCount);
   }
 
+  /** Prüft Minutenbuchungen, handelnde Personen und Löschdaten der Beispielprotokolle */
   @Test
   void auditsMatchAccountsActorsAndRetention() {
     assertThat(
@@ -156,6 +160,10 @@ class AttendanceFixtureTest {
         .isEqualTo(1);
   }
 
+  /**
+   * Prüft synthetische Kennungen, Scanzeitpunkte und die Planung der als SCAN protokollierten
+   * Buchungen
+   */
   @Test
   void scansHaveSyntheticValuesAndMatchBerlinScheduling() {
     assertThat(count("SELECT COUNT(*) FROM raw_scan")).isEqualTo(7);
@@ -175,7 +183,7 @@ class AttendanceFixtureTest {
                   OR scanned_at > created_at
                 """))
         .isZero();
-    // Beide festgelegten Montage liegen in der Berliner Sommerzeit (UTC+02:00).
+    // Beide festgelegten Montage liegen in der Berliner Sommerzeit (UTC+02:00)
     assertThat(
             count(
                 """
@@ -215,6 +223,7 @@ class AttendanceFixtureTest {
         .isEqualTo(2);
   }
 
+  /** Prüft die Datenbankablehnung einer doppelten Scan-ID bei unveränderten Anwesenheitsdaten */
   @Test
   void duplicateScanIdIsRejectedByDatabaseWithoutChangingSnapshot() {
     assertThatThrownBy(
@@ -233,6 +242,7 @@ class AttendanceFixtureTest {
     dailySnapshotsMatchDocumentedCases(6, "ANWESEND", 0, 0, 1);
   }
 
+  /** Liest das ganzzahlige Ergebnis einer Testabfrage */
   private int count(String sql, Object... args) {
     return jdbc.queryForObject(sql, Integer.class, args);
   }

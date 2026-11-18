@@ -6,6 +6,10 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Properties;
 
+/**
+ * Enthält die Einstellungen für Scanquelle, lokale Warteschlange und HTTPS-Verbindung mit
+ * Clientzertifikat
+ */
 public record TerminalConfig(
     String serverUrl,
     String serialPort,
@@ -18,6 +22,11 @@ public record TerminalConfig(
 
   private static final String DEFAULT_URL = "https://127.0.0.1:8444/api/scans";
 
+  /**
+   * Liest verfügbare Dateieinstellungen und setzt ansonsten Standardwerte. TERMINAL_SERIAL_PORT hat
+   * Vorrang vor serial.port. Zertifikatsspeicher haben keinen Standardpfad. Fehlen sie, wird die
+   * Zustellung später beim Laden des TLS-Kontexts abgebrochen
+   */
   public static TerminalConfig load(Path file) {
     Properties werte = new Properties();
 
@@ -34,7 +43,7 @@ public record TerminalConfig(
 
     return new TerminalConfig(
         werte.getProperty("server.url", DEFAULT_URL),
-        // Der Port darf auch aus einer Umgebungsvariablen kommen (Issue #29).
+        // Der Port darf auch aus einer Umgebungsvariablen kommen (Issue #29)
         umgebungOderDatei("TERMINAL_SERIAL_PORT", werte.getProperty("serial.port", "")),
         Integer.parseInt(werte.getProperty("serial.baud", "115200")),
         Path.of(werte.getProperty("queue.file", "scan-puffer.jsonl")),
@@ -44,11 +53,16 @@ public record TerminalConfig(
         werte.getProperty("server.truststore.password", ""));
   }
 
+  /** Verwendet die Umgebungsvariable, falls sie gesetzt und nicht leer ist */
   private static String umgebungOderDatei(String variable, String ausDatei) {
     String ausUmgebung = System.getenv(variable);
     return ausUmgebung == null || ausUmgebung.isBlank() ? ausDatei.trim() : ausUmgebung.trim();
   }
 
+  /**
+   * Liefert true, wenn kein serieller Port eingetragen ist und deshalb die Testkonsole verwendet
+   * wird
+   */
   public boolean usesConsole() {
     return serialPort.isEmpty();
   }

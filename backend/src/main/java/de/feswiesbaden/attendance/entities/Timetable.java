@@ -12,6 +12,7 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
 
+/** Speichert einen benannten Stundenplan für die Zuordnung von Unterrichtszeiten */
 @Entity
 @Table(name = "timetable")
 @Getter

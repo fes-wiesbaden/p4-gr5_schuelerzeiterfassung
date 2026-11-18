@@ -41,6 +41,7 @@ import org.testcontainers.containers.MySQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
+/** Prüft Kartenverwaltung, Blockpläne und Datenlöschung mit MySQL */
 @SpringBootTest(properties = "attendance.retention.scheduling.enabled=false")
 @Testcontainers
 @Sql("/fixtures/attendance.sql")
@@ -60,6 +61,7 @@ class Issue21IntegrationTest {
 
   @MockitoBean Clock clock;
 
+  /** Setzt die Testuhr auf einen festen Zeitpunkt an der Berliner Tagesgrenze */
   @BeforeEach
   void fixTime() {
     signIn("test.admin");
@@ -68,6 +70,7 @@ class Issue21IntegrationTest {
         .thenAnswer(invocation -> Clock.fixed(clock.instant(), invocation.getArgument(0)));
   }
 
+  /** Entfernt die Testdaten nach jedem Test in der Reihenfolge ihrer Abhängigkeiten */
   @AfterEach
   void cleanup() {
     SecurityContextHolder.clearContext();
@@ -92,6 +95,7 @@ class Issue21IntegrationTest {
     }
   }
 
+  /** Prüft das Zuweisen, Ersetzen und Entfernen gültiger Kartenkennungen */
   @ParameterizedTest
   @ValueSource(strings = {"04A3B2C1", "04A3B2C1D2E3F4", "04A3B2C1D2E3F4A5B6C7"})
   void assignsReplacesAndRemovesUid(String uid) {
@@ -108,6 +112,7 @@ class Issue21IntegrationTest {
     assertThat(uidOf(2L)).isEqualTo(uid);
   }
 
+  /** Prüft, dass ungültige Kartenkennungen die Zuordnung nicht verändern */
   @ParameterizedTest
   @NullAndEmptySource
   @ValueSource(
@@ -128,6 +133,7 @@ class Issue21IntegrationTest {
     assertThat(uidOf(1L)).isEqualTo("TEST-UID-001");
   }
 
+  /** Prüft, dass Kartenverwaltung und Blockplananlage Administratorrechte erfordern */
   @ParameterizedTest
   @ValueSource(strings = {"test.teacher.a", "test.teacher.b", "test.unknown"})
   void rejectsNonAdministrators(String username) {
@@ -140,6 +146,7 @@ class Issue21IntegrationTest {
     assertThat(count("block_plan")).isEqualTo(1);
   }
 
+  /** Prüft die Ablehnung einer fehlenden Anmeldung und nicht vorhandener Schüler */
   @Test
   void rejectsMissingActorAndStudent() {
     SecurityContextHolder.clearContext();
@@ -149,6 +156,7 @@ class Issue21IntegrationTest {
     assertThatThrownBy(() -> uids.remove(999L)).hasMessage("STUDENT_NOT_FOUND");
   }
 
+  /** Prüft, dass ein UID-Konflikt beide Zuordnungen erhält und keine UID im Log erscheint */
   @Test
   void uidConflictPreservesAssignmentsAndDoesNotLeak(CapturedOutput output) {
     String uid = "04A3B2C1";
@@ -161,6 +169,7 @@ class Issue21IntegrationTest {
     assertThat(output.getAll()).doesNotContain(uid);
   }
 
+  /** Prüft, dass bei gleichzeitiger Zuordnung nur ein Schüler dieselbe Karte erhält */
   @Test
   void concurrentUidAssignmentHasOnlyOneWinner(CapturedOutput output) throws Exception {
     CyclicBarrier barrier = new CyclicBarrier(2);
@@ -177,6 +186,7 @@ class Issue21IntegrationTest {
     assertThat(output.getAll()).doesNotContain("04A3B2C1");
   }
 
+  /** Prüft die Wiederverwendung des Löschdatums sechs Kalendermonate nach Planende */
   @ParameterizedTest
   @CsvSource({"2027-08-31,2028-02-29", "2026-08-31,2027-02-28", "2026-12-31,2027-06-30"})
   void createsPlansWithReusableCalendarDeadline(LocalDate endsOn, LocalDate expected) {
@@ -192,6 +202,7 @@ class Issue21IntegrationTest {
     assertThat(deletionDates.getOrCreate(endsOn).getDeleteAfter()).isEqualTo(expected);
   }
 
+  /** Prüft einen eintägigen Blockplan und sein Löschdatum am Monatsende */
   @Test
   void createsSingleDayPlanWithCalendarDeadline() {
     LocalDate day = LocalDate.of(2027, 8, 31);
@@ -213,6 +224,7 @@ class Issue21IntegrationTest {
         .isEqualTo(1);
   }
 
+  /** Prüft, dass gleichzeitig angelegte Pläne mit gleichem Ende nur ein Löschdatum erhalten */
   @Test
   void concurrentPlansShareOneDeadline() throws Exception {
     LocalDate endsOn = LocalDate.of(2027, 8, 31);
@@ -230,6 +242,7 @@ class Issue21IntegrationTest {
     assertThat(count("block_plan")).isEqualTo(3);
   }
 
+  /** Prüft, dass ungültige Blockpläne vor dem Speichern abgelehnt werden */
   @Test
   void rejectsInvalidPlansBeforeWriting() {
     LocalDate start = LocalDate.of(2027, 1, 1);
@@ -245,6 +258,7 @@ class Issue21IntegrationTest {
     assertThat(count("deletion_date")).isEqualTo(1);
   }
 
+  /** Prüft, dass bei einem Fehler am Löschdatum auch der neue Blockplan zurückgerollt wird */
   @Test
   void deadlineFailureRollsBackPersistedPlan() {
     jdbc.execute(
@@ -260,6 +274,7 @@ class Issue21IntegrationTest {
     }
   }
 
+  /** Prüft die 14-Tage-Grenze anhand der Empfangszeit und den Erhalt der Anwesenheitsdaten */
   @Test
   void deletesRawScansAtReceiptAgeBoundaryOnly() {
     jdbc.update("DELETE FROM raw_scan");
@@ -284,6 +299,7 @@ class Issue21IntegrationTest {
     assertThat(count("attendance")).isEqualTo(8);
   }
 
+  /** Prüft die fristgerechte Löschung bei unveränderten Minutenkonten und Stammdaten */
   @Test
   void deletesDueAndOverdueHistoryWithoutResettingAccounts() {
     jdbc.update(
@@ -309,6 +325,10 @@ class Issue21IntegrationTest {
     assertThat(retention.deleteHistory()).isZero();
   }
 
+  /**
+   * Prüft, dass ein noch nicht fälliges Audit die Löschung seiner Anwesenheit verhindert und der
+   * gesamte Löschlauf ohne Teiländerungen zurückgesetzt wird
+   */
   @Test
   void nonDueAuditReferenceRollsBackEntireHistoryDeletion() {
     jdbc.update("INSERT INTO deletion_date (id, delete_after) VALUES (2, '2027-07-01')");
@@ -319,15 +339,18 @@ class Issue21IntegrationTest {
     assertThat(count("raw_scan")).isEqualTo(7);
   }
 
+  /** Liest die gespeicherte Kartenkennung des Testschülers */
   private String uidOf(Long studentId) {
     return jdbc.queryForObject(
         "SELECT rfid_uid FROM student WHERE id = ?", String.class, studentId);
   }
 
+  /** Zählt die Datensätze der angegebenen Testtabelle */
   private int count(String table) {
     return jdbc.queryForObject("SELECT COUNT(*) FROM " + table, Integer.class);
   }
 
+  /** Startet eine Kartenzuordnung nach der gemeinsamen Freigabe beider Testthreads */
   private String assignTogether(CyclicBarrier barrier, Long studentId) throws Exception {
     signIn("test.admin");
     barrier.await(10, TimeUnit.SECONDS);
@@ -339,6 +362,7 @@ class Issue21IntegrationTest {
     }
   }
 
+  /** Legt einen Blockplan nach der gemeinsamen Freigabe beider Testthreads an */
   private Long createTogether(CyclicBarrier barrier, String name, LocalDate endsOn)
       throws Exception {
     signIn("test.admin");

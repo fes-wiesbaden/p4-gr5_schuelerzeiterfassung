@@ -16,13 +16,12 @@ const passwordVisible = ref(false)
 
 async function handleSubmit() {
   passwordVisible.value = false
-  const erfolgreich = await auth.login(username.value, password.value)
-  if (!erfolgreich) {
+  if (!(await auth.login(username.value, password.value))) {
     password.value = ''
     return
   }
 
-  // Wer vorher auf eine geschuetzte Seite wollte, kommt dorthin zurueck.
+  // Das vom Router im Parameter weiter gespeicherte Ziel nach erfolgreicher Anmeldung öffnen
   const ziel = route.query.weiter
   if (typeof ziel === 'string') {
     router.replace(ziel)

@@ -1,12 +1,11 @@
 package de.feswiesbaden.terminal;
 
-// Erbt bewusst nicht von javafx.application.Application. Sonst verlangt Java
-// beim Start einen --module-path und bricht mit "JavaFX-Runtime-Komponenten
-// fehlen" ab; über diesen Umweg genügt der normale Klassenpfad.
+/** Startet JavaFX ohne eigene Application-Vererbung, damit der normale Klassenpfad genügt */
 public final class Launcher {
 
   private Launcher() {}
 
+  /** Übergibt die Startargumente an die JavaFX-Terminalanwendung */
   public static void main(String[] args) {
     TerminalApp.main(args);
   }

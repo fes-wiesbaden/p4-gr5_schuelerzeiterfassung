@@ -9,6 +9,7 @@ import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
 import java.util.function.Consumer;
 
+/** Liest Scanmeldungen des ESP32 über die serielle Verbindung ein */
 public final class SerialScanSource implements ScanSource {
   private static final long RESET_PULSE_MS = 150;
 
@@ -27,12 +28,13 @@ public final class SerialScanSource implements ScanSource {
     this.baudRate = baudRate;
   }
 
+  /** Öffnet den seriellen Port, sendet einen Resetimpuls und startet den Hintergrundleser */
   @Override
   public void start(Consumer<Reading> onScan) {
     port = SerialPort.getCommPort(portName);
     port.setBaudRate(baudRate);
-    // Ohne Timeout meldet der Datenstrom sein Ende, sobald einmal nichts
-    // anliegt. Der Ablauf wird unten abgefangen.
+    // Höchstens eine Sekunde auf Daten warten. Ein Timeout wird in read abgefangen,
+    // damit der Leser auch während längerer Pausen zwischen Karten weiterläuft
     port.setComPortTimeouts(SerialPort.TIMEOUT_READ_BLOCKING, READ_TIMEOUT_MS, 0);
 
     if (!port.openPort()) {
@@ -51,8 +53,7 @@ public final class SerialScanSource implements ScanSource {
     leser.start();
   }
 
-  // Das Öffnen des Ports lässt den ESP32 im Reset hängen, er sendet dann nichts
-  // mehr. DTR liegt am Bootmodus-Pin, RTS am Reset.
+  /** Löst den Reset über RTS und hält DTR frei, damit der ESP32 starten kann */
   private void starteBoard() {
     port.clearDTR();
     port.setRTS();
@@ -64,6 +65,7 @@ public final class SerialScanSource implements ScanSource {
     port.clearRTS();
   }
 
+  /** Liest Scanmeldungen und wartet auch nach Lesepausen auf die nächste Karte */
   private void read(Consumer<Reading> onScan) {
     try (BufferedReader in =
         new BufferedReader(new InputStreamReader(port.getInputStream(), StandardCharsets.UTF_8))) {
@@ -76,7 +78,7 @@ public final class SerialScanSource implements ScanSource {
           }
           SerialLine.parse(zeile).ifPresent(onScan);
         } catch (SerialPortTimeoutException pause) {
-          // Pause zwischen zwei Karten, kein Grund aufzugeben.
+          // Pause zwischen zwei Karten, kein Grund aufzugeben
           continue;
         }
       }
@@ -87,6 +89,7 @@ public final class SerialScanSource implements ScanSource {
     }
   }
 
+  /** Beendet den Leser und schließt den seriellen Port */
   @Override
   public void close() {
     running = false;
