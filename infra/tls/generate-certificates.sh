@@ -7,7 +7,7 @@ host_uid="${HOST_UID:-1000}"
 host_gid="${HOST_GID:-1000}"
 mkdir -p "$cert_dir"
 
-# Nur nginx und Spring bekommen diesen Schlüssel, nicht das Terminal.
+# Der Schlüssel ist nur für nginx und Spring bestimmt
 umask 077
 if [ ! -f "$cert_dir/terminal-proxy.properties" ]; then
   printf 'attendance.terminal.proxy-token=%s\n' "$(openssl rand -hex 32)" \

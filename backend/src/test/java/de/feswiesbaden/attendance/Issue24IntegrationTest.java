@@ -1,8 +1,9 @@
 package de.feswiesbaden.attendance;
 
+import static java.nio.charset.StandardCharsets.UTF_8;
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import de.feswiesbaden.attendance.config.TerminalProxyAuthentication;
 import de.feswiesbaden.attendance.service.TerminalIdentityService;
 import jakarta.servlet.http.HttpServletRequest;
 import java.net.URI;
@@ -13,6 +14,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.KeyStore;
 import java.time.Duration;
+import java.util.concurrent.TimeUnit;
 import javax.net.ssl.KeyManagerFactory;
 import javax.net.ssl.SSLContext;
 import javax.net.ssl.TrustManagerFactory;
@@ -31,7 +33,6 @@ import org.springframework.boot.testcontainers.service.connection.ServiceConnect
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
 import org.springframework.core.annotation.Order;
-import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.web.SecurityFilterChain;
@@ -45,6 +46,7 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.utility.MountableFile;
 
+/** Prüft die Terminalidentität über nginx, Spring und MySQL */
 @SpringBootTest(
     webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
     properties =
@@ -65,38 +67,35 @@ class Issue24IntegrationTest {
 
   private HttpClient terminal;
 
+  /** Erzeugt Testzertifikate und startet den nginx-Proxy */
   @BeforeAll
   void startProxy() throws Exception {
     Files.writeString(
         certificates.resolve("terminal-proxy.properties"),
         "attendance.terminal.proxy-token=" + "a".repeat(64) + "\n");
-    var generator = new ProcessBuilder("sh", "../infra/tls/generate-certificates.sh");
+    var generator =
+        new ProcessBuilder(
+            "sh",
+            "-ec",
+            "HOST_UID=$(id -u) HOST_GID=$(id -g) exec sh ../infra/tls/generate-certificates.sh");
     generator.environment().put("CERT_DIR", certificates.toString());
     generator.environment().put("TLS_HOST", "localhost");
-    generator
-        .environment()
-        .put("HOST_UID", Files.getAttribute(certificates, "unix:uid").toString());
-    generator
-        .environment()
-        .put("HOST_GID", Files.getAttribute(certificates, "unix:gid").toString());
     generator.redirectErrorStream(true);
     generator.redirectOutput(certificates.resolve("generation.log").toFile());
     assertThat(generator.start().waitFor()).isZero();
 
-    // Das Serverzertifikat stammt von einer anderen CA als die Terminalzertifikate.
+    // Die Server-CA stellt ein Clientzertifikat aus, dem nginx nicht vertraut
     var wrongCertificate =
         new ProcessBuilder(
-            "openssl",
-            "pkcs12",
-            "-export",
-            "-out",
-            "wrong-client.p12",
-            "-inkey",
-            "server.key",
-            "-in",
-            "server.crt",
-            "-passout",
-            "pass:changeit");
+            "sh",
+            "-ec",
+            """
+            openssl x509 -x509toreq -in terminal-23102003-client.crt \
+              -signkey terminal-23102003-client.key -copy_extensions copy -out wrong-client.csr
+            openssl x509 -req -in wrong-client.csr -CA ca.crt -CAkey ca.key \
+              -copy_extensions copy -out wrong-client.crt
+            openssl verify -purpose sslclient -CAfile ca.crt wrong-client.crt
+            """);
     wrongCertificate.directory(certificates.toFile());
     wrongCertificate.redirectErrorStream(true);
     wrongCertificate.redirectOutput(certificates.resolve("wrong-client.log").toFile());
@@ -127,6 +126,7 @@ class Issue24IntegrationTest {
     terminal = client("terminal-23102003-client.p12");
   }
 
+  /** Stoppt den Testproxy nach dem letzten Test */
   @AfterAll
   void stopProxy() {
     if (nginx != null) {
@@ -134,12 +134,14 @@ class Issue24IntegrationTest {
     }
   }
 
+  /** Legt vor jedem Test zwei Räume mit je einem Terminal an */
   @BeforeEach
   void createRooms() {
     jdbc.update("INSERT INTO room (id, room_number) VALUES (1, 'TEST-R01'), (2, 'TEST-R02')");
     jdbc.update("INSERT INTO terminal (terminal_id, room_id) VALUES (23102003, 1), (9002, 2)");
   }
 
+  /** Prüft die leeren Scan- und Anwesenheitstabellen und entfernt die Testzuordnungen */
   @AfterEach
   void cleanup() {
     for (String table : new String[] {"attendance", "attendance_audit", "raw_scan"}) {
@@ -149,6 +151,7 @@ class Issue24IntegrationTest {
     jdbc.update("DELETE FROM room");
   }
 
+  /** Prüft die Raumauflösung bei passender Terminalnummer und gültigem Zertifikat */
   @Test
   void resolvesRoomThroughNginxWithMatchingCertificate() throws Exception {
     var response = send(terminal, proxyRequest(23102003));
@@ -156,28 +159,71 @@ class Issue24IntegrationTest {
     assertThat(response.body()).isEqualTo("1");
   }
 
+  /** Prüft, dass nginx Anfragen ohne Clientzertifikat ablehnt */
   @Test
   void rejectsMissingClientCertificate() throws Exception {
-    assertThat(send(client(null), proxyRequest(23102003)).statusCode()).isEqualTo(400);
+    var response = send(client(null), proxyRequest(23102003));
+    assertThat(response.statusCode()).isEqualTo(400);
+    assertThat(response.body()).contains("No required SSL certificate was sent");
   }
 
+  /** Prüft, dass nginx ein gesendetes Zertifikat einer fremden CA ablehnt */
   @Test
   void rejectsClientCertificateFromWrongCa() throws Exception {
-    assertThat(send(client("wrong-client.p12"), proxyRequest(23102003)).statusCode())
-        .isEqualTo(400);
+    // OpenSSL sendet das angegebene Zertifikat auch dann, wenn nginx eine andere CA erwartet
+    var uri = proxyRequest(23102003).build().uri();
+    var process =
+        new ProcessBuilder(
+                "openssl",
+                "s_client",
+                "-connect",
+                "localhost:" + uri.getPort(),
+                "-verify_hostname",
+                "localhost",
+                "-verify_return_error",
+                "-CAfile",
+                "ca.crt",
+                "-cert",
+                "wrong-client.crt",
+                "-key",
+                "terminal-23102003-client.key",
+                "-quiet")
+            .directory(certificates.toFile())
+            .redirectError(certificates.resolve("wrong-client-handshake.log").toFile())
+            .start();
+    try {
+      try (var request = process.getOutputStream()) {
+        request.write(
+            ("GET "
+                    + uri.getRawPath()
+                    + "?"
+                    + uri.getRawQuery()
+                    + " HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")
+                .getBytes(UTF_8));
+      }
+      assertThat(process.waitFor(10, TimeUnit.SECONDS)).isTrue();
+      assertThat(new String(process.getInputStream().readAllBytes(), UTF_8))
+          .startsWith("HTTP/1.1 400 ")
+          .contains("The SSL certificate error");
+    } finally {
+      process.destroyForcibly();
+    }
   }
 
+  /** Prüft, dass Spring eine vom Zertifikat abweichende Terminalnummer ablehnt */
   @Test
   void rejectsTerminalNumberThatDoesNotMatchCertificate() throws Exception {
     assertThat(send(terminal, proxyRequest(9002)).statusCode()).isEqualTo(403);
   }
 
+  /** Prüft, dass Spring ein unbekanntes Terminal trotz gültigem Zertifikat ablehnt */
   @Test
   void rejectsValidCertificateForUnknownTerminal() throws Exception {
     jdbc.update("DELETE FROM terminal WHERE terminal_id = 23102003");
     assertThat(send(terminal, proxyRequest(23102003)).statusCode()).isEqualTo(403);
   }
 
+  /** Prüft, dass die geänderte Raumzuordnung sofort gilt */
   @Test
   void usesCurrentRoomFromDatabase() throws Exception {
     jdbc.update("DELETE FROM terminal WHERE terminal_id = 9002");
@@ -185,6 +231,7 @@ class Issue24IntegrationTest {
     assertThat(send(terminal, proxyRequest(23102003)).body()).isEqualTo("2");
   }
 
+  /** Prüft, dass nginx vom Client gesendete Identitätsheader überschreibt */
   @Test
   void nginxOverwritesClientSuppliedIdentityHeaders() throws Exception {
     var request =
@@ -197,6 +244,7 @@ class Issue24IntegrationTest {
     assertThat(send(terminal, forgedIdentity).statusCode()).isEqualTo(403);
   }
 
+  /** Prüft, dass Spring gefälschte Header bei direkten Anfragen ablehnt */
   @Test
   void rejectsDirectBackendRequestsWithForgedHeaders() throws Exception {
     var request =
@@ -212,19 +260,7 @@ class Issue24IntegrationTest {
     assertThat(send(HttpClient.newHttpClient(), request).statusCode()).isEqualTo(403);
   }
 
-  @Test
-  void databaseRequiresUniqueTerminalAndRoom() {
-    assertThatThrownBy(
-            () -> jdbc.update("INSERT INTO terminal (terminal_id, room_id) VALUES (9003, 1)"))
-        .isInstanceOf(DataIntegrityViolationException.class);
-    assertThatThrownBy(
-            () -> jdbc.update("INSERT INTO terminal (terminal_id, room_id) VALUES (9003, NULL)"))
-        .isInstanceOf(DataIntegrityViolationException.class);
-    assertThatThrownBy(
-            () -> jdbc.update("INSERT INTO terminal (terminal_id, room_id) VALUES (9003, 999)"))
-        .isInstanceOf(DataIntegrityViolationException.class);
-  }
-
+  /** Baut die Anfrage an nginx mit der gemeldeten Terminalnummer */
   private HttpRequest.Builder proxyRequest(int terminalNumber) {
     return HttpRequest.newBuilder(
         URI.create(
@@ -234,6 +270,7 @@ class Issue24IntegrationTest {
                 + terminalNumber));
   }
 
+  /** Sendet eine GET-Anfrage mit zehn Sekunden Zeitlimit */
   private HttpResponse<String> send(HttpClient client, HttpRequest.Builder request)
       throws Exception {
     return client.send(
@@ -241,6 +278,7 @@ class Issue24IntegrationTest {
         HttpResponse.BodyHandlers.ofString());
   }
 
+  /** Erstellt einen Testclient mit der Server-CA und bei Bedarf einem Clientzertifikat */
   private HttpClient client(String clientStore) throws Exception {
     KeyStore truststore = KeyStore.getInstance("PKCS12");
     try (var input = Files.newInputStream(certificates.resolve("terminal-server-truststore.p12"))) {
@@ -262,21 +300,28 @@ class Issue24IntegrationTest {
     return HttpClient.newBuilder().sslContext(tls).connectTimeout(Duration.ofSeconds(10)).build();
   }
 
-  // Nur im Test: Der echte Scan-Endpunkt folgt in #26.
+  /** Stellt die Identitätsprüfung für den Test bereit. Der Scan-Endpunkt folgt in #26 */
   @TestConfiguration
   @RestController
   static class TestEndpoint {
+    private final TerminalProxyAuthentication proxyAuthentication;
+
     private final TerminalIdentityService identity;
 
-    TestEndpoint(TerminalIdentityService identity) {
+    /** Übernimmt die Proxy-Prüfung und den Service für die Raumauflösung */
+    TestEndpoint(
+        TerminalProxyAuthentication proxyAuthentication, TerminalIdentityService identity) {
+      this.proxyAuthentication = proxyAuthentication;
       this.identity = identity;
     }
 
+    /** Prüft den Proxy und liefert die Raum-ID für das gemeldete Terminal */
     @GetMapping("/__terminal-identity-test__")
     Long room(HttpServletRequest request, @RequestParam int terminalNumber) {
-      return identity.resolveRoom(request, terminalNumber);
+      return identity.resolveRoom(proxyAuthentication.verifiedSubject(request), terminalNumber);
     }
 
+    /** Richtet die Sicherheitsregeln für den Testpfad ein und meldet Ablehnungen mit HTTP 403 */
     @Bean
     @Order(0)
     SecurityFilterChain identityTestSecurity(HttpSecurity http) throws Exception {

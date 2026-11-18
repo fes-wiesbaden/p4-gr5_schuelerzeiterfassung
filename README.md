@@ -118,10 +118,11 @@ Beispiel `CN=terminal-23102003`. Dieselbe Nummer steht im ESP32 und in
 `terminal.terminal_id`. Der Raum kommt ausschließlich aus `terminal.room_id`.
 Ein Raum kann höchstens ein Terminal haben.
 
-`TerminalIdentityService.resolveRoom(request, terminalNumber)` prüft die von
-nginx bestätigte Identität und liefert die gespeicherte Raum-ID. Fehlende oder
-falsche Identitäten und unbekannte Terminals werden mit `SCAN_REJECTED`
-abgelehnt. Die Prüfung legt keine Anwesenheit und keinen Rohscan an.
+`TerminalProxyAuthentication.verifiedSubject(request)` prüft die internen
+Header von nginx. `TerminalIdentityService.resolveRoom` gleicht den bestätigten
+Zertifikatsnamen mit der Terminalnummer ab und liefert
+die gespeicherte Raum-ID. Fehlende oder falsche Identitäten und unbekannte
+Terminals werden mit `SCAN_REJECTED` abgelehnt.
 
 Damit Spring gefälschte Proxy-Header erkennt, erzeugt `tls-init` zusätzlich
 einen zufälligen gemeinsamen Schlüssel für nginx und Spring. Er steht lokal
@@ -133,19 +134,21 @@ Identitätsheader eingehender Anfragen mit seinen eigenen Werten.
 Nach diesem Update einmal `docker compose up --build -d` ausführen und das
 Backend neu starten. Maven startet das Backend im Ordner `backend`, von dort
 wird die Properties-Datei automatisch geladen. Für IntelliJ ebenfalls
-`backend` als Arbeitsverzeichnis einstellen. Ohne Schlüssel lehnt der Dienst
-alle Terminalanfragen ab; der normale Web-Login bleibt nutzbar.
+`backend` als Arbeitsverzeichnis einstellen. Ohne Schlüssel lehnt der
+Proxy-Adapter Terminalanfragen ab.
 
-Der Scan-Endpunkt `/api/scans` folgt in #26. Er muss zuerst `resolveRoom`
-aufrufen und darf erst danach den Scan verarbeiten. Bis dahin bleibt der
-nginx-Testpfad eine reine TLS-Verbindungsprüfung ohne Anwesenheitsbuchung.
+Der Scan-Endpunkt `/api/scans` folgt in #26. Nach der Proxy-Authentifizierung
+speichert er einen parsebaren Scanauftrag mit neuer Scan-ID zuerst als Rohscan.
+Danach prüft er Terminalnummer und Raum mit `resolveRoom` und verarbeitet
+anschließend die Anwesenheit.
+Der nginx-Testpfad prüft bis dahin die TLS-Verbindung.
 
 ## Prüfungen
 
 Die Backend-Integrationstests verwenden eine eigene MySQL-Datenbank über
 Testcontainers und benötigen laufendes Docker.
 Der Terminal-Identitätstest verwendet zusätzlich einen eigenen nginx-Container,
-`sh`, OpenSSL und `keytool` aus dem JDK. Seine Zertifikate sind nur Testdaten.
+`sh`, OpenSSL 3 und `keytool` aus dem JDK. Seine Zertifikate sind nur Testdaten.
 
 ```sh
 mvn -pl backend spotless:check verify

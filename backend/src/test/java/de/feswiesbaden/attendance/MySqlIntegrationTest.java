@@ -25,6 +25,7 @@ import org.testcontainers.containers.MySQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
+/** Prüft Tabellenstruktur und Datenbankregeln mit MySQL */
 @SpringBootTest
 @Testcontainers
 @Transactional
@@ -34,6 +35,7 @@ class MySqlIntegrationTest {
 
   @Autowired JdbcTemplate jdbc;
 
+  /** Prüft die vorgesehenen Spalten und Zuordnungstabellen des Datenmodells */
   @Test
   void migrationReflectsCurrentDomainModel() {
     assertThat(columnsOf("attendance"))
@@ -48,6 +50,7 @@ class MySqlIntegrationTest {
         .doesNotContain("source", "block_plan_id");
   }
 
+  /** Prüft mehrere Kontenrücksetzungen für denselben Schüler mit gleichem Löschdatum */
   @Test
   void multipleResetsCanShareStudentAndDeletionDate() {
     jdbc.update(
@@ -67,6 +70,7 @@ class MySqlIntegrationTest {
         .isEqualTo(2);
   }
 
+  /** Prüft, dass doppelte Schlüssel abgelehnt werden und vorhandene Daten erhalten bleiben */
   @ParameterizedTest
   @CsvSource(
       delimiter = '|',
@@ -89,6 +93,7 @@ class MySqlIntegrationTest {
     assertThat(rowsOf(table)).isEqualTo(before);
   }
 
+  /** Prüft, dass Verweise auf fehlende Datensätze abgelehnt werden */
   @ParameterizedTest
   @CsvSource({
     "school_class, class_teacher_id",
@@ -121,6 +126,15 @@ class MySqlIntegrationTest {
     assertThat(rowsOf(table)).isEqualTo(before);
   }
 
+  /** Prüft, dass MySQL ein Terminal ohne Raum ablehnt */
+  @Test
+  void terminalRequiresRoom() {
+    assertThatThrownBy(
+            () -> jdbc.update("UPDATE terminal SET room_id = NULL WHERE terminal_id = 9001"))
+        .isInstanceOf(DataIntegrityViolationException.class);
+  }
+
+  /** Prüft den Löschschutz für Datensätze mit bestehenden Verweisen */
   @ParameterizedTest
   @ValueSource(
       strings = {
@@ -147,6 +161,7 @@ class MySqlIntegrationTest {
     assertThat(rowsOf("attendance_audit")).isEqualTo(audits);
   }
 
+  /** Prüft das Anlegen und Ändern gültiger Zeiträume einschließlich gleicher Grenzen */
   @ParameterizedTest
   @MethodSource("intervals")
   void orderedAndEqualIntervalsCanBeInsertedAndUpdated(
@@ -173,6 +188,7 @@ class MySqlIntegrationTest {
     }
   }
 
+  /** Prüft, dass neue Zeiträume mit vertauschten Grenzen abgelehnt werden */
   @ParameterizedTest
   @MethodSource("intervals")
   void reversedIntervalInsertIsRejectedWithoutChangingRows(
@@ -186,6 +202,7 @@ class MySqlIntegrationTest {
     assertThat(rowsOf(table)).isEqualTo(before);
   }
 
+  /** Prüft, dass ungültige Zeitgrenzen den vorhandenen Datensatz nicht verändern */
   @ParameterizedTest
   @MethodSource("intervals")
   void reversedIntervalUpdatePreservesOriginalRow(
@@ -210,6 +227,7 @@ class MySqlIntegrationTest {
     assertThat(rowsOf(table)).isEqualTo(before);
   }
 
+  /** Stellt Testfälle für Blockpläne, Blockzeiträume und Unterrichtszeiten bereit */
   private static Stream<Arguments> intervals() {
     return Stream.of(
         Arguments.of(
@@ -236,6 +254,7 @@ class MySqlIntegrationTest {
             "09:00:00"));
   }
 
+  /** Liest Anfang und Ende eines gespeicherten Zeitraums */
   private List<String> intervalOf(String table, String startColumn, String endColumn, int id) {
     return jdbc.queryForObject(
         "SELECT " + startColumn + ", " + endColumn + " FROM " + table + " WHERE id = ?",
@@ -243,10 +262,12 @@ class MySqlIntegrationTest {
         id);
   }
 
+  /** Liest die Tabellenzeilen sortiert für einen Vergleich */
   private List<Map<String, Object>> rowsOf(String table) {
     return jdbc.queryForList("SELECT * FROM " + table + " ORDER BY 1, 2");
   }
 
+  /** Liest die Spaltennamen einer Tabelle aus der Datenbank */
   private List<String> columnsOf(String table) {
     return jdbc.queryForList(
         "SELECT column_name FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = ?",
