@@ -129,6 +129,14 @@ class MySqlIntegrationTest {
     assertThat(rowsOf(table)).isEqualTo(before);
   }
 
+  /** Prüft, dass MySQL ein Terminal ohne Raum ablehnt */
+  @Test
+  void terminalRequiresRoom() {
+    assertThatThrownBy(
+            () -> jdbc.update("UPDATE terminal SET room_id = NULL WHERE terminal_id = 9001"))
+        .isInstanceOf(DataIntegrityViolationException.class);
+  }
+
   /** Prüft den Löschschutz für Datensätze mit bestehenden Verweisen */
   @ParameterizedTest
   @ValueSource(

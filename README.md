@@ -115,6 +115,8 @@ Firmware und Konfiguration.
 
 Die Backend-Integrationstests verwenden eine eigene MySQL-Datenbank über
 Testcontainers und benötigen laufendes Docker.
+Der Terminal-Identitätstest verwendet zusätzlich einen eigenen nginx-Container,
+`sh`, OpenSSL 3 und `keytool` aus dem JDK. Seine Zertifikate sind nur Testdaten.
 
 ```sh
 mvn -pl backend spotless:check verify
