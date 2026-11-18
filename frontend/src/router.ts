@@ -16,7 +16,7 @@ import StaffView from './views/StaffView.vue'
 declare module 'vue-router' {
   interface RouteMeta {
     adminOnly?: boolean
-    // Ohne Anmeldung erreichbar.
+    // Ohne Anmeldung erreichbar
     public?: boolean
   }
 }
@@ -83,8 +83,7 @@ setUnauthorizedHandler(async () => {
 router.beforeEach(async (to) => {
   const auth = useAuthStore()
 
-  // Nach einem Neuladen ist der Store leer, das Sitzungscookie kann aber noch
-  // gelten. Einmal pro Sitzung beim Backend nachfragen.
+  // Prüft den Anmeldestatus vor dem Seitenwechsel, falls er noch nicht geladen wurde
   if (!auth.sessionChecked) {
     await auth.loadCurrentUser()
   }
@@ -93,17 +92,13 @@ router.beforeEach(async (to) => {
     return auth.isLoggedIn ? { name: 'live-anwesenheit' } : true
   }
 
-  if (to.meta.public) {
-    return true
-  }
-
-  // Das gewuenschte Ziel wird gemerkt, damit es nach der Anmeldung direkt
-  // aufgerufen werden kann.
+  // Das gewünschte Ziel wird gemerkt, damit es nach der Anmeldung direkt
+  // aufgerufen werden kann
   if (!auth.isLoggedIn) {
     return { name: 'login', query: { weiter: to.fullPath } }
   }
 
-  if (to.meta.adminOnly && !auth.isAdmin) {
+  if (!to.matched.length || (to.meta.adminOnly && !auth.isAdmin)) {
     return { name: 'live-anwesenheit' }
   }
 })

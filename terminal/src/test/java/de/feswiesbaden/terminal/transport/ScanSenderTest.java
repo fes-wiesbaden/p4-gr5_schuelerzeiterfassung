@@ -9,8 +9,10 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
+/** Prüft die Einordnung von Serverantworten für die Scanzustellung */
 class ScanSenderTest {
 
+  /** Prüft die Ablehnung von Zieladressen ohne HTTPS-Schema oder Host */
   @ParameterizedTest
   @ValueSource(
       strings = {
@@ -24,24 +26,28 @@ class ScanSenderTest {
         IllegalArgumentException.class, () -> new ScanSender(adresse, SSLContext.getDefault()));
   }
 
+  /** Prüft, dass der Sender ohne TLS-Kontext nicht erstellt werden kann */
   @Test
   void verlangtEinenTlsKontext() {
     assertThrows(
         NullPointerException.class, () -> new ScanSender("https://127.0.0.1/api/scans", null));
   }
 
+  /** Prüft die Erstellung mit HTTPS-Adresse und TLS-Kontext, ohne eine Verbindung aufzubauen */
   @Test
   void akzeptiertHttpsMitTlsKontext() {
     assertDoesNotThrow(
         () -> new ScanSender("https://127.0.0.1/api/scans", SSLContext.getDefault()));
   }
 
+  /** Prüft, dass der Sender HTTP 200 und 201 als ACCEPTED einordnet */
   @Test
   void zweihundertIstEineErfolgreicheBuchung() {
     assertEquals(SendResult.Status.ACCEPTED, ScanSender.interpret(200, null).status());
     assertEquals(SendResult.Status.ACCEPTED, ScanSender.interpret(201, null).status());
   }
 
+  /** Prüft, dass eine fachliche Ablehnung die Zustellung endgültig beendet */
   @Test
   void vierhundertIstEndgueltigAbgelehnt() {
     SendResult ergebnis = ScanSender.interpret(400, "SCAN_REJECTED");
@@ -51,22 +57,21 @@ class ScanSenderTest {
     assertEquals(true, ergebnis.isFinal());
   }
 
-  // Der Scan war schon da, also ist er auch gebucht. Für den Schüler ist das
-  // ein Erfolg, kein Fehler (Issue #26).
+  /** Prüft, dass ein bereits empfangener Scan als Erfolg behandelt wird */
   @Test
   void schonEmpfangenerScanGiltAlsErfolg() {
     assertEquals(
         SendResult.Status.ACCEPTED, ScanSender.interpret(409, "SCAN_ALREADY_RECEIVED").status());
   }
 
-  // Bei 500 ist der Server kaputt, nicht der Scan. Also nochmal versuchen,
-  // statt ihn wegzuwerfen.
+  /** Prüft, dass Serverfehler einen erneuten Zustellversuch erlauben */
   @Test
   void fuenfhundertWirdSpaeterNochmalVersucht() {
     assertEquals(SendResult.Status.RETRY, ScanSender.interpret(500, null).status());
     assertEquals(false, ScanSender.interpret(503, null).isFinal());
   }
 
+  /** Prüft die Übernahme des Duplikatcodes und die neutrale Behandlung anderer Antworten */
   @Test
   void ohneCodeGiltDerSammelcode() {
     assertEquals("SCAN_REJECTED", ScanSender.readCode(""));

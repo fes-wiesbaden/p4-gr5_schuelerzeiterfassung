@@ -19,6 +19,9 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
 
+/**
+ * Beschreibt einen geplanten Unterrichtszeitraum (Slot) mit Wochentag, Berliner Ortszeiten und Raum
+ */
 @Entity
 @Table(name = "timetable_slot")
 @Getter

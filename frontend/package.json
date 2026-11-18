@@ -34,5 +34,9 @@
     "vitest": "^4.1.12",
     "vue-eslint-parser": "^10.4.2",
     "vue-tsc": "3.3.11"
+  },
+  "overrides": {
+    "minimatch": "^11.0.9",
+    "glob": "^14.0.6"
   }
 }

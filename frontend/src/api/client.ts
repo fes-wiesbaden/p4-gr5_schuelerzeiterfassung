@@ -1,5 +1,5 @@
-// Spring Security legt das CSRF-Token in einem Cookie ab. Schreibende Anfragen
-// muessen es als Header zurueckschicken, sonst lehnt das Backend sie ab.
+// Liest das CSRF-Token aus XSRF-TOKEN. POST-Anfragen senden es im Header
+// X-XSRF-TOKEN zurück, damit Spring Security die Anfrage prüfen kann
 function readCsrfToken(): string {
   const cookie = document.cookie
     .split('; ')
@@ -15,6 +15,8 @@ export function setUnauthorizedHandler(handler: () => Promise<void>) {
 }
 
 async function request(url: string, options: RequestInit): Promise<Response> {
+  // Sendet das Sitzungscookie mit. HTTP 401 außerhalb der Anmeldung
+  // löst die Behandlung einer abgelaufenen oder fehlenden Sitzung aus
   const response = await fetch(url, { ...options, credentials: 'include' })
   if (response.status === 401 && url !== '/api/login') {
     await handleUnauthorized()
@@ -22,7 +24,6 @@ async function request(url: string, options: RequestInit): Promise<Response> {
   return response
 }
 
-// credentials: 'include' sorgt dafuer, dass das Sitzungscookie mitgeht.
 export function postJson(url: string, body: unknown): Promise<Response> {
   return request(url, {
     method: 'POST',

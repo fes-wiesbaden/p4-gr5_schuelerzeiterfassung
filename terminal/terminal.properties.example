@@ -1,27 +1,28 @@
-# Kopiere diese Datei nach terminal.properties und passe sie an.
+# Kopiere diese Datei nach terminal.properties und passe sie an
 
-# mTLS-Endpunkt fuer Scans (Issue #26). Ueber diesen Port ist nur der
-# Scan-Endpunkt erreichbar, keine anderen /api/-Pfade.
+# Zieladresse für die Scanzustellung über mTLS (Issue #26).
+# Die lokale nginx-Konfiguration bietet bisher nur /api/__scan-endpoint-todo__
+# als Verbindungstest an. /api/scans ist dort noch nicht angebunden
 server.url=https://127.0.0.1:8444/api/scans
 
-# Serieller Port des ESP32. LEER LASSEN, dann werden Scans von der Konsole
-# gelesen und man braucht keine Hardware.
-# Unter Linux typischerweise /dev/ttyUSB0 oder /dev/ttyACM0
-# Geht auch ueber die Umgebungsvariable TERMINAL_SERIAL_PORT.
+# Serieller Port des ESP32, unter Linux zum Beispiel /dev/ttyUSB0 oder /dev/ttyACM0.
+# Ein nicht leerer Wert in TERMINAL_SERIAL_PORT hat Vorrang vor dieser Angabe.
+# Bleiben beide Angaben leer, dient die Konsole zum Testen ohne Kartenleser
 serial.port=
 
 serial.baud=115200
 
-# Clientzertifikat dieser Installation als PKCS12-Datei. nginx prueft es gegen
-# die Terminal-Client-CA. Beide Speicher sind Pflicht; ohne sie startet keine
-# Zustellung.
+# Privater Client-Schlüssel und Clientzertifikat dieser Installation als PKCS12-Datei.
+# nginx prüft das Zertifikat gegen die Terminal-Client-CA. Ohne lesbaren KeyStore
+# und Truststore kann der TLS-Kontext für die Zustellung nicht geladen werden
 client.keystore=../.local/tls/terminal-23102003-client.p12
 client.keystore.password=changeit
 
-# PKCS12-Truststore mit der Server-CA. Die JVM prueft damit Zertifikat und
-# Hostname/IP des Servers; Trust-all ist nicht erlaubt.
+# PKCS12-Truststore mit der Server-CA. Die JVM prüft die Zertifikatskette
+# gegen diesen Speicher und die Zieladresse gegen den Zertifikatsnamen
 server.truststore=../.local/tls/terminal-server-truststore.p12
 server.truststore.password=changeit
 
-# Datei fuer die lokale Warteschlange.
+# Datei für noch nicht endgültig beantwortete Scans, einschließlich Kartenkennungen.
+# Den Speicherort durch Betriebssystemrechte vor fremdem Zugriff schützen
 queue.file=scan-puffer.jsonl

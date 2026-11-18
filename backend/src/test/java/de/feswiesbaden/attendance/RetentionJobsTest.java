@@ -21,8 +21,10 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.scheduling.annotation.ScheduledAnnotationBeanPostProcessor;
 import org.springframework.scheduling.support.CronExpression;
 
+/** Prüft Ausführungszeiten und Fehlerprotokollierung der geplanten Löschläufe */
 @ExtendWith(OutputCaptureExtension.class)
 class RetentionJobsTest {
+  /** Prüft Planung und Abschaltung der Löschläufe ohne Ausführung beim Anwendungsstart */
   @Test
   void registersJobsWithoutRunningOnStartupAndCanDisableScheduling() {
     RetentionService retention = mock(RetentionService.class);
@@ -45,6 +47,7 @@ class RetentionJobsTest {
         .run(application -> assertThat(application).doesNotHaveBean(RetentionJobs.class));
   }
 
+  /** Prüft die Ausführung um Berliner Mitternacht auch bei Zeitumstellungen */
   @ParameterizedTest
   @CsvSource({
     "2027-06-29T21:59:59Z,2027-06-29T22:00:00Z",
@@ -55,6 +58,7 @@ class RetentionJobsTest {
     assertNextRun("deleteHistory", previous, expected);
   }
 
+  /** Prüft den nächsten Rohscan-Löschlauf zur vollen UTC-Stunde */
   @Test
   void rawScansRunOnTheNextFullUtcHour() throws Exception {
     assertNextRun(
@@ -63,6 +67,7 @@ class RetentionJobsTest {
         Instant.parse("2027-10-31T01:00:00Z"));
   }
 
+  /** Prüft, dass Fehler keine UID verraten und den anderen Löschlauf nicht verhindern */
   @Test
   void failedJobLogsOnlyTechnicalCodeAndOtherJobStillWorks(CapturedOutput output) {
     RetentionService retention = mock(RetentionService.class);
@@ -78,6 +83,7 @@ class RetentionJobsTest {
         .doesNotContain("04A3B2C1");
   }
 
+  /** Vergleicht den nächsten geplanten Ausführungszeitpunkt mit dem erwarteten Zeitpunkt */
   private void assertNextRun(String method, Instant previous, Instant expected) throws Exception {
     Scheduled schedule = RetentionJobs.class.getMethod(method).getAnnotation(Scheduled.class);
     var next =

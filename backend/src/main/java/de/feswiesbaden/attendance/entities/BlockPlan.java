@@ -13,6 +13,7 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
 
+/** Beschreibt den Gültigkeitszeitraum eines Blockplans für Klassen */
 @Entity
 @Table(name = "block_plan")
 @Getter

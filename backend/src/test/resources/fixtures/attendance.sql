@@ -1,4 +1,5 @@
--- Issue #19
+-- Synthetische Beispieldaten für Anwesenheit und Minutenabrechnung (Issue #19)
+-- Scan-, Ereignis- und Speicherzeitpunkte sind UTC. Slot-Uhrzeiten sind Berliner Ortszeiten
 SET @fixture_created_at = '2026-09-01 06:00:00';
 
 INSERT INTO staff (id, first_name, last_name, username, password_hash, role, created_at, changed_at) VALUES
@@ -30,7 +31,7 @@ INSERT INTO terminal (terminal_id, room_id, created_at, changed_at) VALUES
     (9001, 1, @fixture_created_at, @fixture_created_at),
     (9002, 2, @fixture_created_at, @fixture_created_at);
 
--- Jeder Slot dauert 90 Minuten = zwei Schulstunden; die 15-minütige Pause zählt nicht.
+-- Jeder Slot dauert 90 Minuten = zwei Schulstunden. Die 15-minütige Pause zählt nicht
 INSERT INTO timetable_slot (id, timetable_id, room_id, weekday, start_time, end_time, created_at, changed_at) VALUES
     (1, 1, 1, 'MONTAG', '07:30:00', '09:00:00', @fixture_created_at, @fixture_created_at),
     (2, 1, 1, 'MONTAG', '09:15:00', '10:45:00', @fixture_created_at, @fixture_created_at),
@@ -41,7 +42,7 @@ INSERT INTO block_assignment (id, block_plan_id, starts_on, ends_on, created_at,
     (1, 1, '2026-09-14', '2026-09-18', @fixture_created_at, @fixture_created_at),
     (2, 1, '2026-09-21', '2026-09-25', @fixture_created_at, @fixture_created_at);
 
--- A und B nutzen in Block 1 getrennte Räume; C nutzt den Stundenplan von A erst in Block 2.
+-- A und B nutzen in Block 1 getrennte Räume. C nutzt den Stundenplan von A erst in Block 2
 INSERT INTO class_block_assignment (school_class_id, block_assignment_id) VALUES (1, 1), (2, 1), (3, 2);
 
 INSERT INTO student (id, first_name, last_name, birth_date, school_class_id, rfid_uid,
@@ -74,7 +75,8 @@ INSERT INTO attendance_audit (id, student_id, attendance_id, deletion_date_id, e
     (4, 3, 3, 1, 'STATUS_CHANGE', 1, NULL, 'ANWESEND', 'ABWESEND', '2026-09-14 06:00:00', 0, 0, '2026-09-14 06:00:00'),
     (5, 3, 3, 1, 'DAILY_CLOSE', NULL, NULL, NULL, NULL, '2026-09-14 08:45:00', 150, 0, '2026-09-14 08:45:00'),
     (6, 4, 4, 1, 'SCAN', NULL, 9001, 'ABWESEND', 'ANWESEND', '2026-09-14 07:15:00', 90, 0, '2026-09-14 07:15:01'),
-    -- Um 09:30 Berliner Zeit rückwirkend 08:00–09:00 entschuldigen; der Scan um 09:15 bleibt das letzte wirksame Statusereignis.
+    -- Um 09:30 Berliner Zeit ab 08:00 rückwirkend entschuldigt: Bis Slotende 09:00 werden
+    -- 60 Minuten umgebucht. Die Pause zählt nicht. Der Scan um 09:15 setzt wieder ANWESEND
     (7, 4, 4, 1, 'STATUS_CHANGE', 1, NULL, 'ANWESEND', 'ENTSCHULDIGT', '2026-09-14 06:00:00', -60, 60, '2026-09-14 07:30:00'),
     (8, 5, 5, 1, 'SCAN', NULL, 9001, 'ABWESEND', 'ANWESEND', '2026-09-14 05:30:00', 0, 0, '2026-09-14 05:30:01'),
     (9, 6, 6, 1, 'SCAN', NULL, 9001, 'ABWESEND', 'ANWESEND', '2026-09-14 05:30:00', 0, 0, '2026-09-14 05:30:01'),
@@ -86,8 +88,9 @@ INSERT INTO raw_scan (scan_id, rfid_uid, scanned_at, created_at) VALUES
     ('00000000-0000-4000-8000-000000000003', 'TEST-UID-003', '2026-09-14 05:30:00', '2026-09-14 05:30:01'),
     ('00000000-0000-4000-8000-000000000004', 'TEST-UID-004', '2026-09-14 07:15:00', '2026-09-14 07:15:01'),
     ('00000000-0000-4000-8000-000000000005', 'TEST-UID-005', '2026-09-14 05:30:00', '2026-09-14 05:30:01'),
-    -- Neue Scan-ID bei bereits anwesendem Schüler: nur Rohscan, kein weiteres Audit und keine Kontobuchung.
+    -- Neue Scan-ID bei bereits anwesendem Schüler: nur Rohscan, kein weiteres Audit und keine Kontobuchung
     ('00000000-0000-4000-8000-000000000015', 'TEST-UID-005', '2026-09-14 05:45:00', '2026-09-14 05:45:01'),
-    -- Wiederholung mit derselben Scan-ID und demselben Inhalt; es entsteht kein zweiter Datensatz.
+    -- Datensatz für den Wiederholungsfall: Die Scan-ID ist hier nur einmal enthalten.
+    -- AttendanceFixtureTest prüft, dass ein zweites INSERT mit dieser ID abgelehnt wird
     ('00000000-0000-4000-8000-000000000006', 'TEST-UID-006', '2026-09-14 05:30:00', '2026-09-14 05:30:01'),
     ('00000000-0000-4000-8000-000000000008', 'TEST-UID-008', '2026-09-21 06:00:00', '2026-09-21 06:00:01');

@@ -4,6 +4,7 @@ import java.util.Optional;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 
+/** Liest Mitarbeiteridentität und aktuelle Administratorrolle für Rechteprüfungen */
 @Repository
 public class StaffAccessRepository {
   private final JdbcTemplate jdbc;
@@ -12,6 +13,7 @@ public class StaffAccessRepository {
     this.jdbc = jdbc;
   }
 
+  /** Sucht die gespeicherte Mitarbeiter-ID und aktuelle Administratorrolle zum Benutzernamen */
   public Optional<StaffIdentity> findByUsername(String username) {
     return jdbc
         .query(
@@ -23,5 +25,6 @@ public class StaffAccessRepository {
         .findFirst();
   }
 
+  /** Enthält die Mitarbeiter-ID und die aktuelle Administratorberechtigung */
   public record StaffIdentity(Long id, boolean administrator) {}
 }

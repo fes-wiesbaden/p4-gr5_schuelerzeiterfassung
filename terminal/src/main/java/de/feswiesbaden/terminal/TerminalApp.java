@@ -19,8 +19,9 @@ import javafx.application.Application;
 import javafx.scene.Scene;
 import javafx.stage.Stage;
 
+/** Verbindet Kartenleser, lokale Warteschlange, Zustellung und Terminalanzeige */
 public final class TerminalApp extends Application {
-  // Absoluter Pfad, sonst sucht JavaFX im Paket der aufrufenden Klasse.
+  // Absoluter Pfad, sonst sucht JavaFX im Paket der aufrufenden Klasse
   private static final String STYLESHEET =
       TerminalApp.class.getResource("/de/feswiesbaden/terminal/terminal.css").toExternalForm();
 
@@ -32,11 +33,12 @@ public final class TerminalApp extends Application {
 
   private TerminalView view;
 
-  // Nur dieser Scan darf die Anzeige ändern. Sonst schaltet sie im Takt der
-  // Zustellversuche älterer Scans hin und her. Der Scan wird im Lesethread
-  // gesetzt und im Zustellthread gelesen, deshalb volatile.
+  // Endgültige Antworten älterer Scans dürfen die aktuelle Rückmeldung nicht überschreiben.
+  // Der Wert null bedeutet, dass keine unmittelbare Rückmeldung mehr aussteht. Mit volatile
+  // werden Änderungen aus dem Lesethread für den Zustellthread sichtbar
   private volatile String angezeigterScan;
 
+  /** Lädt die Konfiguration, startet Leser und Zustellung und öffnet die Terminalanzeige */
   @Override
   public void start(Stage fenster) {
     TerminalConfig config = TerminalConfig.load(Path.of("terminal.properties"));
@@ -70,8 +72,7 @@ public final class TerminalApp extends Application {
     fenster.show();
   }
 
-  // Erst vormerken, dann senden. Stürzt das Programm direkt nach dem Auflegen
-  // der Karte ab, ist der Scan trotzdem da.
+  /** Speichert den neuen Scan vor dem Senden und zeigt die laufende Verarbeitung an */
   private void onScan(Reading gelesen) {
     Scan scan = Scan.of(gelesen.rfidUid(), gelesen.terminalNumber());
     try {
@@ -87,11 +88,14 @@ public final class TerminalApp extends Application {
     }
   }
 
-  // Jeder Chip bekommt genau eine sichtbare Rückmeldung.
+  /**
+   * Zeigt endgültige Antworten nur für den zuletzt erfassten, noch angezeigten Scan. Ist ein
+   * erneuter Versuch nötig, erscheint eine lokale Vormerkung, auch wenn zunächst ein älterer Scan
+   * die Warteschlange blockiert. Aktualisiert danach die Zahl offener Scans
+   */
   private void onResult(Scan scan, SendResult ergebnis) {
     switch (ergebnis.status()) {
-      // Die Warteschlange arbeitet der Reihe nach, der eigene Scan kommt also
-      // vielleicht nicht dran. Fehlende Verbindung gilt trotzdem für ihn.
+      // Bei RETRY endet der Durchlauf am ersten offenen Scan. Auch neuere Scans warten dann
       case RETRY -> {
         if (angezeigterScan != null) {
           angezeigterScan = null;
@@ -114,6 +118,7 @@ public final class TerminalApp extends Application {
     updateQueueInfo();
   }
 
+  /** Liest die Zahl offener Scans für die Anzeige und meldet Lesefehler ohne Kartendaten */
   private void updateQueueInfo() {
     try {
       view.showQueueSize(queue.size());
@@ -122,6 +127,7 @@ public final class TerminalApp extends Application {
     }
   }
 
+  /** Beendet Kartenleser und Zustellung beim Schließen des Terminals */
   @Override
   public void stop() {
     if (scanner != null) {
@@ -132,6 +138,7 @@ public final class TerminalApp extends Application {
     }
   }
 
+  /** Startet die JavaFX-Anwendung */
   public static void main(String[] args) {
     launch(args);
   }

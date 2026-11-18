@@ -20,6 +20,11 @@ import lombok.NoArgsConstructor;
 import lombok.Setter;
 import org.hibernate.annotations.Immutable;
 
+/**
+ * Unveränderliches Änderungsprotokoll für Tagesstatus und Fehlminutenkonten. Positive Minutendeltas
+ * erhöhen das jeweilige Konto, negative verringern es. Ein Kontenreset verweist auf den Schüler und
+ * das Löschdatum, aber auf keine Tagesanwesenheit
+ */
 @Entity
 @Table(name = "attendance_audit")
 @Immutable

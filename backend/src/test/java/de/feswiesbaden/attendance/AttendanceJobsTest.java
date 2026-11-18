@@ -25,8 +25,10 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.scheduling.annotation.ScheduledAnnotationBeanPostProcessor;
 import org.springframework.scheduling.support.CronExpression;
 
+/** Prüft Ausführung, Berliner Zeitplanung und Fehlerbehandlung des Tagesabschlussjobs */
 @ExtendWith(OutputCaptureExtension.class)
 class AttendanceJobsTest {
+  /** Prüft Startausführung und unabhängig von der Retention abschaltbare Tagesabschlussplanung */
   @Test
   void registersNightJobAndRunsAtApplicationReadyIndependentlyOfRetentionScheduling() {
     var accounting = mock(AttendanceAccountingService.class);
@@ -54,6 +56,7 @@ class AttendanceJobsTest {
         .run(context -> assertThat(context).doesNotHaveBean(AttendanceJobs.class));
   }
 
+  /** Prüft die Ausführung um 00:15 Uhr Berliner Zeit auch bei Sommerzeitwechseln */
   @ParameterizedTest
   @CsvSource({
     "2027-06-29T22:00:00Z,2027-06-29T22:15:00Z",
@@ -69,6 +72,7 @@ class AttendanceJobsTest {
     assertThat(next.toInstant()).isEqualTo(expected);
   }
 
+  /** Prüft technische Fehlerlogs ohne Kartenkennung und einen erfolgreichen Folgelauf */
   @Test
   void logsOnlyTechnicalFailureAndAllowsTheNextRun(CapturedOutput output) {
     var accounting = mock(AttendanceAccountingService.class);

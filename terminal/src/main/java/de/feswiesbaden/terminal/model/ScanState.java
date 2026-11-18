@@ -1,7 +1,6 @@
 package de.feswiesbaden.terminal.model;
 
-// Feste Texte, damit nie ein Name, eine Klasse oder eine UID am Terminal
-// auftaucht (#37).
+/** Definiert feste Terminalanzeigen ohne Namen, Klassen oder Kartenkennungen */
 public enum ScanState {
   READY("⌾", "Karte auflegen", "Halte deine Schulkarte an das Lesegerät."),
   PROCESSING("⧗", "Wird verarbeitet", "Der Scan wird an den Server geschickt."),
@@ -21,14 +20,17 @@ public enum ScanState {
     this.hint = hint;
   }
 
+  /** Liefert das feste Symbol des Anzeigezustands */
   public String symbol() {
     return symbol;
   }
 
+  /** Liefert die neutrale Überschrift des Anzeigezustands */
   public String headline() {
     return headline;
   }
 
+  /** Liefert den festen Hinweistext des Anzeigezustands */
   public String hint() {
     return hint;
   }

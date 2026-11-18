@@ -1,4 +1,4 @@
-/* Farben und Abstände wie im Web-Terminal des Schulprojekts. */
+/* Gestaltung der JavaFX-Terminalanzeige und ihrer Scan-Zustände */
 
 .root {
   -fx-font-family: "Inter", "Cantarell", sans-serif;
@@ -57,17 +57,17 @@
 .state-ready .headline { -fx-text-fill: #0f172a; }
 .state-ready .badge    { -fx-background-color: #e4ebf6; -fx-border-color: #34558b; -fx-text-fill: #34558b; }
 
-/* Erfasst */
+/* Erfolgsrückmeldung */
 .state-success .symbol   { -fx-background-color: #dcfce7; -fx-border-color: #15803d; -fx-text-fill: #15803d; }
 .state-success .headline { -fx-text-fill: #15803d; }
 .state-success .badge    { -fx-background-color: #dcfce7; -fx-border-color: #15803d; -fx-text-fill: #15803d; }
 
-/* Nicht erfasst */
+/* Fehlerrückmeldung */
 .state-error .symbol   { -fx-background-color: #fee2e2; -fx-border-color: #b91c1c; -fx-text-fill: #b91c1c; }
 .state-error .headline { -fx-text-fill: #b91c1c; }
 .state-error .badge    { -fx-background-color: #fee2e2; -fx-border-color: #b91c1c; -fx-text-fill: #b91c1c; }
 
-/* Lokal vorgemerkt, Server war nicht erreichbar */
+/* Lokal vorgemerkt. Die Zustellung wird später erneut versucht */
 .state-queued .symbol   { -fx-background-color: #fef3c7; -fx-border-color: #b45309; -fx-text-fill: #b45309; }
 .state-queued .headline { -fx-text-fill: #b45309; }
 .state-queued .badge    { -fx-background-color: #fef3c7; -fx-border-color: #b45309; -fx-text-fill: #b45309; }

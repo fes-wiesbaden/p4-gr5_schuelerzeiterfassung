@@ -12,6 +12,7 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
 
+/** Speichert einen Raum mit eindeutiger Raumnummer */
 @Entity
 @Table(name = "room")
 @Getter

@@ -14,15 +14,22 @@ import org.springframework.security.core.Authentication;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
 import org.springframework.security.web.servlet.util.matcher.PathPatternRequestMatcher;
 
+/** Liest und prüft die als JSON gesendeten Anmeldedaten */
 public class JsonLoginFilter extends UsernamePasswordAuthenticationFilter {
   private final ObjectMapper mapper;
 
+  /** Bindet den JSON-Filter an POST-Anfragen auf /api/login */
   public JsonLoginFilter(ObjectMapper mapper) {
     this.mapper = mapper;
     setRequiresAuthenticationRequestMatcher(
         PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.POST, "/api/login"));
   }
 
+  /**
+   * Prüft JSON-Inhaltstyp, Pflichtfelder und Längengrenzen und lässt Spring Security die
+   * Zugangsdaten prüfen. Ungültige Eingaben erhalten HTTP 400, ein unzulässiger Inhaltstyp HTTP
+   * 415. In diesen Fällen wird keine Authentifizierung gestartet
+   */
   @Override
   public Authentication attemptAuthentication(
       HttpServletRequest request, HttpServletResponse response) {

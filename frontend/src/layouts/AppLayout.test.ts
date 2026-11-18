@@ -6,13 +6,18 @@ import PrimeVue from 'primevue/config'
 import AppLayout from './AppLayout.vue'
 import router from '@/router'
 import { useAuthStore } from '@/stores/auth'
+import LoginView from '@/views/LoginView.vue'
 
 describe('AppLayout Navigation', () => {
-  afterEach(() => vi.unstubAllGlobals())
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    document.cookie = 'XSRF-TOKEN=; Max-Age=0'
+  })
   beforeEach(async () => {
     setActivePinia(createPinia())
 
-    // Ohne angemeldeten Nutzer schickt der Router auf die Anmeldeseite.
+    // Simuliert eine bereits geprüfte Anmeldung, damit der Test die Navigation
+    // ohne Backend-Anfrage oder Weiterleitung zur Anmeldeseite aufbauen kann
     const auth = useAuthStore()
     auth.user = { name: 'A. Muster', role: 'admin' }
     auth.sessionChecked = true
@@ -60,6 +65,50 @@ describe('AppLayout Navigation', () => {
     expect(wrapper.text()).toContain('Klassen')
     wrapper.unmount()
   })
+
+  it.each([
+    ['/klassen?seite=2', '/klassen?seite=2'],
+    ['/unbekannt', '/live-anwesenheit'],
+    ['/personal', '/live-anwesenheit']
+  ])(
+    'holt das CSRF-Cookie nach und leitet von %s zu %s weiter',
+    async (weiter, target) => {
+      const auth = useAuthStore()
+      auth.user = null
+      auth.sessionChecked = false
+      const fetchMock = vi
+        .fn()
+        .mockRejectedValueOnce(new Error('offline'))
+        .mockImplementationOnce(() => {
+          document.cookie = 'XSRF-TOKEN=csrf-test'
+          return new Response(null, { status: 401 })
+        })
+        .mockResolvedValueOnce(
+          Response.json({ name: 'L. Kraft', role: 'lehrkraft' })
+        )
+      vi.stubGlobal('fetch', fetchMock)
+
+      await router.push({ name: 'login', query: { weiter } })
+      const wrapper = mount(LoginView, {
+        global: { plugins: [router, PrimeVue] }
+      })
+      await wrapper.get('#login-username').setValue('lehrkraft')
+      await wrapper.get('#login-password').setValue('testpasswort')
+      await wrapper.get('form').trigger('submit')
+      await flushPromises()
+
+      expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
+        '/api/me',
+        '/api/me',
+        '/api/login'
+      ])
+      expect(fetchMock.mock.calls[2][1].headers['X-XSRF-TOKEN']).toBe(
+        'csrf-test'
+      )
+      expect(router.currentRoute.value.fullPath).toBe(target)
+      wrapper.unmount()
+    }
+  )
 
   it.each([403, 500, 'offline'])(
     'zeigt einen Logout-Fehler (%s) und erlaubt einen neuen Versuch',

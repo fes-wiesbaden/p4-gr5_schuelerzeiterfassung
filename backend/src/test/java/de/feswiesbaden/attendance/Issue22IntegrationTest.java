@@ -39,6 +39,7 @@ import org.testcontainers.containers.MySQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
+/** Prüft Anmeldung, Sitzungen und CSRF-Schutz über HTTP-Anfragen */
 @SpringBootTest(
     webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
     properties = "attendance.retention.scheduling.enabled=false")
@@ -63,6 +64,7 @@ class Issue22IntegrationTest {
 
   private String hash;
 
+  /** Legt vor jedem Test eine Lehrkraft und einen Administrator mit BCrypt-Passwort-Hash an */
   @BeforeEach
   void createAccounts() {
     hash = encoder.encode(PASSWORD);
@@ -76,6 +78,7 @@ class Issue22IntegrationTest {
     }
   }
 
+  /** Beendet alle Testsitzungen und entfernt die Mitarbeiterkonten */
   @AfterEach
   void cleanup() {
     for (var session : manager().findSessions()) {
@@ -85,6 +88,7 @@ class Issue22IntegrationTest {
     jdbc.update("DELETE FROM staff");
   }
 
+  /** Prüft Anmeldung, Cookies und die Ausgabe von Name und Rolle ohne Zugangsdaten */
   @ParameterizedTest
   @CsvSource({"lehrkraft,lehrkraft", "administrator,admin"})
   void logsInWithStoredBcryptAndPersistsOnlyPublicUser(
@@ -109,6 +113,7 @@ class Issue22IntegrationTest {
     assertThat(output.getAll()).doesNotContain(PASSWORD, hash);
   }
 
+  /** Prüft den Wechsel der Sitzungs-ID und die Ungültigkeit der alten Sitzung */
   @Test
   void rotatesSessionIdAndInvalidatesOldIdOnReauthentication() throws Exception {
     var client = authenticated();
@@ -122,6 +127,7 @@ class Issue22IntegrationTest {
     assertThat(sessions.getAllSessions(sessions.getAllPrincipals().getFirst(), false)).hasSize(1);
   }
 
+  /** Prüft neutrale Anmeldefehler und den Erhalt bereits gültiger Sitzungen */
   @Test
   void credentialErrorsAreNeutralAndDoNotDisplaceExistingLogin() throws Exception {
     var existing = authenticated();
@@ -137,6 +143,7 @@ class Issue22IntegrationTest {
     assertThat(existing.get("/api/me").statusCode()).isEqualTo(200);
   }
 
+  /** Prüft, dass ungültige JSON-Anfragen ohne Wiedergabe ihres Inhalts abgelehnt werden */
   @ParameterizedTest
   @ValueSource(
       strings = {
@@ -157,6 +164,7 @@ class Issue22IntegrationTest {
     assertThat(client.cookies).doesNotContainKey("SESSION");
   }
 
+  /** Prüft Eingabelängen, die UTF-8-Passwortgrenze und den Inhaltstyp der Anmeldung */
   @Test
   void validatesUtf8PasswordLimitAndMediaType() throws Exception {
     var client = new Client();
@@ -171,6 +179,7 @@ class Issue22IntegrationTest {
     assertThat(client.get("/api/login").statusCode()).isEqualTo(401);
   }
 
+  /** Prüft den CSRF-Schutz schreibender Anfragen und die Token-Erneuerung nach der Anmeldung */
   @Test
   void requiresCsrfForLoginLogoutAndOtherWritesAndRenewsItAfterLogin() throws Exception {
     var client = new Client();
@@ -194,6 +203,7 @@ class Issue22IntegrationTest {
     assertThat(client.get("/api/students").statusCode()).isEqualTo(403);
   }
 
+  /** Prüft, dass eine neue Anmeldung nur die vorherige Sitzung desselben Nutzers beendet */
   @Test
   void secondLoginExpiresOldSessionButOtherUsersRemainLoggedIn() throws Exception {
     var first = authenticated();
@@ -209,6 +219,7 @@ class Issue22IntegrationTest {
     assertThat(teacher.get("/api/me").statusCode()).isEqualTo(200);
   }
 
+  /** Prüft, dass nach einer verdrängten Sitzung ein neues CSRF-Token zur Anmeldung bereitsteht */
   @Test
   void displacedSessionBootstrapsCsrfForImmediateLogin() throws Exception {
     var displaced = authenticated();
@@ -222,6 +233,7 @@ class Issue22IntegrationTest {
     assertThat(displaced.login("test.administrator", PASSWORD).statusCode()).isEqualTo(200);
   }
 
+  /** Prüft, dass nach gleichzeitigen Anmeldungen genau eine Sitzung berechtigt bleibt */
   @Test
   void simultaneousLoginsLeaveExactlyOneAuthorizedSession() throws Exception {
     var first = new Client();
@@ -250,6 +262,7 @@ class Issue22IntegrationTest {
     assertThat(sessions.getAllSessions(sessions.getAllPrincipals().getFirst(), false)).hasSize(1);
   }
 
+  /** Prüft, dass die Abmeldung Cookies, Sitzung und Registrierung entfernt */
   @Test
   void logoutDeletesCookiesSessionAndRegistryEntry() throws Exception {
     var client = authenticated();
@@ -267,6 +280,7 @@ class Issue22IntegrationTest {
     assertThat(client.get("/api/me").statusCode()).isEqualTo(401);
   }
 
+  /** Prüft die Inaktivitätsfrist von 30 Minuten und ihre Verlängerung durch Anfragen */
   @Test
   void idleTimeoutIsThirtyMinutesAndRequestsExtendIt() throws Exception {
     var client = authenticated();
@@ -282,6 +296,7 @@ class Issue22IntegrationTest {
     assertThat(sessions.getAllPrincipals()).isEmpty();
   }
 
+  /** Prüft den öffentlichen Statusendpunkt und den Schutz der übrigen Routen */
   @Test
   void healthIsPublicAndOtherRoutesStayClosed() throws Exception {
     var client = new Client();
@@ -290,11 +305,13 @@ class Issue22IntegrationTest {
     assertThat(client.get("/api/students").statusCode()).isEqualTo(401);
   }
 
+  /** Liefert die Sitzungsverwaltung des eingebetteten Testservers */
   private Manager manager() {
     var server = (TomcatWebServer) context.getWebServer();
     return ((Context) server.getTomcat().getHost().findChildren()[0]).getManager();
   }
 
+  /** Erstellt einen Testclient mit angemeldeter Administratorsitzung */
   private Client authenticated() throws Exception {
     var client = new Client();
     client.get("/api/me");
@@ -302,6 +319,7 @@ class Issue22IntegrationTest {
     return client;
   }
 
+  /** Prüft Path, Secure, SameSite=Strict und den erwarteten HttpOnly-Status des Antwortcookies */
   private void assertCookie(HttpResponse<String> response, String name, boolean httpOnly) {
     String header =
         response.headers().allValues("Set-Cookie").stream()
@@ -316,6 +334,7 @@ class Issue22IntegrationTest {
     }
   }
 
+  /** Verwaltet HTTP-Anfragen und Cookies eines Testnutzers */
   private class Client {
     private final Map<String, String> cookies = new HashMap<>();
 
@@ -324,14 +343,17 @@ class Issue22IntegrationTest {
 
     private HttpResponse<String> last;
 
+    /** Liest das aktuelle CSRF-Token aus den Testcookies */
     String csrf() {
       return cookies.get("XSRF-TOKEN");
     }
 
+    /** Sendet eine GET-Anfrage mit den gespeicherten Testcookies */
     HttpResponse<String> get(String path) throws Exception {
       return send(path, null, null, null);
     }
 
+    /** Sendet die Anmeldedaten mit dem aktuellen CSRF-Token als JSON */
     HttpResponse<String> login(String username, String password) throws Exception {
       return post(
           "/api/login",
@@ -340,18 +362,23 @@ class Issue22IntegrationTest {
           csrf());
     }
 
+    /** Sendet eine POST-Anfrage mit Inhaltstyp und CSRF-Token */
     HttpResponse<String> post(String path, String body, String type, String token)
         throws Exception {
       return send(path, body, type, token);
     }
 
+    /**
+     * Sendet die Testanfrage, aktualisiert gespeicherte Cookies und verlangt eine Antwort ohne
+     * Weiterleitung
+     */
     private HttpResponse<String> send(String path, String body, String type, String token)
         throws Exception {
       var request =
           HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + port + path))
               .timeout(Duration.ofSeconds(15));
-      // Direkter HTTP-Zugriff nur im Test; produktive Clients senden diese Cookies ausschließlich
-      // über HTTPS.
+      // Der lokale Test sendet Cookies ausdrücklich als Header über HTTP.
+      // Browser würden Cookies mit Secure-Attribut nur über HTTPS senden
       if (!cookies.isEmpty()) {
         request.header(
             "Cookie",

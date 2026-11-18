@@ -15,6 +15,7 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
 
+/** Speichert Mitarbeiter mit Zugangsdaten und ihrer Rolle */
 @Entity
 @Table(name = "staff")
 @Getter

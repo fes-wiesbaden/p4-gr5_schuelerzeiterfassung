@@ -10,6 +10,7 @@ import org.springframework.context.event.EventListener;
 import org.springframework.scheduling.annotation.EnableScheduling;
 import org.springframework.scheduling.annotation.Scheduled;
 
+/** Startet den Tagesabschluss beim Anwendungsstart und täglich um 00:15 Uhr Berliner Zeit */
 @Configuration
 @EnableScheduling
 @ConditionalOnProperty(
@@ -25,6 +26,7 @@ public class AttendanceJobs {
     this.accounting = accounting;
   }
 
+  /** Schließt fällige Tage ab und protokolliert Fehler ohne personenbezogene Details */
   @EventListener(ApplicationReadyEvent.class)
   @Scheduled(cron = "0 15 0 * * *", zone = "Europe/Berlin")
   public void closeDays() {

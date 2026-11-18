@@ -16,6 +16,12 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.support.GeneratedKeyHolder;
 import org.springframework.stereotype.Repository;
 
+/**
+ * Liest und speichert Tagesanwesenheiten, Fehlminutenkonten und Änderungsprotokolle.
+ *
+ * <p>Die aufrufenden Services bilden die Transaktionsgrenze. Datenbanksperren bleiben bis zum Ende
+ * dieser Transaktion bestehen. Konten werden durch Sperren des Schülerdatensatzes geschützt
+ */
 @Repository
 public class AttendanceAccountingRepository {
   private final JdbcTemplate jdbc;
@@ -24,6 +30,10 @@ public class AttendanceAccountingRepository {
     this.jdbc = jdbc;
   }
 
+  /**
+   * Lädt die Fehlminutenkonten einer Klasse und sperrt die Schülerdatensätze in aufsteigender
+   * ID-Reihenfolge
+   */
   public List<Account> lockAccounts(Long classId) {
     return jdbc.query(
         "SELECT id, unexcused_minutes_account, excused_minutes_account, created_at"
@@ -32,6 +42,7 @@ public class AttendanceAccountingRepository {
         classId);
   }
 
+  /** Lädt die Fehlminutenkonten und sperrt den Schüler, sofern er zur angegebenen Klasse gehört */
   public Optional<Account> lockAccount(Long studentId, Long classId) {
     return jdbc
         .query(
@@ -44,6 +55,9 @@ public class AttendanceAccountingRepository {
         .findFirst();
   }
 
+  /**
+   * Liefert Klassen-IDs, deren Blockplan begonnen hat und dessen Löschdatum noch nicht erreicht ist
+   */
   public List<Long> findClassesToClose(LocalDate today) {
     return jdbc.queryForList(
         "SELECT c.id FROM school_class c JOIN block_plan p ON p.id = c.block_plan_id"
@@ -53,6 +67,10 @@ public class AttendanceAccountingRepository {
         today);
   }
 
+  /**
+   * Prüft einen Slot des angegebenen Stundenplans im Terminalraum zur Berliner Ortszeit. Der Beginn
+   * zählt zum Slot, das Ende nicht. Die Blockzuordnung wird hier nicht geprüft
+   */
   public boolean matchesTerminalSlot(
       Long timetableId, int terminalId, LocalDate date, LocalTime time) {
     return !jdbc.queryForList(
@@ -68,6 +86,7 @@ public class AttendanceAccountingRepository {
         .isEmpty();
   }
 
+  /** Lädt die zugeordneten Blockzeiträume der Klasse mit Lesesperre */
   public List<Period> findPeriods(Long classId) {
     return jdbc.query(
         "SELECT b.block_plan_id, b.starts_on, b.ends_on FROM block_assignment b"
@@ -80,6 +99,10 @@ public class AttendanceAccountingRepository {
         classId);
   }
 
+  /**
+   * Lädt alle Slots mit positiver Dauer aus dem Stundenplan, nach Beginn sortiert und mit
+   * Lesesperre
+   */
   public List<Slot> findSlots(Long timetableId) {
     return jdbc.query(
         "SELECT weekday, start_time, end_time FROM timetable_slot"
@@ -92,6 +115,7 @@ public class AttendanceAccountingRepository {
         timetableId);
   }
 
+  /** Lädt und sperrt alle Tagesanwesenheiten eines Schülers, nach Datum sortiert */
   public List<DayAttendance> findAttendances(Long studentId) {
     return jdbc.query(
         "SELECT id, attendance_date, status FROM attendance WHERE student_id = ? ORDER BY attendance_date FOR UPDATE",
@@ -103,6 +127,7 @@ public class AttendanceAccountingRepository {
         studentId);
   }
 
+  /** Lädt und sperrt alle Änderungsprotokolle eines Schülers, nach Ereigniszeit und ID sortiert */
   public List<Audit> findAudits(Long studentId) {
     return jdbc.query(
         "SELECT id, attendance_id, deletion_date_id, event_type, occurred_at, old_status, new_status,"
@@ -114,7 +139,7 @@ public class AttendanceAccountingRepository {
                 row.getObject("attendance_id", Long.class),
                 row.getLong("deletion_date_id"),
                 AuditEventType.valueOf(row.getString("event_type")),
-                row.getTimestamp("occurred_at").toLocalDateTime(),
+                row.getObject("occurred_at", LocalDateTime.class),
                 row.getString("new_status") == null
                     ? null
                     : AttendanceStatus.valueOf(row.getString("new_status")),
@@ -126,6 +151,7 @@ public class AttendanceAccountingRepository {
         studentId);
   }
 
+  /** Legt eine Tagesanwesenheit an und liefert ihre erzeugte ID */
   public Long insertAttendance(
       Long studentId, LocalDate date, AttendanceStatus status, LocalDateTime now) {
     var key = new GeneratedKeyHolder();
@@ -147,6 +173,10 @@ public class AttendanceAccountingRepository {
     return key.getKey().longValue();
   }
 
+  /**
+   * Fügt ein Änderungsprotokoll ein und speichert die übergebenen Fehlminutenkonten und den
+   * Tagesstatus
+   */
   public void book(
       Account account,
       Long attendanceId,
@@ -184,14 +214,19 @@ public class AttendanceAccountingRepository {
         attendanceId);
   }
 
+  /** Liest Schüler-ID, Fehlminutenkonten und Erstellungszeitpunkt aus dem SQL-Abfrageergebnis */
   private Account account(ResultSet row, int index) throws SQLException {
     return new Account(
         row.getLong("id"),
         row.getInt("unexcused_minutes_account"),
         row.getInt("excused_minutes_account"),
-        row.getTimestamp("created_at").toLocalDateTime());
+        row.getObject("created_at", LocalDateTime.class));
   }
 
+  /**
+   * Setzt beide Fehlminutenkonten auf null und protokolliert die abgezogenen Minuten. Auch bei
+   * bereits leeren Konten entsteht ein ACCOUNT_RESET-Protokoll ohne Tagesanwesenheit
+   */
   public void reset(Account account, Long actorId, Long deletionDateId, LocalDateTime now) {
     jdbc.update(
         "INSERT INTO attendance_audit (student_id, deletion_date_id, event_type, changed_by_staff_id,"
@@ -208,14 +243,25 @@ public class AttendanceAccountingRepository {
         account.id());
   }
 
+  /**
+   * Enthält Schüler-ID, beide Fehlminutenkonten und den Erstellungszeitpunkt des Schülerdatensatzes
+   */
   public record Account(Long id, int unexcused, int excused, LocalDateTime createdAt) {}
 
+  /** Enthält einen zugeordneten Blockzeitraum mit seiner Blockplan-ID */
   public record Period(Long planId, LocalDate startsOn, LocalDate endsOn) {}
 
+  /** Enthält Wochentag, Beginn und Ende einer geplanten Unterrichtszeit */
   public record Slot(DayOfWeek weekday, LocalTime startsAt, LocalTime endsAt) {}
 
+  /** Enthält ID, Datum und aktuellen Status einer Tagesanwesenheit */
   public record DayAttendance(Long id, LocalDate date, AttendanceStatus status) {}
 
+  /**
+   * Enthält ein Änderungsprotokoll mit UTC-Ereigniszeit, optionalem Statuswechsel und
+   * Minutenänderungen. Positive Minutenwerte erhöhen das jeweilige Fehlminutenkonto, negative
+   * verringern es
+   */
   public record Audit(
       Long id,
       Long attendanceId,

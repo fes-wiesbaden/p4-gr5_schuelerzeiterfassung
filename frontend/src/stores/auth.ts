@@ -10,8 +10,8 @@ export interface AuthUser {
   role: Role
 }
 
-// Immer derselbe Text, egal was schiefging. Er darf nicht verraten, ob es den
-// Benutzernamen ueberhaupt gibt.
+// Abgelehnte Anmeldungen erhalten denselben Text, damit kein Rückschluss auf
+// vorhandene Benutzernamen möglich ist. Verbindungsfehler haben einen eigenen Hinweis
 const LOGIN_FAILED = 'Anmeldung fehlgeschlagen. Bitte Eingaben pruefen.'
 const SERVER_UNREACHABLE =
   'Server nicht erreichbar. Bitte spaeter erneut versuchen.'
@@ -21,7 +21,7 @@ export const useAuthStore = defineStore('auth', () => {
   const errorMessage = ref('')
   const busy = ref(false)
 
-  // Solange false, ist noch unbekannt ob eine Sitzung besteht.
+  // false bedeutet: Der Anmeldestatus muss vor dem nächsten Seitenwechsel geladen werden
   const sessionChecked = ref(false)
 
   const isLoggedIn = computed(() => user.value !== null)
@@ -32,6 +32,13 @@ export const useAuthStore = defineStore('auth', () => {
     errorMessage.value = ''
 
     try {
+      if (!sessionChecked.value) {
+        await loadCurrentUser()
+        if (!sessionChecked.value) {
+          errorMessage.value = SERVER_UNREACHABLE
+          return false
+        }
+      }
       const response = await postJson('/api/login', { username, password })
 
       if (!response.ok) {
@@ -66,8 +73,8 @@ export const useAuthStore = defineStore('auth', () => {
         return false
       }
       clearSession()
-      // Logout entfernt den CSRF-Cookie. /api/me liefert vor dem nächsten Login
-      // einen neuen Token, auch wenn keine Sitzung mehr besteht.
+      // Nach der Abmeldung muss /api/me erneut aufgerufen werden, damit vor
+      // der nächsten Anmeldung wieder ein CSRF-Token-Cookie vorhanden ist
       sessionChecked.value = false
       return true
     } catch {
@@ -79,16 +86,16 @@ export const useAuthStore = defineStore('auth', () => {
     }
   }
 
-  // Nach einem Neuladen der Seite ist der Store leer, das Sitzungscookie kann
-  // aber noch gelten. Deshalb einmal beim Backend nachfragen.
+  // Lädt Anzeigenamen und Rolle aus einer noch gültigen Cookiesitzung.
+  // So wird der nach einem Neuladen leere Store wieder mit dem Backend abgeglichen
   async function loadCurrentUser() {
     try {
       const response = await getJson('/api/me')
       user.value = response.ok ? ((await response.json()) as AuthUser) : null
+      sessionChecked.value = response.ok || response.status === 401
     } catch {
       user.value = null
-    } finally {
-      sessionChecked.value = true
+      sessionChecked.value = false
     }
   }
 

@@ -1,3 +1,11 @@
+<template>
+  <section>
+    <h1>Live-Anwesenheit</h1>
+    <p>Die Live-Anwesenheit ist noch nicht verfügbar.</p>
+  </section>
+</template>
+
+<!--
 <script setup lang="ts">
 import AppDataTable, {
   type DataTableColumn
@@ -31,10 +39,10 @@ const rows: AttendanceRow[] = [
   <section>
     <h1>Live-Anwesenheit</h1>
     <AppDataTable
-      caption="Live-Anwesenheit der aktuellen Klasse"
-      :columns="columns"
-      :rows="rows"
-      row-key="id"
+        caption="Live-Anwesenheit der aktuellen Klasse"
+        :columns="columns"
+        :rows="rows"
+        row-key="id"
     >
       <template #cell-status="{ value }">
         <StatusBadge :status="value as AttendanceStatus" />
@@ -42,3 +50,4 @@ const rows: AttendanceRow[] = [
     </AppDataTable>
   </section>
 </template>
+-->

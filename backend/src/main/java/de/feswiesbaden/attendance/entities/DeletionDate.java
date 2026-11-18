@@ -12,6 +12,7 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
 
+/** Speichert ein wiederverwendbares Löschdatum für Anwesenheitsprotokolle */
 @Entity
 @Table(name = "deletion_date")
 @Getter
