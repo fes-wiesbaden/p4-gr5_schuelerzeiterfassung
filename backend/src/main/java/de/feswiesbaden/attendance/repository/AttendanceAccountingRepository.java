@@ -10,7 +10,10 @@ import java.time.DayOfWeek;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
+import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.support.GeneratedKeyHolder;
@@ -88,9 +91,15 @@ public class AttendanceAccountingRepository {
 
   /** Lädt die zugeordneten Blockzeiträume der Klasse mit Lesesperre */
   public List<Period> findPeriods(Long classId) {
+    return findPeriods(classId, true);
+  }
+
+  /** Lädt die Blockzeiträume der Klasse und verwendet bei Bedarf eine Lesesperre */
+  public List<Period> findPeriods(Long classId, boolean lock) {
     return jdbc.query(
         "SELECT b.block_plan_id, b.starts_on, b.ends_on FROM block_assignment b"
-            + " JOIN class_block_assignment c ON c.block_assignment_id = b.id WHERE c.school_class_id = ? FOR SHARE",
+            + " JOIN class_block_assignment c ON c.block_assignment_id = b.id WHERE c.school_class_id = ?"
+            + (lock ? " FOR SHARE" : ""),
         (row, index) ->
             new Period(
                 row.getLong("block_plan_id"),
@@ -104,9 +113,15 @@ public class AttendanceAccountingRepository {
    * Lesesperre
    */
   public List<Slot> findSlots(Long timetableId) {
+    return findSlots(timetableId, true);
+  }
+
+  /** Lädt die Unterrichtszeiten nach Beginn sortiert und verwendet bei Bedarf eine Lesesperre */
+  public List<Slot> findSlots(Long timetableId, boolean lock) {
     return jdbc.query(
         "SELECT weekday, start_time, end_time FROM timetable_slot"
-            + " WHERE timetable_id = ? AND start_time < end_time ORDER BY start_time, id FOR SHARE",
+            + " WHERE timetable_id = ? AND start_time < end_time ORDER BY start_time, id"
+            + (lock ? " FOR SHARE" : ""),
         (row, index) ->
             new Slot(
                 DayOfWeek.of(Weekday.valueOf(row.getString("weekday")).ordinal() + 1),
@@ -133,22 +148,50 @@ public class AttendanceAccountingRepository {
         "SELECT id, attendance_id, deletion_date_id, event_type, occurred_at, old_status, new_status,"
             + " unexcused_minutes_delta, excused_minutes_delta"
             + " FROM attendance_audit WHERE student_id = ? ORDER BY occurred_at, id FOR UPDATE",
-        (row, index) ->
-            new Audit(
-                row.getLong("id"),
-                row.getObject("attendance_id", Long.class),
-                row.getLong("deletion_date_id"),
-                AuditEventType.valueOf(row.getString("event_type")),
-                row.getObject("occurred_at", LocalDateTime.class),
-                row.getString("new_status") == null
-                    ? null
-                    : AttendanceStatus.valueOf(row.getString("new_status")),
-                row.getInt("unexcused_minutes_delta"),
-                row.getInt("excused_minutes_delta"),
-                row.getString("old_status") == null
-                    ? null
-                    : AttendanceStatus.valueOf(row.getString("old_status"))),
+        (row, index) -> audit(row),
         studentId);
+  }
+
+  /** Liest die noch aufbewahrten Audits eines Klassentags nach Schüler gruppiert */
+  public Map<Long, List<Audit>> findDayAudits(Long classId, LocalDate date, LocalDate today) {
+    return jdbc.query(
+        """
+        SELECT h.id, h.student_id, h.attendance_id, h.deletion_date_id, h.event_type, h.occurred_at,
+               h.old_status, h.new_status, h.unexcused_minutes_delta, h.excused_minutes_delta
+        FROM attendance_audit h
+        JOIN attendance a ON a.id = h.attendance_id AND a.student_id = h.student_id
+        JOIN student s ON s.id = a.student_id
+        JOIN deletion_date d ON d.id = h.deletion_date_id
+        WHERE s.school_class_id = ? AND a.attendance_date = ? AND d.delete_after > ?
+        """,
+        rows -> {
+          Map<Long, List<Audit>> audits = new HashMap<>();
+          while (rows.next()) {
+            audits
+                .computeIfAbsent(rows.getLong("student_id"), id -> new ArrayList<>())
+                .add(audit(rows));
+          }
+          return audits;
+        },
+        classId,
+        date,
+        today);
+  }
+
+  /** Liest ein Audit mit Statuswechsel und beiden Minutendeltas */
+  private Audit audit(ResultSet row) throws SQLException {
+    String oldStatus = row.getString("old_status");
+    String newStatus = row.getString("new_status");
+    return new Audit(
+        row.getLong("id"),
+        row.getObject("attendance_id", Long.class),
+        row.getLong("deletion_date_id"),
+        AuditEventType.valueOf(row.getString("event_type")),
+        row.getObject("occurred_at", LocalDateTime.class),
+        newStatus == null ? null : AttendanceStatus.valueOf(newStatus),
+        row.getInt("unexcused_minutes_delta"),
+        row.getInt("excused_minutes_delta"),
+        oldStatus == null ? null : AttendanceStatus.valueOf(oldStatus));
   }
 
   /** Legt eine Tagesanwesenheit an und liefert ihre erzeugte ID */

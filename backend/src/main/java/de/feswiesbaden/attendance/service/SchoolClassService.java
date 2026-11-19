@@ -92,7 +92,7 @@ public class SchoolClassService {
    * Setzt als Administrator beide Fehlminutenkonten aller Klassenschüler zurück. Offene
    * Tagesabrechnungen werden vorher nachgeholt. Noch laufende oder spätere heutige Slots verhindern
    * den Reset. Jeder Schüler erhält ein ACCOUNT_RESET-Protokoll, auch bei leeren Konten. Der
-   * Rückgabewert ist die Zahl der zurückgesetzten Schüler
+   * Rückgabewert ist die Zahl der zurückgesetzten Schüler. Eine leere Klasse liefert 0
    */
   @Transactional
   public int resetAccounts(Long classId, Long expectedPlanId) {
@@ -103,8 +103,11 @@ public class SchoolClassService {
   private int resetAccounts(ClassPlan plan, Long actorId, boolean requireStudents) {
     var deadline = deletionDates.getOrCreate(plan.endsOn());
     var accounts = accounting.lockAccounts(plan.classId());
-    if (requireStudents && accounts.isEmpty()) {
-      throw new IllegalStateException("CLASS_HAS_NO_STUDENTS");
+    if (accounts.isEmpty()) {
+      if (requireStudents) {
+        throw new IllegalStateException("CLASS_HAS_NO_STUDENTS");
+      }
+      return 0;
     }
     var now =
         LocalDateTime.ofInstant(clock.instant(), ZoneOffset.UTC).truncatedTo(ChronoUnit.SECONDS);
