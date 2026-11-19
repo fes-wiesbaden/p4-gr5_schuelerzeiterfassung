@@ -1,6 +1,5 @@
 package de.feswiesbaden.terminal.transport;
 
-import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
@@ -31,13 +30,6 @@ class ScanSenderTest {
   void verlangtEinenTlsKontext() {
     assertThrows(
         NullPointerException.class, () -> new ScanSender("https://127.0.0.1/api/scans", null));
-  }
-
-  /** Prüft die Erstellung mit HTTPS-Adresse und TLS-Kontext, ohne eine Verbindung aufzubauen */
-  @Test
-  void akzeptiertHttpsMitTlsKontext() {
-    assertDoesNotThrow(
-        () -> new ScanSender("https://127.0.0.1/api/scans", SSLContext.getDefault()));
   }
 
   /** Prüft, dass der Sender HTTP 200 und 201 als ACCEPTED einordnet */

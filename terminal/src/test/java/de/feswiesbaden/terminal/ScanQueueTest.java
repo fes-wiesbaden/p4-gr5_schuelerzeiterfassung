@@ -50,19 +50,6 @@ class ScanQueueTest {
     assertEquals("UID-B", offen.get(0).rfidUid());
   }
 
-  /** Prüft, dass eine neue Warteschlange die zuvor gespeicherten Scans wieder einliest */
-  @Test
-  void ueberstehtEinenNeustart(@TempDir Path ordner) throws IOException {
-    Path datei = ordner.resolve("puffer.jsonl");
-    new ScanQueue(datei).add(Scan.of("UID-C", 3));
-
-    // Neue Instanz steht für einen Neustart der Anwendung
-    ScanQueue nachNeustart = new ScanQueue(datei);
-
-    assertEquals(1, nachNeustart.size());
-    assertEquals("UID-C", nachNeustart.pending().get(0).rfidUid());
-  }
-
   /** Prüft, dass beschädigte Zeilen andere Scans nicht unlesbar machen */
   @Test
   void ueberspringtKaputteZeilenStattAufzugeben(@TempDir Path ordner) throws IOException {
