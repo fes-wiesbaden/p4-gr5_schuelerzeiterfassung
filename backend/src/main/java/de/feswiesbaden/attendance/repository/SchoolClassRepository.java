@@ -117,10 +117,16 @@ public class SchoolClassRepository {
 
   /** Sperrt Klasse und aktuellen Blockplan und liefert deren Planungsdaten */
   public Optional<ClassPlan> lockPlan(Long classId) {
+    return findPlan(classId, true);
+  }
+
+  /** Lädt den aktuellen Blockplan der Klasse und sperrt beide Datensätze auf Wunsch */
+  public Optional<ClassPlan> findPlan(Long classId, boolean lock) {
     return jdbc
         .query(
             "SELECT c.id, c.block_plan_id, c.timetable_id, p.starts_on, p.ends_on FROM school_class c"
-                + " JOIN block_plan p ON p.id = c.block_plan_id WHERE c.id = ? FOR UPDATE",
+                + " JOIN block_plan p ON p.id = c.block_plan_id WHERE c.id = ?"
+                + (lock ? " FOR UPDATE" : ""),
             (row, index) ->
                 new ClassPlan(
                     row.getLong("id"),
