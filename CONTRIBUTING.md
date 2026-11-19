@@ -61,10 +61,19 @@ Commits und Pushes erfolgen nur mit ausdrücklicher Freigabe.
 
 Das Projekt verwendet System-Maven; ein Maven Wrapper ist nicht eingecheckt. Befehle werden aus dem Repository-Hauptverzeichnis ausgeführt:
 
+1. Spotless und Checkstyle ausführen
+2. Betroffene Test gezielt ausführen
+3. Nach dem Review vollständig Backend-Build ausführen
+Grund: Unnötige Wartezeit und redundante Prüfungen minimieren.
+
 ```sh
-# Backend: Formatierung, Tests und Build
-mvn -pl backend spotless:check verify
+# Backend: schnelle Prüfungen
+mvn -pl backend spotless:check
 mvn -pl backend org.apache.maven.plugins:maven-checkstyle-plugin:3.6.0:check "-Dcheckstyle.config.location=config/checkstyle/checkstyle.xml"
+
+# Backend: gezielter Test und vollständiger Build
+mvn -pl backend "-Dtest=Testklasse#testmethode" test
+mvn -pl backend spotless:check verify
 
 # Terminal: Formatierung, Tests und Build
 mvn -pl terminal spotless:check verify
