@@ -32,6 +32,8 @@ class StaffApiErrors {
     AccessDeniedException.class
   })
   ResponseEntity<Map<String, String>> serviceError(RuntimeException exception) {
+    // Sobald weitere Fehlerfälle dazukommen, soll die HTTP-Zuordnung typisierte Fehlercodes aus
+    // einem Enum verwenden
     String code = String.valueOf(exception.getMessage());
     return switch (code) {
       case "CLASS_ACCESS_DENIED", "CLASS_NOT_FOUND", "STUDENT_NOT_FOUND" ->
