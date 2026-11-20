@@ -7,6 +7,20 @@ host_uid="${HOST_UID:-1000}"
 host_gid="${HOST_GID:-1000}"
 mkdir -p "$cert_dir"
 
+# Der Schlüssel ist nur für nginx und Spring bestimmt
+umask 077
+if [ ! -f "$cert_dir/terminal-proxy.properties" ]; then
+  printf 'attendance.terminal.proxy-token=%s\n' "$(openssl rand -hex 32)" \
+    > "$cert_dir/terminal-proxy.properties"
+fi
+proxy_token=$(sed -n 's/^attendance\.terminal\.proxy-token=//p' "$cert_dir/terminal-proxy.properties")
+if ! printf '%s' "$proxy_token" | grep -Eq '^[0-9a-f]{64}$'; then
+  echo 'Ungueltiger Terminal-Proxy-Schluessel.' >&2
+  exit 1
+fi
+printf 'proxy_set_header X-Terminal-Proxy-Token "%s";\n' "$proxy_token" \
+  > "$cert_dir/terminal-proxy.conf"
+
 if [ ! -f "$cert_dir/ca.key" ]; then
   openssl genrsa -out "$cert_dir/ca.key" 4096
   openssl req -x509 -new -key "$cert_dir/ca.key" -sha256 -days 3650 \
@@ -78,5 +92,6 @@ fi
 
 chmod 600 "$cert_dir"/*.key
 chmod 600 "$cert_dir"/*.p12
+chmod 600 "$cert_dir"/terminal-proxy.properties "$cert_dir"/terminal-proxy.conf
 chmod 644 "$cert_dir"/*.crt
 chown "$host_uid:$host_gid" "$cert_dir"/*

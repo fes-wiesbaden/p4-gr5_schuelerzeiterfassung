@@ -171,6 +171,61 @@ public class AttendanceAccountingService {
         .changed();
   }
 
+  /** Liefert den Tagesstatus und die unentschuldigten Fehlminuten einer zugänglichen Klasse */
+  @Transactional(readOnly = true)
+  public List<DailyStudent> readDay(Long classId, LocalDate date) {
+    authorization.requireClassAccess(classId, authorization.currentStaff());
+    var now = now();
+    var today = berlinDate(now);
+    if (date == null || date.isAfter(today)) {
+      throw new IllegalArgumentException("INVALID_ATTENDANCE_DATE");
+    }
+    var plan =
+        classes
+            .findPlan(classId, false)
+            .orElseThrow(() -> new IllegalArgumentException("CLASS_NOT_FOUND"));
+    var slots = readDaySlots(plan, date, now);
+    var audits = accounting.findDayAudits(classId, date, today);
+    List<DailyStudent> result = new ArrayList<>();
+    for (var student : students.findAttendanceStudents(classId)) {
+      var dayAudits = audits.getOrDefault(student.id(), List.of());
+      boolean planned = !slots.isEmpty() && !date.isBefore(berlinDate(student.createdAt()));
+      if (!planned && dayAudits.isEmpty()) {
+        continue;
+      }
+      long minutes =
+          planned
+              ? calculate(date, slots, dayAudits, now).unexcused()
+              : dayAudits.stream().mapToLong(Audit::unexcusedDelta).sum();
+      result.add(
+          new DailyStudent(
+              student.id(),
+              student.firstName(),
+              student.lastName(),
+              statusAt(dayAudits, now),
+              minutes));
+    }
+    return result;
+  }
+
+  /** Liefert geplante Slots des Tages, solange die Aufbewahrungsfrist des Plans läuft */
+  private List<Slot> readDaySlots(ClassPlan plan, LocalDate date, LocalDateTime now) {
+    if (!retained(plan, now) || date.isBefore(plan.startsOn()) || date.isAfter(plan.endsOn())) {
+      return List.of();
+    }
+    var periods = accounting.findPeriods(plan.classId(), false);
+    requirePlanPeriods(plan, periods);
+    return slotsFor(plan, periods, accounting.findSlots(plan.timetableId(), false), date);
+  }
+
+  /** Enthält sichtbare Schülerdaten mit Tagesstatus und unentschuldigten Fehlminuten des Tages */
+  public record DailyStudent(
+      Long studentId,
+      String firstName,
+      String lastName,
+      AttendanceStatus status,
+      long unexcusedMinutes) {}
+
   /**
    * Rechnet beendete geplante Unterrichtstage je Schüler ab, je Klasse in einer eigenen
    * Transaktion. Fehler einer Klasse verhindern die übrigen Klassen nicht. Der Rückgabewert zählt

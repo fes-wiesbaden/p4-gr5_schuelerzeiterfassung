@@ -1,4 +1,6 @@
 spring:
+  config:
+    import: optional:file:../.local/tls/terminal-proxy.properties
   application:
     name: attendance-backend
   datasource:

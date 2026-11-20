@@ -108,6 +108,9 @@ class Issue22IntegrationTest {
     assertThat(mapper.readTree(login.body()).path("name").asText())
         .isEqualTo("Test " + username.toUpperCase(java.util.Locale.ROOT));
     assertThat(client.get("/api/me").body()).isEqualTo(login.body());
+    var classes = client.get("/api/classes");
+    assertThat(classes.statusCode()).isEqualTo(200);
+    assertThat(classes.body()).isEqualTo("[]");
     assertThat(hash).startsWith("$2a$12$").hasSize(60);
     assertThat(login.body()).doesNotContain(PASSWORD, hash, "password", "username");
     assertThat(output.getAll()).doesNotContain(PASSWORD, hash);
@@ -302,6 +305,8 @@ class Issue22IntegrationTest {
     var client = new Client();
     assertThat(client.get("/actuator/health").statusCode()).isEqualTo(200);
     assertThat(client.get("/api/me").statusCode()).isEqualTo(401);
+    assertThat(client.get("/api/classes").statusCode()).isEqualTo(401);
+    assertThat(client.get("/api/classes/1/attendance?date=2026-09-14").statusCode()).isEqualTo(401);
     assertThat(client.get("/api/students").statusCode()).isEqualTo(401);
   }
 

@@ -53,6 +53,7 @@ class StaffAuthorization {
   void requireClassManagement(Long classId, StaffIdentity actor) {
     var teacher = classes.lockClassTeacher(classId);
     if (teacher.isEmpty() || (!actor.administrator() && !teacher.get().equals(actor.id()))) {
+      requireClassAccess(classId, actor);
       throw new AccessDeniedException("CLASS_MANAGEMENT_DENIED");
     }
   }

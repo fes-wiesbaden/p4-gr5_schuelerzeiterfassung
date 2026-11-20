@@ -6,6 +6,7 @@ import jakarta.persistence.EntityManager;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -39,6 +40,19 @@ public class StudentRepository {
         "SELECT id FROM student WHERE rfid_uid = ?",
         rs -> rs.next() ? Optional.of(rs.getLong("id")) : Optional.empty(),
         uuid);
+  }
+
+  /** Liest Namen und Anlagezeitpunkt der Schüler für die Anwesenheitsliste */
+  public List<AttendanceStudent> findAttendanceStudents(Long classId) {
+    return jdbc.query(
+        "SELECT id, first_name, last_name, created_at FROM student WHERE school_class_id = ? ORDER BY id",
+        (row, index) ->
+            new AttendanceStudent(
+                row.getLong("id"),
+                row.getString("first_name"),
+                row.getString("last_name"),
+                row.getObject("created_at", LocalDateTime.class)),
+        classId);
   }
 
   /** Lädt die Daten eines vorhandenen Schülers ohne Kartenkennung */
@@ -104,4 +118,8 @@ public class StudentRepository {
       Long classId,
       int unexcusedMinutes,
       int excusedMinutes) {}
+
+  /** Enthält die Schülerdaten für die Zuordnung zur Tagesanwesenheit */
+  public record AttendanceStudent(
+      Long id, String firstName, String lastName, LocalDateTime createdAt) {}
 }

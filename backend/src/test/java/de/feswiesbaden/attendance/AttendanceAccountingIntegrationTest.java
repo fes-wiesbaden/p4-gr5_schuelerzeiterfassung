@@ -2,8 +2,16 @@ package de.feswiesbaden.attendance;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.hamcrest.Matchers.contains;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.when;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import de.feswiesbaden.attendance.dtos.RawScanDTO;
 import de.feswiesbaden.attendance.enums.AttendanceStatus;
@@ -12,6 +20,7 @@ import de.feswiesbaden.attendance.repository.RetentionRepository;
 import de.feswiesbaden.attendance.service.AttendanceAccountingService;
 import de.feswiesbaden.attendance.service.RetentionService;
 import de.feswiesbaden.attendance.service.SchoolClassService;
+import jakarta.servlet.http.Cookie;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.LocalDate;
@@ -32,15 +41,22 @@ import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.EnumSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
 import org.springframework.dao.DataAccessException;
+import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.mock.web.MockHttpSession;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.security.web.context.HttpSessionSecurityContextRepository;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.context.jdbc.Sql;
+import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.ResultActions;
+import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 import org.testcontainers.containers.MySQLContainer;
@@ -49,14 +65,34 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 
 /** Prüft Tagesstatus, Minutenabrechnung und unveränderliche Audits mit MySQL */
 @SpringBootTest
+@AutoConfigureMockMvc
 @Testcontainers
 @Sql("/fixtures/attendance.sql")
 class AttendanceAccountingIntegrationTest {
   private static final LocalDate MONDAY = LocalDate.of(2026, 9, 14);
 
+  private static final String CLASS_DAY = "/api/classes/1/attendance?date=2026-09-14";
+
+  private static final String CORRECTION =
+      "/api/students/1/attendance/2026-09-14/status-corrections";
+
+  private static final String RESET = "/api/classes/1/account-resets";
+
+  private static final String EXCUSE =
+      """
+      {"status":"ENTSCHULDIGT","occurredAt":"2026-09-14T05:45:00Z"}
+      """;
+
+  private static final String STUDENT =
+      """
+      {"firstName":"Neu","lastName":"Schüler","birthDate":"2008-02-03"}
+      """;
+
   @Container @ServiceConnection static MySQLContainer<?> mysql = new MySQLContainer<>("mysql:8.0");
 
   @Autowired JdbcTemplate jdbc;
+
+  @Autowired MockMvc mvc;
 
   @Autowired AttendanceAccountingService accounting;
 
@@ -105,6 +141,183 @@ class AttendanceAccountingIntegrationTest {
             "deletion_date")) {
       jdbc.update("DELETE FROM " + table);
     }
+  }
+
+  /**
+   * Prüft laufende Tagesfehlminuten, eine verspätete Ankunft und eine nachträgliche Entschuldigung
+   */
+  @Test
+  void readsUpdatedDailyMinutesWithoutBookingThem() throws Exception {
+    var teacher = staffSession("test.teacher.a");
+    setTime("2026-09-14T05:50:00Z");
+    assertThat(scan(2, "2026-09-14T05:50:00Z")).isTrue();
+    mvc.perform(get(CLASS_DAY).session(teacher))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$[0].status").value("ABWESEND"))
+        .andExpect(jsonPath("$[0].unexcusedMinutes").value(20))
+        .andExpect(jsonPath("$[1].status").value("ANWESEND"))
+        .andExpect(jsonPath("$[1].unexcusedMinutes").value(20))
+        .andExpect(jsonPath("$[0].birthDate").doesNotExist())
+        .andExpect(jsonPath("$[0].rfidUid").doesNotExist());
+
+    setTime("2026-09-14T06:00:00Z");
+    mvc.perform(get(CLASS_DAY).session(teacher))
+        .andExpect(jsonPath("$[0].unexcusedMinutes").value(30))
+        .andExpect(jsonPath("$[1].unexcusedMinutes").value(20));
+    assertAccount(1, 0, 0);
+    write(post(CORRECTION), teacher, EXCUSE)
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.changed").value(true));
+    mvc.perform(get(CLASS_DAY).session(teacher))
+        .andExpect(jsonPath("$[0].status").value("ENTSCHULDIGT"))
+        .andExpect(jsonPath("$[0].unexcusedMinutes").value(15));
+    mvc.perform(get("/api/students/1").session(teacher))
+        .andExpect(jsonPath("$.unexcusedMinutes").value(15))
+        .andExpect(jsonPath("$.excusedMinutes").value(15));
+    mvc.perform(get("/api/classes/1/attendance?date=2026-09-12").session(teacher))
+        .andExpect(content().json("[]"));
+    mvc.perform(get("/api/classes/1/attendance?date=2026-09-15").session(teacher))
+        .andExpect(status().isBadRequest());
+  }
+
+  /** Prüft Klassengrenzen und die Verwaltungsrechte der Klassenleitung über HTTP */
+  @Test
+  void enforcesClassAccessAndClassManagementThroughHttp() throws Exception {
+    var teacher = staffSession("test.teacher.b");
+    mvc.perform(get("/api/classes")).andExpect(status().isUnauthorized());
+    mvc.perform(get("/api/classes").session(teacher)).andExpect(jsonPath("$[*].id", contains(2)));
+    mvc.perform(get(CLASS_DAY).session(teacher))
+        .andExpect(status().isNotFound())
+        .andExpect(content().json("{\"code\":\"NOT_FOUND\"}"));
+    mvc.perform(get("/api/classes/999/attendance?date=2026-09-14").session(teacher))
+        .andExpect(status().isNotFound())
+        .andExpect(content().json("{\"code\":\"NOT_FOUND\"}"));
+    write(post(CORRECTION), teacher, EXCUSE).andExpect(status().isNotFound());
+    write(put("/api/students/1"), teacher, STUDENT).andExpect(status().isNotFound());
+
+    jdbc.update("INSERT INTO teacher_class (staff_id, school_class_id) VALUES (2, 1)");
+    mvc.perform(get("/api/classes/1/students").session(teacher)).andExpect(status().isOk());
+    mvc.perform(get(CLASS_DAY).session(teacher)).andExpect(status().isOk());
+    write(post(CORRECTION), teacher, EXCUSE).andExpect(status().isOk());
+    write(post("/api/classes/1/students"), teacher, STUDENT).andExpect(status().isForbidden());
+    write(delete("/api/students/1"), teacher, "").andExpect(status().isForbidden());
+
+    mvc.perform(post("/api/classes").session(teacher)).andExpect(status().isForbidden());
+    write(
+            post("/api/classes"),
+            teacher,
+            "{\"classCode\":\"26TEST-NEU\",\"blockPlanId\":1,\"timetableId\":2}")
+        .andExpect(status().isCreated());
+    assertThat(
+            jdbc.queryForObject(
+                "SELECT class_teacher_id FROM school_class WHERE class_code = '26TEST-NEU'",
+                Long.class))
+        .isEqualTo(2L);
+  }
+
+  /** Prüft Schülerverwaltung und HTTP 409 bei bestehender Anwesenheitshistorie */
+  @Test
+  void managesStudentsButPreservesTheirHistory() throws Exception {
+    var teacher = staffSession("test.teacher.a");
+    write(post("/api/classes/1/students"), teacher, STUDENT).andExpect(status().isCreated());
+    long id = jdbc.queryForObject("SELECT id FROM student WHERE first_name = 'Neu'", Long.class);
+    write(put("/api/students/" + id), teacher, STUDENT.replace("Neu", "Geändert"))
+        .andExpect(status().isNoContent());
+    mvc.perform(get("/api/students/" + id).session(teacher))
+        .andExpect(jsonPath("$.firstName").value("Geändert"));
+    write(delete("/api/students/" + id), teacher, "").andExpect(status().isNoContent());
+
+    assertThat(scan(1, "2026-09-14T05:50:00Z")).isTrue();
+    var admin = staffSession("test.admin");
+    mvc.perform(get("/api/classes").session(admin))
+        .andExpect(jsonPath("$").isArray())
+        .andExpect(jsonPath("$[*].id", contains(1, 2, 3)));
+    write(delete("/api/students/1"), admin, "")
+        .andExpect(status().isConflict())
+        .andExpect(jsonPath("$.code").value("STUDENT_HAS_HISTORY"));
+    mvc.perform(get("/api/students/1").session(admin)).andExpect(status().isOk());
+    assertThat(
+            jdbc.queryForObject(
+                "SELECT COUNT(*) FROM attendance_audit WHERE student_id = 1", Integer.class))
+        .isEqualTo(1);
+    assertAccount(1, 20, 0);
+  }
+
+  /** Prüft Administratorrechte, Planbindung, wiederholte Resets und erhaltene Tageswerte */
+  @Test
+  void resetsAccountsThroughHttpAndKeepsDailyMinutes() throws Exception {
+    var admin = staffSession("test.admin");
+    var teacher = staffSession("test.teacher.a");
+    String plan = "{\"expectedBlockPlanId\":1}";
+    write(post(RESET), teacher, plan).andExpect(status().isForbidden());
+    write(post(RESET), admin, "{}").andExpect(status().isBadRequest());
+    write(post(RESET), admin, "{\"expectedBlockPlanId\":999}")
+        .andExpect(status().isConflict())
+        .andExpect(jsonPath("$.code").value("CLASS_PLAN_CHANGED"));
+    for (int reset = 0; reset < 2; reset++) {
+      write(post(RESET), admin, plan)
+          .andExpect(status().isOk())
+          .andExpect(jsonPath("$.resetCount").value(6));
+    }
+    jdbc.update("DELETE FROM student WHERE id = 8");
+    setTime("2026-09-21T06:00:00Z");
+    write(post("/api/classes/3/account-resets"), admin, plan)
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.resetCount").value(0));
+    assertThat(
+            jdbc.queryForObject(
+                """
+        SELECT COUNT(*) FROM attendance_audit WHERE event_type = 'ACCOUNT_RESET'
+        AND changed_by_staff_id = 3 AND deletion_date_id = 1 AND attendance_id IS NULL
+        """,
+                Integer.class))
+        .isEqualTo(12);
+    assertThat(
+            jdbc.queryForObject(
+                """
+                SELECT COUNT(*) FROM attendance_audit
+                WHERE event_type = 'ACCOUNT_RESET' AND unexcused_minutes_delta = 0
+                """,
+                Integer.class))
+        .isEqualTo(6);
+    assertAccount(1, 0, 0);
+    write(post(CORRECTION), teacher, EXCUSE).andExpect(status().isConflict());
+    mvc.perform(get(CLASS_DAY).session(teacher))
+        .andExpect(jsonPath("$[0].unexcusedMinutes").value(180));
+
+    jdbc.update(
+        "INSERT INTO block_plan (id, name, starts_on, ends_on) VALUES (999, 'Folgeplan', '2027-01-01', '2027-06-30')");
+    jdbc.update("DELETE FROM class_block_assignment WHERE school_class_id = 1");
+    jdbc.update("UPDATE school_class SET block_plan_id = 999 WHERE id = 1");
+    setTime("2027-01-01T00:00:00Z");
+    mvc.perform(get(CLASS_DAY).session(teacher))
+        .andExpect(jsonPath("$[0].unexcusedMinutes").value(180));
+    setTime("2027-06-29T22:00:00Z");
+    mvc.perform(get(CLASS_DAY).session(teacher)).andExpect(content().json("[]"));
+  }
+
+  /** Legt eine Testsitzung mit dem gespeicherten Sicherheitskontext des Mitarbeiters an */
+  private MockHttpSession staffSession(String username) {
+    var context = SecurityContextHolder.createEmptyContext();
+    context.setAuthentication(
+        UsernamePasswordAuthenticationToken.authenticated(username, null, List.of()));
+    var session = new MockHttpSession();
+    session.setAttribute(HttpSessionSecurityContextRepository.SPRING_SECURITY_CONTEXT_KEY, context);
+    return session;
+  }
+
+  /** Führt einen Schreibzugriff mit Sitzung und passendem CSRF-Token aus */
+  private ResultActions write(
+      MockHttpServletRequestBuilder request, MockHttpSession session, String body)
+      throws Exception {
+    String token = "test-csrf-token";
+    return mvc.perform(
+        request
+            .session(session)
+            .cookie(new Cookie("XSRF-TOKEN", token))
+            .header("X-XSRF-TOKEN", token)
+            .contentType(MediaType.APPLICATION_JSON)
+            .content(body));
   }
 
   /** Prüft Minutenkonten und Auditfelder für jeden Tagesstatus */
