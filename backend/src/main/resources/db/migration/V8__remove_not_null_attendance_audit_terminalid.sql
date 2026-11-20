@@ -1,1 +1,0 @@
-ALTER TABLE attendance_audit MODIFY terminal_id BIGINT NULL;

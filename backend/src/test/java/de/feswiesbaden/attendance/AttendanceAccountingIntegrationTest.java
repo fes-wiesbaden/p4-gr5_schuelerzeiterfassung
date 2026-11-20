@@ -324,18 +324,12 @@ class AttendanceAccountingIntegrationTest {
     assertThat(
             accounting.recordScan(
                 new RawScanDTO(
-                    UUID.randomUUID(),
-                    UUID.randomUUID(),
-                    9002L,
-                    LocalDateTime.of(2026, 9, 14, 6, 0))))
+                    UUID.randomUUID(), "TEST-UID-001", 9002L, LocalDateTime.of(2026, 9, 14, 6, 0))))
         .isEqualTo(ScanResult.FORBIDDEN);
     assertThat(
             accounting.recordScan(
                 new RawScanDTO(
-                    UUID.randomUUID(),
-                    UUID.randomUUID(),
-                    9999L,
-                    LocalDateTime.of(2026, 9, 14, 6, 0))))
+                    UUID.randomUUID(), "TEST-UID-001", 9999L, LocalDateTime.of(2026, 9, 14, 6, 0))))
         .isEqualTo(ScanResult.FORBIDDEN);
     assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM attendance", Integer.class)).isZero();
     assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM attendance_audit", Integer.class))
@@ -548,10 +542,15 @@ class AttendanceAccountingIntegrationTest {
 
   /** Ruft die Scanabrechnung für Terminal 9001 auf und liefert, ob der Testscan angenommen wurde */
   private boolean scan(long student, String at) {
+    String rfidUid =
+        jdbc.queryForObject("SELECT rfid_uid FROM student WHERE id = ?", String.class, student);
     return accounting
         .recordScan(
             new RawScanDTO(
-                UUID.randomUUID(), UUID.randomUUID(), 9001L, LocalDateTime.of(2026, 9, 14, 6, 0)))
+                UUID.randomUUID(),
+                rfidUid,
+                9001L,
+                LocalDateTime.ofInstant(Instant.parse(at), ZoneOffset.UTC)))
         .equals(ScanResult.SUCCESS);
   }
 

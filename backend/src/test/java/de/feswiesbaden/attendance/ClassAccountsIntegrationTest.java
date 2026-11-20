@@ -671,14 +671,15 @@ class ClassAccountsIntegrationTest {
         firstDay,
         firstDay);
     jdbc.update("INSERT INTO class_block_assignment VALUES (?, 3)", classId);
+    jdbc.update("UPDATE student SET rfid_uid = 'TEST-UID-WECHSEL' WHERE id = ?", scanned);
     setTime("2026-08-31T05:40:00Z");
     assertThat(
             attendance.recordScan(
                 new RawScanDTO(
                     UUID.randomUUID(),
-                    UUID.randomUUID(),
+                    "TEST-UID-WECHSEL",
                     9001L,
-                    LocalDateTime.of(2026, 9, 14, 6, 0))))
+                    LocalDateTime.of(2026, 8, 31, 5, 40))))
         .isEqualTo(ScanResult.SUCCESS);
     setTime("2026-08-31T08:45:00Z");
     attendance.closeDueDays();

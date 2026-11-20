@@ -1,1 +1,0 @@
-ALTER TABLE raw_scan MODIFY rfid_uid BINARY(64);
