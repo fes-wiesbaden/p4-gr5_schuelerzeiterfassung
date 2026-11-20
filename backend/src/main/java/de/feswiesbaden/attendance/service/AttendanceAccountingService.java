@@ -10,6 +10,7 @@ import de.feswiesbaden.attendance.repository.AttendanceAccountingRepository.Audi
 import de.feswiesbaden.attendance.repository.AttendanceAccountingRepository.DayAttendance;
 import de.feswiesbaden.attendance.repository.AttendanceAccountingRepository.Period;
 import de.feswiesbaden.attendance.repository.AttendanceAccountingRepository.Slot;
+import de.feswiesbaden.attendance.repository.RawScanRepository;
 import de.feswiesbaden.attendance.repository.SchoolClassRepository;
 import de.feswiesbaden.attendance.repository.SchoolClassRepository.ClassPlan;
 import de.feswiesbaden.attendance.repository.StudentRepository;
@@ -51,6 +52,8 @@ public class AttendanceAccountingService {
 
   private final StaffAuthorization authorization;
 
+  private final RawScanRepository rawScans;
+
   private final Clock clock;
 
   private final TransactionTemplate transactions;
@@ -61,6 +64,7 @@ public class AttendanceAccountingService {
       StudentRepository students,
       DeletionDateService deletionDates,
       StaffAuthorization authorization,
+      RawScanRepository rawScans,
       Clock clock,
       PlatformTransactionManager transactions) {
     this.accounting = accounting;
@@ -68,6 +72,7 @@ public class AttendanceAccountingService {
     this.students = students;
     this.deletionDates = deletionDates;
     this.authorization = authorization;
+    this.rawScans = rawScans;
     this.clock = clock;
     this.transactions = new TransactionTemplate(transactions);
   }
@@ -83,8 +88,13 @@ public class AttendanceAccountingService {
   @Transactional
   public ScanResult recordScan(RawScanDTO scan) {
 
-    Optional<Long> studentIdOptional = students.findByUUID(scan.rfidUid());
-    if(studentIdOptional.isEmpty()){
+    if (rawScans.checkIfExists(scan.scanId())) {
+      return ScanResult.DUPLICATE;
+    }
+    rawScans.insert(scan);
+
+    Optional<Long> studentIdOptional = students.findByUUID(scan.rfidUid().toString());
+    if (studentIdOptional.isEmpty()) {
       return ScanResult.ERROR;
     }
     Long studentId = studentIdOptional.get();
@@ -108,9 +118,9 @@ public class AttendanceAccountingService {
       return ScanResult.FORBIDDEN;
     }
     reconcile(
-            day,
-            new Change(
-                AuditEventType.SCAN, before, AttendanceStatus.ANWESEND, at, null, scan.terminalId()));
+        day,
+        new Change(
+            AuditEventType.SCAN, before, AttendanceStatus.ANWESEND, at, null, scan.terminalId()));
 
     return ScanResult.SUCCESS;
   }

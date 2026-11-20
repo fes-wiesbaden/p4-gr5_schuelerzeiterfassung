@@ -1,9 +1,6 @@
 package de.feswiesbaden.attendance.entities;
 
-import jakarta.persistence.Column;
-import jakarta.persistence.Entity;
-import jakarta.persistence.Id;
-import jakarta.persistence.Table;
+import jakarta.persistence.*;
 import jakarta.validation.constraints.NotNull;
 import java.time.LocalDateTime;
 import java.util.UUID;
@@ -26,6 +23,13 @@ import org.hibernate.type.SqlTypes;
 @NoArgsConstructor
 public class RawScan {
 
+  public RawScan(UUID scanId, UUID rfidUid, Long terminalId, LocalDateTime scannedAt) {
+    this.scanId = scanId;
+    this.rfidUid = rfidUid;
+    this.terminalId = terminalId;
+    this.scannedAt = scannedAt;
+  }
+
   @Id
   @JdbcTypeCode(SqlTypes.CHAR)
   @Column(name = "scan_id", length = 36, nullable = false)
@@ -33,10 +37,10 @@ public class RawScan {
 
   @NotNull
   @Column(name = "rfid_uid", length = 64, nullable = false)
-  private String rfidUid;
+  private UUID rfidUid;
 
   @NotNull
-  @Column(name="terminal_id", nullable = false)
+  @Column(name = "terminal_id", nullable = false)
   private Long terminalId;
 
   @NotNull

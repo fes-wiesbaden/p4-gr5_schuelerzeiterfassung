@@ -141,6 +141,8 @@ public class SecurityConfig {
                     .permitAll()
                     .requestMatchers(HttpMethod.GET, "/api/me")
                     .authenticated()
+                    .requestMatchers(HttpMethod.POST, "/api/scans")
+                    .authenticated()
                     .anyRequest()
                     .denyAll())
         .securityContext(security -> security.securityContextRepository(context))

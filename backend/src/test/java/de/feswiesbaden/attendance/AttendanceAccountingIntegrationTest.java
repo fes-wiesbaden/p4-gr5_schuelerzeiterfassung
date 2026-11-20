@@ -5,7 +5,9 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.when;
 
+import de.feswiesbaden.attendance.dtos.RawScanDTO;
 import de.feswiesbaden.attendance.enums.AttendanceStatus;
+import de.feswiesbaden.attendance.enums.ScanResult;
 import de.feswiesbaden.attendance.repository.RetentionRepository;
 import de.feswiesbaden.attendance.service.AttendanceAccountingService;
 import de.feswiesbaden.attendance.service.RetentionService;
@@ -16,6 +18,7 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.util.List;
+import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CyclicBarrier;
 import java.util.concurrent.Executors;
@@ -318,8 +321,22 @@ class AttendanceAccountingIntegrationTest {
     assertThat(scan(1, "2026-09-14T07:15:00.001Z")).isFalse();
     assertThat(scan(1, "2026-09-15T05:30:00Z")).isFalse();
     assertThat(scan(8, "2026-09-14T06:00:00Z")).isFalse();
-    assertThat(accounting.recordScan(1L, 9002, Instant.parse("2026-09-14T06:00:00Z"))).isFalse();
-    assertThat(accounting.recordScan(1L, 9999, Instant.parse("2026-09-14T06:00:00Z"))).isFalse();
+    assertThat(
+            accounting.recordScan(
+                new RawScanDTO(
+                    UUID.randomUUID(),
+                    UUID.randomUUID(),
+                    9002L,
+                    LocalDateTime.of(2026, 9, 14, 6, 0))))
+        .isEqualTo(ScanResult.FORBIDDEN);
+    assertThat(
+            accounting.recordScan(
+                new RawScanDTO(
+                    UUID.randomUUID(),
+                    UUID.randomUUID(),
+                    9999L,
+                    LocalDateTime.of(2026, 9, 14, 6, 0))))
+        .isEqualTo(ScanResult.FORBIDDEN);
     assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM attendance", Integer.class)).isZero();
     assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM attendance_audit", Integer.class))
         .isZero();
@@ -531,7 +548,11 @@ class AttendanceAccountingIntegrationTest {
 
   /** Ruft die Scanabrechnung für Terminal 9001 auf und liefert, ob der Testscan angenommen wurde */
   private boolean scan(long student, String at) {
-    return accounting.recordScan(student, 9001, Instant.parse(at));
+    return accounting
+        .recordScan(
+            new RawScanDTO(
+                UUID.randomUUID(), UUID.randomUUID(), 9001L, LocalDateTime.of(2026, 9, 14, 6, 0)))
+        .equals(ScanResult.SUCCESS);
   }
 
   /**

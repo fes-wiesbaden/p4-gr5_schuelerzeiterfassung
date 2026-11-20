@@ -5,6 +5,8 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.when;
 
+import de.feswiesbaden.attendance.dtos.RawScanDTO;
+import de.feswiesbaden.attendance.enums.ScanResult;
 import de.feswiesbaden.attendance.service.AttendanceAccountingService;
 import de.feswiesbaden.attendance.service.BlockPlanService;
 import de.feswiesbaden.attendance.service.RetentionService;
@@ -15,6 +17,7 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CyclicBarrier;
 import java.util.concurrent.Executors;
@@ -669,8 +672,14 @@ class ClassAccountsIntegrationTest {
         firstDay);
     jdbc.update("INSERT INTO class_block_assignment VALUES (?, 3)", classId);
     setTime("2026-08-31T05:40:00Z");
-    assertThat(attendance.recordScan(scanned, 9001, Instant.parse("2026-08-31T05:40:00Z")))
-        .isTrue();
+    assertThat(
+            attendance.recordScan(
+                new RawScanDTO(
+                    UUID.randomUUID(),
+                    UUID.randomUUID(),
+                    9001L,
+                    LocalDateTime.of(2026, 9, 14, 6, 0))))
+        .isEqualTo(ScanResult.SUCCESS);
     setTime("2026-08-31T08:45:00Z");
     attendance.closeDueDays();
     assertThat(

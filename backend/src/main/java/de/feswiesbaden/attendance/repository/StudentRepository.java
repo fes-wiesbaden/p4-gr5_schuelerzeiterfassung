@@ -35,9 +35,10 @@ public class StudentRepository {
 
   /** Liefert die ID eines Schülers anhand der ID des Chips */
   public Optional<Long> findByUUID(String uuid) {
-    return jdbc.query("SELECT id FROM student WHERE rfid_uid = ?",
-            rs -> rs.next() ? Optional.of(rs.getLong("id")) : Optional.empty(),
-            uuid);
+    return jdbc.query(
+        "SELECT id FROM student WHERE rfid_uid = ?",
+        rs -> rs.next() ? Optional.of(rs.getLong("id")) : Optional.empty(),
+        uuid);
   }
 
   /** Lädt die Daten eines vorhandenen Schülers ohne Kartenkennung */
