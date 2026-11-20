@@ -3,6 +3,8 @@ package de.feswiesbaden.attendance.repository;
 import de.feswiesbaden.attendance.dtos.RawScanDTO;
 import de.feswiesbaden.attendance.entities.RawScan;
 import jakarta.persistence.EntityManager;
+import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.util.UUID;
 import org.springframework.stereotype.Repository;
 
@@ -15,10 +17,14 @@ public class RawScanRepository {
     this.entityManager = entityManager;
   }
 
-  /** Fügt den Blockplan in den aktuellen Persistenzkontext ein */
+  /** Fügt den Rohscan in den aktuellen Persistenzkontext ein */
   public void insert(RawScanDTO scan) {
     entityManager.persist(
-        new RawScan(scan.scanId(), scan.rfidUid(), scan.terminalId(), scan.scannedAt()));
+        new RawScan(
+            scan.scanId(),
+            scan.rfidUid(),
+            scan.terminalId(),
+            LocalDateTime.ofInstant(scan.scannedAt(), ZoneOffset.UTC)));
   }
 
   /** Prüft, ob eine Scan-ID schon vorhanden ist */

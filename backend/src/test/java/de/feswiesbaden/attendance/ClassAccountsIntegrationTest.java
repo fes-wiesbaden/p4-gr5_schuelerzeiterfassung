@@ -679,7 +679,7 @@ class ClassAccountsIntegrationTest {
                     UUID.randomUUID(),
                     "TEST-UID-WECHSEL",
                     9001L,
-                    LocalDateTime.of(2026, 8, 31, 5, 40))))
+                    Instant.parse("2026-08-31T05:40:00Z"))))
         .isEqualTo(ScanResult.SUCCESS);
     setTime("2026-08-31T08:45:00Z");
     attendance.closeDueDays();

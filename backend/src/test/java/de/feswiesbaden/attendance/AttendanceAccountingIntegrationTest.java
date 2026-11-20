@@ -537,12 +537,18 @@ class AttendanceAccountingIntegrationTest {
     assertThat(
             accounting.recordScan(
                 new RawScanDTO(
-                    UUID.randomUUID(), "TEST-UID-001", 9002L, LocalDateTime.of(2026, 9, 14, 6, 0))))
+                    UUID.randomUUID(),
+                    "TEST-UID-001",
+                    9002L,
+                    Instant.parse("2026-09-14T06:00:00Z"))))
         .isEqualTo(ScanResult.FORBIDDEN);
     assertThat(
             accounting.recordScan(
                 new RawScanDTO(
-                    UUID.randomUUID(), "TEST-UID-001", 9999L, LocalDateTime.of(2026, 9, 14, 6, 0))))
+                    UUID.randomUUID(),
+                    "TEST-UID-001",
+                    9999L,
+                    Instant.parse("2026-09-14T06:00:00Z"))))
         .isEqualTo(ScanResult.FORBIDDEN);
     assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM attendance", Integer.class)).isZero();
     assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM attendance_audit", Integer.class))
@@ -758,12 +764,7 @@ class AttendanceAccountingIntegrationTest {
     String rfidUid =
         jdbc.queryForObject("SELECT rfid_uid FROM student WHERE id = ?", String.class, student);
     return accounting
-        .recordScan(
-            new RawScanDTO(
-                UUID.randomUUID(),
-                rfidUid,
-                9001L,
-                LocalDateTime.ofInstant(Instant.parse(at), ZoneOffset.UTC)))
+        .recordScan(new RawScanDTO(UUID.randomUUID(), rfidUid, 9001L, Instant.parse(at)))
         .equals(ScanResult.SUCCESS);
   }
 

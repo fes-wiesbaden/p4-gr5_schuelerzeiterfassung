@@ -105,7 +105,7 @@ class Issue24IntegrationTest {
     String config =
         Files.readString(Path.of("../infra/nginx/development.conf"))
             .replace(
-                "http://host.docker.internal:8080/actuator/health",
+                "http://host.docker.internal:8080/api/scans",
                 "http://host.testcontainers.internal:" + port + "/__terminal-identity-test__");
     Path proxyDirectory = certificates.resolve("nginx");
     Files.createDirectories(proxyDirectory.resolve("conf.d"));
@@ -266,7 +266,7 @@ class Issue24IntegrationTest {
         URI.create(
             "https://localhost:"
                 + nginx.getMappedPort(8444)
-                + "/api/__scan-endpoint-todo__?terminalNumber="
+                + "/api/scans?terminalNumber="
                 + terminalNumber));
   }
 

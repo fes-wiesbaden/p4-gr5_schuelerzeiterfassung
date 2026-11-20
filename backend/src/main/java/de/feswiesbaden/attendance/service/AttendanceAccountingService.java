@@ -103,22 +103,17 @@ public class AttendanceAccountingService {
     }
     Long studentId = studentIdOptional.get();
 
-    // scannedAt ist bereits die UTC-Scanzeit als LocalDateTime, wie an anderer Stelle in dieser
-    // Klasse auch. Instant.from(LocalDateTime) scheitert, weil LocalDateTime kein Instant-Feld
-    // kennt; und atZone(BERLIN) auf dem UTC-Wert direkt würde die Zeit nicht umrechnen, sondern
-    // nur die Zone anheften
-    var at = scan.scannedAt();
-    var scannedInstant = at.toInstant(ZoneOffset.UTC);
-    if (!validTime(scannedInstant)) {
+    if (!validTime(scan.scannedAt())) {
       return ScanResult.ERROR;
     }
+    var at = LocalDateTime.ofInstant(scan.scannedAt(), ZoneOffset.UTC);
     var day = lockDay(studentId, berlinDate(at));
     if (day == null
         || !accounting.matchesTerminalSlot(
             day.plan().timetableId(),
             scan.terminalId(),
             day.date(),
-            scannedInstant.atZone(BERLIN).toLocalTime())) {
+            scan.scannedAt().atZone(BERLIN).toLocalTime())) {
       return ScanResult.FORBIDDEN;
     }
     var before = statusAt(day.audits(), at);

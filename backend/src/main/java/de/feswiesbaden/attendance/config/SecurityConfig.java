@@ -158,15 +158,22 @@ public class SecurityConfig {
                     .authenticated()
                     .requestMatchers(HttpMethod.DELETE, "/api/students/{studentId}")
                     .authenticated()
+                    // Terminals haben keine Staff-Session; die Identitaet bestaetigt stattdessen
+                    // nginx per mTLS, geprueft im Controller ueber TerminalProxyAuthentication.
                     .requestMatchers(HttpMethod.POST, "/api/scans")
-                    .authenticated()
+                    .permitAll()
                     .anyRequest()
                     .denyAll())
         .securityContext(security -> security.securityContextRepository(context))
         .sessionManagement(
             session -> session.sessionCreationPolicy(SessionCreationPolicy.IF_REQUIRED))
         .requestCache(cache -> cache.disable())
-        .csrf(config -> config.csrfTokenRepository(csrf).csrfTokenRequestHandler(csrfHandler))
+        .csrf(
+            config ->
+                config
+                    .csrfTokenRepository(csrf)
+                    .csrfTokenRequestHandler(csrfHandler)
+                    .ignoringRequestMatchers("/api/scans"))
         .exceptionHandling(
             errors ->
                 errors
