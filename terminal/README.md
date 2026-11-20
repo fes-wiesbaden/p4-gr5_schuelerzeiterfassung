@@ -110,12 +110,9 @@ Am Versuchsaufbau gemessen, mit einer MIFARE-Classic-Karte:
 Karten mit 7 Byte langer UID, etwa NTAG, liefern entsprechend 14 Zeichen. Die
 Anwendung rechnet deshalb nirgends mit einer festen Laenge.
 
-**Eine liegengebliebene Karte meldet sich wiederholt.** Die Firmware blockt
-dieselbe UID `REPEAT_BLOCK_MS` lang, aktuell 30 Sekunden. Mit den urspruenglichen
-1,5 Sekunden erzeugte eine vergessene Karte im Versuch 13 Meldungen in 45
-Sekunden, und jede davon wird eine eigene Scan-ID und damit ein eigener Rohscan.
-Fachlich waere auch das gedeckt, weil nur der erste gueltige Scan eine
-Anwesenheit erzeugt, es fiel aber unnoetig Verkehr an.
+Die Firmware meldet eine aufliegende Karte einmal. Sie erkennt das Entfernen
+nach drei Abfragen ohne Kartenantwort. Danach löst dieselbe Karte beim
+erneuten Auflegen einen neuen Scan aus.
 
 ## Stolperfallen beim Aufbau
 
