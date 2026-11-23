@@ -193,7 +193,7 @@ class AttendanceAccountingIntegrationTest {
         .containsEntry("student_id", 2L)
         .containsEntry("attendance_id", attendanceId)
         .containsEntry("event_type", "SCAN")
-        .containsEntry("terminal_id", 9001L)
+        .containsEntry("terminal_id", 9001)
         .containsEntry("changed_by_staff_id", null)
         .containsEntry("deletion_date_id", 1L)
         .containsEntry("old_status", "ABWESEND")
