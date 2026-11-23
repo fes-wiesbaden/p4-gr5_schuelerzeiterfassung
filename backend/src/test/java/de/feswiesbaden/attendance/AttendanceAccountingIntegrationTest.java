@@ -215,6 +215,22 @@ class AttendanceAccountingIntegrationTest {
         .isEqualTo(2L);
   }
 
+  @Test
+  void onlyAdminCanManageMasterDataAndBlockedDeleteKeepsAssignments() throws Exception {
+    var admin = staffSession("test.admin");
+    var teacher = staffSession("test.teacher.b");
+    String room = "{\"roomNumber\":\"A104\"}";
+    write(post("/api/rooms"), teacher, room).andExpect(status().isForbidden());
+    write(post("/api/rooms"), admin, room).andExpect(status().isCreated());
+    write(post("/api/rooms"), admin, room).andExpect(status().isConflict());
+    mvc.perform(get("/api/teachers").session(teacher)).andExpect(status().isForbidden());
+    write(delete("/api/classes/1"), admin, "").andExpect(status().isConflict());
+    assertThat(
+            jdbc.queryForObject(
+                "SELECT COUNT(*) FROM teacher_class WHERE school_class_id=1", Integer.class))
+        .isOne();
+  }
+
   /** Prüft Schülerverwaltung und HTTP 409 bei bestehender Anwesenheitshistorie */
   @Test
   void managesStudentsButPreservesTheirHistory() throws Exception {

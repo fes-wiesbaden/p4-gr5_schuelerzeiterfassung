@@ -12,7 +12,7 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 
 /** Übersetzt bekannte Fehler der Mitarbeiter-API in HTTP-Status und feste Fehlercodes */
-@RestControllerAdvice(assignableTypes = StaffController.class)
+@RestControllerAdvice(assignableTypes = {StaffController.class, MasterDataController.class})
 class StaffApiErrors {
   /** Meldet ungültige Anfragen ohne Eingabewerte in der Antwort */
   @ExceptionHandler({
@@ -58,6 +58,11 @@ class StaffApiErrors {
           error(HttpStatus.BAD_REQUEST, code);
       default -> throw exception;
     };
+  }
+
+  @ExceptionHandler(org.springframework.dao.DataIntegrityViolationException.class)
+  ResponseEntity<Map<String, String>> conflict() {
+    return error(HttpStatus.CONFLICT, "MASTER_DATA_CONFLICT");
   }
 
   /** Erstellt die Antwort mit einem maschinenlesbaren Fehlercode */
