@@ -42,6 +42,23 @@ public class StudentRepository {
         rfidUid);
   }
 
+  /** Liefert die Zuordnungen vorhandener Karten mit Schülername und Klassenkürzel */
+  public List<RfidAssignment> findRfidAssignments() {
+    return jdbc.query(
+        """
+        SELECT CONCAT(s.last_name, ', ', s.first_name) AS student_name, c.class_code, s.rfid_uid
+        FROM student s
+        JOIN school_class c ON c.id = s.school_class_id
+        WHERE s.rfid_uid IS NOT NULL
+        ORDER BY c.class_code, s.last_name, s.first_name, s.id
+        """,
+        (row, index) ->
+            new RfidAssignment(
+                row.getString("student_name"),
+                row.getString("class_code"),
+                row.getString("rfid_uid")));
+  }
+
   /** Liest Namen und Anlagezeitpunkt der Schüler für die Anwesenheitsliste */
   public List<AttendanceStudent> findAttendanceStudents(Long classId) {
     return jdbc.query(
@@ -122,4 +139,7 @@ public class StudentRepository {
   /** Enthält die Schülerdaten für die Zuordnung zur Tagesanwesenheit */
   public record AttendanceStudent(
       Long id, String firstName, String lastName, LocalDateTime createdAt) {}
+
+  /** Enthält die sichtbaren Felder der Kartenzuordnung für Lehrkräfte */
+  public record RfidAssignment(String studentName, String classCode, String rfidUid) {}
 }

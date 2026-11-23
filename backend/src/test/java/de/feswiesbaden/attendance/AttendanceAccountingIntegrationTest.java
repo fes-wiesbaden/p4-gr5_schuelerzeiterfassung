@@ -3,6 +3,7 @@ package de.feswiesbaden.attendance;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.hamcrest.Matchers.contains;
+import static org.hamcrest.Matchers.is;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
@@ -10,6 +11,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -27,6 +29,7 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CyclicBarrier;
@@ -241,6 +244,65 @@ class AttendanceAccountingIntegrationTest {
                 "SELECT COUNT(*) FROM attendance_audit WHERE student_id = 1", Integer.class))
         .isEqualTo(1);
     assertAccount(1, 20, 0);
+  }
+
+  /** Prüft Kartenzuordnung über HTTP mit CSRF, Rollenprüfung und neutralen Antworten */
+  @Test
+  void managesRfidCardsThroughAdminHttp() throws Exception {
+    var admin = staffSession("test.admin");
+    var teacher = staffSession("test.teacher.a");
+    String card = "/api/students/1/rfid-uid";
+    String newUid = "{\"uid\":\"04A3B2C1\"}";
+
+    mvc.perform(put(card).session(admin).contentType(MediaType.APPLICATION_JSON).content(newUid))
+        .andExpect(status().isForbidden());
+    write(put(card), teacher, newUid).andExpect(status().isForbidden());
+    write(delete(card), teacher, "").andExpect(status().isForbidden());
+    write(put(card), admin, "{\"uid\":\"invalid\"}")
+        .andExpect(status().isBadRequest())
+        .andExpect(content().json("{\"code\":\"INVALID_RFID_UID\"}"));
+    write(put(card), admin, newUid)
+        .andExpect(status().isNoContent())
+        .andExpect(content().string(""));
+    assertThat(jdbc.queryForObject("SELECT rfid_uid FROM student WHERE id = 1", String.class))
+        .isEqualTo("04A3B2C1");
+    write(put("/api/students/2/rfid-uid"), admin, newUid)
+        .andExpect(status().isConflict())
+        .andExpect(content().json("{\"code\":\"RFID_UID_ALREADY_ASSIGNED\"}"));
+    mvc.perform(get("/api/students/1").session(admin))
+        .andExpect(jsonPath("$.rfidUid").doesNotExist());
+    write(delete(card), admin, "")
+        .andExpect(status().isNoContent())
+        .andExpect(content().string(""));
+    assertThat(jdbc.queryForObject("SELECT rfid_uid FROM student WHERE id = 1", String.class))
+        .isNull();
+  }
+
+  /** Prüft den klassenübergreifenden UID-Lesezugriff und die Begrenzung auf den Leseendpunkt */
+  @Test
+  void teacherReadsRfidAssignmentsAcrossClassBoundaries() throws Exception {
+    String endpoint = "/api/students/rfid-uids";
+    var teacher = staffSession("test.teacher.a");
+    jdbc.update("UPDATE student SET rfid_uid = NULL WHERE id = 8");
+
+    mvc.perform(get(endpoint)).andExpect(status().isUnauthorized());
+    mvc.perform(get(endpoint).session(staffSession("test.admin")))
+        .andExpect(status().isForbidden());
+    mvc.perform(get("/api/students/7").session(teacher)).andExpect(status().isNotFound());
+    mvc.perform(get("/api/students/1").session(teacher))
+        .andExpect(jsonPath("$.rfidUid").doesNotExist());
+    mvc.perform(get(endpoint).session(teacher))
+        .andExpect(status().isOk())
+        .andExpect(header().string("Cache-Control", "no-store"))
+        .andExpect(jsonPath("$.length()").value(7))
+        .andExpect(
+            jsonPath("$[6]")
+                .value(
+                    is(
+                        Map.of(
+                            "studentName", "Raum-B, Test",
+                            "classCode", "26TEST-B",
+                            "rfidUid", "TEST-UID-007"))));
   }
 
   /** Prüft Administratorrechte, Planbindung, wiederholte Resets und erhaltene Tageswerte */

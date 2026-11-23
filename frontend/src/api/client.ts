@@ -1,4 +1,4 @@
-// Liest das CSRF-Token aus XSRF-TOKEN. POST-Anfragen senden es im Header
+// Liest das CSRF-Token aus XSRF-TOKEN. Schreibende Anfragen senden es im Header
 // X-XSRF-TOKEN zurück, damit Spring Security die Anfrage prüfen kann
 function readCsrfToken(): string {
   const cookie = document.cookie
@@ -24,14 +24,33 @@ async function request(url: string, options: RequestInit): Promise<Response> {
   return response
 }
 
-export function postJson(url: string, body: unknown): Promise<Response> {
+function sendJson(
+  url: string,
+  method: 'POST' | 'PUT',
+  body: unknown
+): Promise<Response> {
   return request(url, {
-    method: 'POST',
+    method,
     headers: {
       'Content-Type': 'application/json',
       'X-XSRF-TOKEN': readCsrfToken()
     },
     body: JSON.stringify(body)
+  })
+}
+
+export function postJson(url: string, body: unknown): Promise<Response> {
+  return sendJson(url, 'POST', body)
+}
+
+export function putJson(url: string, body: unknown): Promise<Response> {
+  return sendJson(url, 'PUT', body)
+}
+
+export function deleteResource(url: string): Promise<Response> {
+  return request(url, {
+    method: 'DELETE',
+    headers: { 'X-XSRF-TOKEN': readCsrfToken() }
   })
 }
 
