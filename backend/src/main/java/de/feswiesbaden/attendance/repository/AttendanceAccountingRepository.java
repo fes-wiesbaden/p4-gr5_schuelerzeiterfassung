@@ -112,6 +112,39 @@ public class AttendanceAccountingRepository {
         timetableId);
   }
 
+  /**
+   * Prüft, ob eine andere Klasse denselben Raum in einem überlappenden Zeitfenster belegt, während
+   * ihr zugeordneter Block den angegebenen Zeitraum überschneidet
+   */
+  public boolean hasConflictingRoomAssignment(
+      Long excludeClassId,
+      long roomId,
+      DayOfWeek weekday,
+      LocalTime startsAt,
+      LocalTime endsAt,
+      LocalDate periodStart,
+      LocalDate periodEnd) {
+    return !jdbc.queryForList(
+            """
+            SELECT DISTINCT c.id FROM school_class c
+            JOIN timetable_slot s ON s.timetable_id = c.timetable_id
+            JOIN class_block_assignment cba ON cba.school_class_id = c.id
+            JOIN block_assignment b ON b.id = cba.block_assignment_id
+            WHERE c.id <> ? AND s.room_id = ? AND s.weekday = ?
+              AND s.start_time < ? AND s.end_time > ?
+              AND b.starts_on <= ? AND b.ends_on >= ?
+            """,
+            Long.class,
+            excludeClassId,
+            roomId,
+            Weekday.values()[weekday.getValue() - 1].name(),
+            endsAt,
+            startsAt,
+            periodEnd,
+            periodStart)
+        .isEmpty();
+  }
+
   /** Lädt und sperrt alle Tagesanwesenheiten eines Schülers, nach Datum sortiert */
   public List<DayAttendance> findAttendances(Long studentId) {
     return jdbc.query(

@@ -48,4 +48,25 @@ public class BlockPlanService {
     deletionDates.getOrCreate(endsOn);
     return plan.getId();
   }
+
+  /**
+   * Fügt dem Blockplan einen Blockzeitraum hinzu, sofern der Plan existiert, Beginn vor oder am
+   * Ende liegt und sich der Zeitraum nicht mit einem bereits vorhandenen Block desselben Plans
+   * überlappt. Blöcke eines Blockplans dürfen sich nicht überlappen
+   */
+  @Transactional
+  public Long addBlockAssignment(Long blockPlanId, LocalDate startsOn, LocalDate endsOn) {
+    authorization.requireAdministrator();
+    if (blockPlanId == null
+        || startsOn == null
+        || endsOn == null
+        || startsOn.isAfter(endsOn)
+        || !plans.exists(blockPlanId)) {
+      throw new IllegalArgumentException("INVALID_BLOCK_ASSIGNMENT");
+    }
+    if (plans.hasOverlappingBlockAssignment(blockPlanId, startsOn, endsOn)) {
+      throw new IllegalArgumentException("OVERLAPPING_BLOCK_ASSIGNMENT");
+    }
+    return plans.insertBlockAssignment(blockPlanId, startsOn, endsOn);
+  }
 }

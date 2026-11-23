@@ -167,12 +167,63 @@ public class SchoolClassRepository {
     jdbc.update("UPDATE school_class SET block_plan_id = ? WHERE id = ?", planId, classId);
   }
 
+  /** Sperrt den Blockzeitraum und liefert seinen Blockplan sowie Beginn und Ende */
+  public Optional<BlockAssignmentData> lockBlockAssignment(Long blockAssignmentId) {
+    return jdbc
+        .query(
+            "SELECT id, block_plan_id, starts_on, ends_on FROM block_assignment WHERE id = ?"
+                + " FOR UPDATE",
+            (row, index) ->
+                new BlockAssignmentData(
+                    row.getLong("id"),
+                    row.getLong("block_plan_id"),
+                    row.getDate("starts_on").toLocalDate(),
+                    row.getDate("ends_on").toLocalDate()),
+            blockAssignmentId)
+        .stream()
+        .findFirst();
+  }
+
+  /**
+   * Prüft, ob eine andere Klasse denselben Stundenplan verwendet und einen zeitlich überlappenden
+   * Block zugeordnet hat. Derselbe Stundenplan darf nur von Klassen genutzt werden, deren
+   * zugeordnete Blöcke sich nicht überschneiden
+   */
+  public boolean timetableSharedWithOverlappingBlock(
+      Long excludeClassId, Long timetableId, LocalDate periodStart, LocalDate periodEnd) {
+    return !jdbc.queryForList(
+            """
+            SELECT DISTINCT c.id FROM school_class c
+            JOIN class_block_assignment cba ON cba.school_class_id = c.id
+            JOIN block_assignment b ON b.id = cba.block_assignment_id
+            WHERE c.id <> ? AND c.timetable_id = ? AND b.starts_on <= ? AND b.ends_on >= ?
+            """,
+            Long.class,
+            excludeClassId,
+            timetableId,
+            periodEnd,
+            periodStart)
+        .isEmpty();
+  }
+
+  /** Ordnet der Klasse den Blockzeitraum zu */
+  public void insertClassBlockAssignment(Long classId, Long blockAssignmentId) {
+    jdbc.update(
+        "INSERT INTO class_block_assignment (school_class_id, block_assignment_id) VALUES (?, ?)",
+        classId,
+        blockAssignmentId);
+  }
+
   /** Enthält Klassen-, Blockplan- und Stundenplan-ID sowie Beginn und Ende des Blockplans */
   public record ClassPlan(
       Long classId, Long planId, Long timetableId, LocalDate startsOn, LocalDate endsOn) {}
 
   /** Enthält Beginn und Ende eines Blockplans */
   public record PlanDates(LocalDate startsOn, LocalDate endsOn) {}
+
+  /** Enthält den zugehörigen Blockplan sowie Beginn und Ende eines Blockzeitraums */
+  public record BlockAssignmentData(
+      Long id, Long blockPlanId, LocalDate startsOn, LocalDate endsOn) {}
 
   /** Enthält Klassenkennung, Klassenlehrkraft und aktuelle Planverweise */
   public record ClassData(
