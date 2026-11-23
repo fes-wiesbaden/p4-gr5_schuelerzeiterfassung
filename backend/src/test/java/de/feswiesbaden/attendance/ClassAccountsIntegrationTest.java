@@ -5,6 +5,8 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.when;
 
+import de.feswiesbaden.attendance.dtos.RawScanDTO;
+import de.feswiesbaden.attendance.enums.ScanResult;
 import de.feswiesbaden.attendance.service.AttendanceAccountingService;
 import de.feswiesbaden.attendance.service.BlockPlanService;
 import de.feswiesbaden.attendance.service.RetentionService;
@@ -15,6 +17,7 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CyclicBarrier;
 import java.util.concurrent.Executors;
@@ -668,9 +671,18 @@ class ClassAccountsIntegrationTest {
         firstDay,
         firstDay);
     jdbc.update("INSERT INTO class_block_assignment VALUES (?, 3)", classId);
+    jdbc.update("UPDATE student SET rfid_uid = 'TEST-UID-WECHSEL' WHERE id = ?", scanned);
     setTime("2026-08-31T05:40:00Z");
-    assertThat(attendance.recordScan(scanned, 9001, Instant.parse("2026-08-31T05:40:00Z")))
-        .isTrue();
+    assertThat(
+            attendance.recordScan(
+                "CN=terminal-9001",
+                new RawScanDTO(
+                    UUID.randomUUID(),
+                    "TEST-UID-WECHSEL",
+                    9001,
+                    Instant.parse("2026-08-31T05:40:00Z")),
+                clock.instant()))
+        .isEqualTo(ScanResult.SUCCESS);
     setTime("2026-08-31T08:45:00Z");
     attendance.closeDueDays();
     assertThat(

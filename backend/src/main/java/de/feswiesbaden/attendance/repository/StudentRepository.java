@@ -34,6 +34,14 @@ public class StudentRepository {
         STUDENT_COLUMNS + " WHERE school_class_id = ? ORDER BY id", this::data, classId);
   }
 
+  /** Liefert die Schüler-ID zur RFID-Kennung */
+  public Optional<Long> findIdByRfidUid(String rfidUid) {
+    return jdbc.query(
+        "SELECT id FROM student WHERE rfid_uid = ?",
+        rs -> rs.next() ? Optional.of(rs.getLong("id")) : Optional.empty(),
+        rfidUid);
+  }
+
   /** Liest Namen und Anlagezeitpunkt der Schüler für die Anwesenheitsliste */
   public List<AttendanceStudent> findAttendanceStudents(Long classId) {
     return jdbc.query(
