@@ -70,25 +70,6 @@ public class AttendanceAccountingRepository {
         today);
   }
 
-  /**
-   * Prüft einen Slot des angegebenen Stundenplans im Terminalraum zur Berliner Ortszeit. Der Beginn
-   * zählt zum Slot, das Ende nicht. Die Blockzuordnung wird hier nicht geprüft
-   */
-  public boolean matchesTerminalSlot(
-      Long timetableId, int terminalId, LocalDate date, LocalTime time) {
-    return !jdbc.queryForList(
-            "SELECT s.id FROM timetable_slot s JOIN terminal t ON t.room_id = s.room_id"
-                + " WHERE s.timetable_id = ? AND t.terminal_id = ? AND s.weekday = ?"
-                + " AND s.start_time <= ? AND s.end_time > ? FOR SHARE",
-            Long.class,
-            timetableId,
-            terminalId,
-            Weekday.values()[date.getDayOfWeek().getValue() - 1].name(),
-            time,
-            time)
-        .isEmpty();
-  }
-
   /** Lädt die zugeordneten Blockzeiträume der Klasse mit Lesesperre */
   public List<Period> findPeriods(Long classId) {
     return findPeriods(classId, true);
@@ -119,14 +100,15 @@ public class AttendanceAccountingRepository {
   /** Lädt die Unterrichtszeiten nach Beginn sortiert und verwendet bei Bedarf eine Lesesperre */
   public List<Slot> findSlots(Long timetableId, boolean lock) {
     return jdbc.query(
-        "SELECT weekday, start_time, end_time FROM timetable_slot"
+        "SELECT weekday, start_time, end_time, room_id FROM timetable_slot"
             + " WHERE timetable_id = ? AND start_time < end_time ORDER BY start_time, id"
             + (lock ? " FOR SHARE" : ""),
         (row, index) ->
             new Slot(
                 DayOfWeek.of(Weekday.valueOf(row.getString("weekday")).ordinal() + 1),
                 row.getTime("start_time").toLocalTime(),
-                row.getTime("end_time").toLocalTime()),
+                row.getTime("end_time").toLocalTime(),
+                row.getLong("room_id")),
         timetableId);
   }
 
@@ -294,8 +276,8 @@ public class AttendanceAccountingRepository {
   /** Enthält einen zugeordneten Blockzeitraum mit seiner Blockplan-ID */
   public record Period(Long planId, LocalDate startsOn, LocalDate endsOn) {}
 
-  /** Enthält Wochentag, Beginn und Ende einer geplanten Unterrichtszeit */
-  public record Slot(DayOfWeek weekday, LocalTime startsAt, LocalTime endsAt) {}
+  /** Enthält Wochentag, Beginn, Ende und Raum einer geplanten Unterrichtszeit */
+  public record Slot(DayOfWeek weekday, LocalTime startsAt, LocalTime endsAt, long roomId) {}
 
   /** Enthält ID, Datum und aktuellen Status einer Tagesanwesenheit */
   public record DayAttendance(Long id, LocalDate date, AttendanceStatus status) {}

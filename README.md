@@ -19,7 +19,7 @@ Projektentwickler.
 | JavaFX | Lokal, Java 21 | RFID-Terminal; [Einrichtung](terminal/README.md) |
 
 Der Browser verwendet Vite. nginx ist für den Terminalzugang bestimmt und
-leitet dessen Testanfragen an `host.docker.internal:8080` weiter. Port `8444`
+leitet `POST /api/scans` an `host.docker.internal:8080` weiter. Port `8444`
 ist keine Browser-Oberfläche.
 
 ## Starten

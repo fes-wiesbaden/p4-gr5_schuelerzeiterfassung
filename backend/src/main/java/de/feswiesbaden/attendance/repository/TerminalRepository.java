@@ -14,10 +14,11 @@ public class TerminalRepository {
     this.jdbc = jdbc;
   }
 
-  /** Gibt die Raum-ID zurück, wenn das Terminal gespeichert ist */
+  /** Liest und sperrt die Raumzuordnung eines gespeicherten Terminals */
   public Optional<Long> findRoomId(int terminalId) {
     return jdbc
-        .queryForList("SELECT room_id FROM terminal WHERE terminal_id = ?", Long.class, terminalId)
+        .queryForList(
+            "SELECT room_id FROM terminal WHERE terminal_id = ? FOR SHARE", Long.class, terminalId)
         .stream()
         .findFirst();
   }

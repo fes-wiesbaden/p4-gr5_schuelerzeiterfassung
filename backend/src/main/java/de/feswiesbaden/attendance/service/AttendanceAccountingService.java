@@ -1,13 +1,16 @@
 package de.feswiesbaden.attendance.service;
 
+import de.feswiesbaden.attendance.dtos.RawScanDTO;
 import de.feswiesbaden.attendance.enums.AttendanceStatus;
 import de.feswiesbaden.attendance.enums.AuditEventType;
+import de.feswiesbaden.attendance.enums.ScanResult;
 import de.feswiesbaden.attendance.repository.AttendanceAccountingRepository;
 import de.feswiesbaden.attendance.repository.AttendanceAccountingRepository.Account;
 import de.feswiesbaden.attendance.repository.AttendanceAccountingRepository.Audit;
 import de.feswiesbaden.attendance.repository.AttendanceAccountingRepository.DayAttendance;
 import de.feswiesbaden.attendance.repository.AttendanceAccountingRepository.Period;
 import de.feswiesbaden.attendance.repository.AttendanceAccountingRepository.Slot;
+import de.feswiesbaden.attendance.repository.RawScanRepository;
 import de.feswiesbaden.attendance.repository.SchoolClassRepository;
 import de.feswiesbaden.attendance.repository.SchoolClassRepository.ClassPlan;
 import de.feswiesbaden.attendance.repository.StudentRepository;
@@ -52,6 +55,10 @@ public class AttendanceAccountingService {
 
   private final StaffAuthorization authorization;
 
+  private final RawScanRepository rawScans;
+
+  private final TerminalIdentityService terminalIdentity;
+
   private final Clock clock;
 
   private final TransactionTemplate transactions;
@@ -62,6 +69,8 @@ public class AttendanceAccountingService {
       StudentRepository students,
       DeletionDateService deletionDates,
       StaffAuthorization authorization,
+      RawScanRepository rawScans,
+      TerminalIdentityService terminalIdentity,
       Clock clock,
       PlatformTransactionManager transactions) {
     this.accounting = accounting;
@@ -69,43 +78,61 @@ public class AttendanceAccountingService {
     this.students = students;
     this.deletionDates = deletionDates;
     this.authorization = authorization;
+    this.rawScans = rawScans;
+    this.terminalIdentity = terminalIdentity;
     this.clock = clock;
     this.transactions = new TransactionTemplate(transactions);
   }
 
   /**
-   * Verarbeitet einen Scan nur in einem passenden Slot und zugeordneten Block. Nur ABWESEND und
-   * BETRIEBLICH_ENTSCHULDIGT dürfen zu ANWESEND wechseln. Abgelehnte Scans ändern weder
-   * Tagesanwesenheit noch Fehlminutenkonten. Der Rückgabewert true bedeutet, dass gebucht wurde.
-   *
-   * <p>Der Aufrufer muss zuvor Terminalidentität und Kartenkennung prüfen und den Rohscan in
-   * derselben Transaktion speichern
+   * Prüft die Terminalzuordnung und speichert Rohscan und Fachänderungen atomar. Neue Scans buchen
+   * nur im zugeordneten Raum und Block aus ABWESEND oder BETRIEBLICH_ENTSCHULDIGT
    */
   @Transactional
-  public boolean recordScan(Long studentId, int terminalId, Instant scannedAt) {
-    if (!validTime(scannedAt)) {
-      return false;
+  public ScanResult recordScan(String verifiedSubject, RawScanDTO scan, Instant receivedAt) {
+    long roomId = terminalIdentity.resolveRoom(verifiedSubject, scan.terminalNumber());
+    var capturedAt = scan.capturedAt();
+    var at = LocalDateTime.ofInstant(capturedAt.truncatedTo(ChronoUnit.SECONDS), ZoneOffset.UTC);
+    var received =
+        LocalDateTime.ofInstant(receivedAt.truncatedTo(ChronoUnit.SECONDS), ZoneOffset.UTC);
+    if (!rawScans.insertIfNew(scan.scanId(), scan.rfidUid(), at, received)) {
+      return ScanResult.DUPLICATE;
     }
-    var at = LocalDateTime.ofInstant(scannedAt, ZoneOffset.UTC);
+    if (capturedAt.getNano() != 0 || capturedAt.isAfter(receivedAt)) {
+      return ScanResult.REJECTED;
+    }
+
+    var studentId = students.findIdByRfidUid(scan.rfidUid()).orElse(null);
+    if (studentId == null) {
+      return ScanResult.REJECTED;
+    }
+    var berlinTime = capturedAt.atZone(BERLIN).toLocalTime();
     var day = lockDay(studentId, berlinDate(at));
     if (day == null
-        || !accounting.matchesTerminalSlot(
-            day.plan().timetableId(),
-            terminalId,
-            day.date(),
-            scannedAt.atZone(BERLIN).toLocalTime())) {
-      return false;
+        || day.slots().stream()
+            .noneMatch(
+                slot ->
+                    slot.roomId() == roomId
+                        && !berlinTime.isBefore(slot.startsAt())
+                        && berlinTime.isBefore(slot.endsAt()))) {
+      return ScanResult.REJECTED;
     }
+
     var before = statusAt(day.audits(), at);
     if (before != AttendanceStatus.ABWESEND
         && before != AttendanceStatus.BETRIEBLICH_ENTSCHULDIGT) {
-      return false;
+      return ScanResult.REJECTED;
     }
-    return reconcile(
-            day,
-            new Change(
-                AuditEventType.SCAN, before, AttendanceStatus.ANWESEND, at, null, terminalId))
-        .changed();
+    reconcile(
+        day,
+        new Change(
+            AuditEventType.SCAN,
+            before,
+            AttendanceStatus.ANWESEND,
+            at,
+            null,
+            scan.terminalNumber()));
+    return ScanResult.SUCCESS;
   }
 
   /**

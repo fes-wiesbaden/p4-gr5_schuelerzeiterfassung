@@ -16,7 +16,7 @@ public class TerminalIdentityService {
   }
 
   /** Vergleicht die gemeldete Terminalnummer mit dem Zertifikat und liest die Raum-ID */
-  @Transactional(readOnly = true)
+  @Transactional
   public Long resolveRoom(String verifiedSubject, int terminalId) {
     if (terminalId <= 0 || !("CN=terminal-" + terminalId).equals(verifiedSubject)) {
       throw new AccessDeniedException("SCAN_REJECTED");
