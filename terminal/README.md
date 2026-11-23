@@ -110,12 +110,9 @@ Am Versuchsaufbau gemessen, mit einer MIFARE-Classic-Karte:
 Karten mit 7 Byte langer UID, etwa NTAG, liefern entsprechend 14 Zeichen. Die
 Anwendung rechnet deshalb nirgends mit einer festen Laenge.
 
-**Eine liegengebliebene Karte meldet sich wiederholt.** Die Firmware blockt
-dieselbe UID `REPEAT_BLOCK_MS` lang, aktuell 30 Sekunden. Mit den urspruenglichen
-1,5 Sekunden erzeugte eine vergessene Karte im Versuch 13 Meldungen in 45
-Sekunden, und jede davon wird eine eigene Scan-ID und damit ein eigener Rohscan.
-Fachlich waere auch das gedeckt, weil nur der erste gueltige Scan eine
-Anwesenheit erzeugt, es fiel aber unnoetig Verkehr an.
+Die Firmware meldet eine aufliegende Karte einmal. Sie erkennt das Entfernen
+nach drei Abfragen ohne Kartenantwort. Danach löst dieselbe Karte beim
+erneuten Auflegen einen neuen Scan aus.
 
 ## Stolperfallen beim Aufbau
 
@@ -151,9 +148,9 @@ ESP32 ──USB──> ScanSource ──> Puffer (Platte) ──> DeliveryWorker
 Ein Scan wird **zuerst gepuffert und dann erst gesendet**. Stürzt die Anwendung
 direkt nach dem Auflegen der Karte ab, ist der Scan trotzdem sicher.
 
-Aus dem Puffer verschwindet er erst, wenn der Server geantwortet hat egal ob
-angenommen oder abgelehnt. Nur wenn der Server gar nicht erreichbar ist, bleibt
-er liegen und wird alle 5 Sekunden erneut versucht.
+Eine Buchung, eine bestätigte Ablehnung oder eine bereits verarbeitete Scan-ID
+schließt die Zustellung ab. Bei Netzwerkfehlern oder anderen Antworten bleibt
+der Scan im Puffer. JavaFX versucht die Zustellung alle fünf Sekunden erneut.
 
 ## Zustände der Anzeige
 
@@ -161,8 +158,9 @@ er liegen und wird alle 5 Sekunden erneut versucht.
 |---|---|
 | ⌾ Karte auflegen | bereit, wartet auf eine Karte |
 | ⧗ Wird verarbeitet | Scan ist vorgemerkt und geht gerade raus |
-| ⇄ Lokal vorgemerkt | Server nicht erreichbar, wird nachgereicht |
-| ✓ Buchung erfolgreich | Server hat mit HTTP 200 geantwortet |
+| ⇄ Lokal vorgemerkt | Zustellung wird erneut versucht |
+| ✓ Buchung erfolgreich | Backend bestätigt die Buchung mit HTTP 204 |
+| ⓘ Scan bereits verarbeitet | Backend kennt die Scan-ID bereits |
 | ✕ Nicht gebucht | endgültig abgelehnt, mit öffentlichem Fehlercode |
 
 „Wird verarbeitet" steht mindestens 1 Sekunde, sonst blitzt es nur auf: eine

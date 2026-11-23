@@ -18,7 +18,7 @@
 // Verkabelung RC522 an ESP32:
 //     SDA/SS -> GPIO 5     SCK  -> GPIO 18
 //     MOSI   -> GPIO 23    MISO -> GPIO 19
-//     RST    -> GPIO 22    3V3 und GND entsprechend
+//     3V3 und GND entsprechend. Reset erfolgt per SPI, ohne ESP32-GPIO.
 //
 // Benötigte Bibliothek: MFRC522 von GithubCommunity
 
@@ -29,17 +29,15 @@
 const int TERMINAL_NUMBER = 23102003;
 
 const uint8_t PIN_SS = 5;
-const uint8_t PIN_RST = 22;
 const long BAUD = 115200;
 
-// Unterdrückt die erneut erkannte, zuletzt gesendete UID bis mehr als 30 Sekunden
-// nach ihrer letzten Ausgabe. Eine andere UID wird ohne diese Wartezeit gesendet
-const unsigned long REPEAT_BLOCK_MS = 30000;
+const unsigned long POLL_INTERVAL_MS = 50;
+const uint8_t EMPTY_POLLS_TO_REARM = 3;
 
-MFRC522 reader(PIN_SS, PIN_RST);
+MFRC522 reader(PIN_SS, MFRC522::UNUSED_PIN);
 
 String lastUid = "";
-unsigned long lastSeenAt = 0;
+uint8_t emptyPolls = 0;
 
 void setup() {
   Serial.begin(BAUD);
@@ -79,15 +77,28 @@ String uidToHex(MFRC522::Uid uid) {
 }
 
 void loop() {
-  if (!reader.PICC_IsNewCardPresent() || !reader.PICC_ReadCardSerial()) {
-    delay(50);
+  delay(POLL_INTERVAL_MS);
+
+  // WUPA erreicht auch Karten, die nach dem letzten Lesen im HALT-Zustand sind.
+  byte atqa[2];
+  byte atqaSize = sizeof(atqa);
+  auto status = reader.PICC_WakeupA(atqa, &atqaSize);
+  if (status == MFRC522::STATUS_TIMEOUT) {
+    // Ein einzelner Lesefehler soll keine zweite Meldung für dieselbe Karte auslösen.
+    if (!lastUid.isEmpty() && ++emptyPolls >= EMPTY_POLLS_TO_REARM) {
+      lastUid = "";
+    }
+    return;
+  }
+  emptyPolls = 0;
+  if ((status != MFRC522::STATUS_OK && status != MFRC522::STATUS_COLLISION)
+      || !reader.PICC_ReadCardSerial()) {
     return;
   }
 
   String uid = uidToHex(reader.uid);
-  unsigned long jetzt = millis();
 
-  if (uid != lastUid || jetzt - lastSeenAt > REPEAT_BLOCK_MS) {
+  if (uid != lastUid) {
     // JSON von Hand zusammenbauen. Die UID ist reines Hex, da muss nichts
     // maskiert werden
     Serial.print("{\"rfidUid\":\"");
@@ -97,7 +108,6 @@ void loop() {
     Serial.println("}");
 
     lastUid = uid;
-    lastSeenAt = jetzt;
   }
 
   reader.PICC_HaltA();

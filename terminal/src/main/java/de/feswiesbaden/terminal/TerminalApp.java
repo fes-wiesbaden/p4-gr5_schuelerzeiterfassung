@@ -102,10 +102,13 @@ public final class TerminalApp extends Application {
           view.showState(ScanState.QUEUED);
         }
       }
-      case ACCEPTED -> {
+      case ACCEPTED, ALREADY_RECEIVED -> {
         if (scan.scanId().equals(angezeigterScan)) {
           angezeigterScan = null;
-          view.showState(ScanState.SUCCESS);
+          view.showState(
+              ergebnis.status() == SendResult.Status.ACCEPTED
+                  ? ScanState.SUCCESS
+                  : ScanState.ALREADY_RECEIVED);
         }
       }
       case REJECTED -> {

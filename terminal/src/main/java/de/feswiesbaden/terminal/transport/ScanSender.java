@@ -1,6 +1,6 @@
 package de.feswiesbaden.terminal.transport;
 
-import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.DeserializationFeature;
 import de.feswiesbaden.terminal.model.Json;
 import de.feswiesbaden.terminal.model.Scan;
 import java.io.IOException;
@@ -14,11 +14,8 @@ import javax.net.ssl.SSLContext;
 
 /** Sendet Scans an das Backend und ordnet dessen Antworten für die Zustellung ein */
 public final class ScanSender {
-  // Unbekannte oder fehlende Antwortcodes werden durch einen festen, neutralen Code ersetzt
-  private static final String FALLBACK_CODE = "SCAN_REJECTED";
+  private static final String REJECTED = "SCAN_REJECTED";
 
-  // Das Backend kennt diese Scan-ID bereits. Die Zustellung gilt dann als abgeschlossen
-  // und wird wie ein Erfolg angezeigt. Der Code allein belegt keine Anwesenheitsbuchung
   private static final String ALREADY_RECEIVED = "SCAN_ALREADY_RECEIVED";
 
   private final HttpClient client;
@@ -56,7 +53,7 @@ public final class ScanSender {
               .build();
 
       HttpResponse<String> antwort = client.send(anfrage, HttpResponse.BodyHandlers.ofString());
-      return interpret(antwort.statusCode(), readCode(antwort.body()));
+      return interpret(antwort.statusCode(), antwort.body());
 
     } catch (IOException nichtErreichbar) {
       return SendResult.retry();
@@ -67,35 +64,37 @@ public final class ScanSender {
   }
 
   /**
-   * Übernimmt aus dem JSON-Feld code ausschließlich SCAN_ALREADY_RECEIVED. Fehlende oder andere
-   * Codes und unlesbares JSON ergeben den neutralen Code SCAN_REJECTED
+   * Schließt die Zustellung bei den definierten Antworten von /api/scans ab. Sonstige Antworten
+   * lassen den Scan für einen weiteren Versuch in der Warteschlange
    */
-  static String readCode(String antwortkoerper) {
-    if (antwortkoerper == null || antwortkoerper.isBlank()) {
-      return FALLBACK_CODE;
-    }
-    try {
-      JsonNode code = Json.mapper().readTree(antwortkoerper).get("code");
-      return code != null && ALREADY_RECEIVED.equals(code.asText())
-          ? ALREADY_RECEIVED
-          : FALLBACK_CODE;
-    } catch (IOException kaputt) {
-      return FALLBACK_CODE;
-    }
+  static SendResult interpret(int status, String antwortkoerper) {
+    return switch (status) {
+      case 204 -> SendResult.accepted();
+      case 400, 403 ->
+          REJECTED.equals(readCode(antwortkoerper))
+              ? SendResult.rejected(REJECTED)
+              : SendResult.retry();
+      case 409 ->
+          ALREADY_RECEIVED.equals(readCode(antwortkoerper))
+              ? SendResult.alreadyReceived()
+              : SendResult.retry();
+      default -> SendResult.retry();
+    };
   }
 
-  /**
-   * Wertet HTTP 2xx als ACCEPTED und HTTP 4xx als endgültige Ablehnung. Die Ausnahme
-   * SCAN_ALREADY_RECEIVED gilt auch bei HTTP 4xx als ACCEPTED. Alle übrigen HTTP-Statuswerte
-   * ergeben RETRY und lassen den Scan in der Warteschlange
-   */
-  static SendResult interpret(int status, String code) {
-    if (status >= 200 && status < 300) {
-      return SendResult.accepted();
+  private static String readCode(String antwortkoerper) {
+    if (antwortkoerper == null || antwortkoerper.isBlank()) {
+      return null;
     }
-    if (status >= 400 && status < 500) {
-      return ALREADY_RECEIVED.equals(code) ? SendResult.accepted() : SendResult.rejected(code);
+    try {
+      return Json.mapper()
+          .reader()
+          .with(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
+          .readTree(antwortkoerper)
+          .path("code")
+          .textValue();
+    } catch (IOException kaputt) {
+      return null;
     }
-    return SendResult.retry();
   }
 }
