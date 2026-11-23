@@ -180,6 +180,26 @@ class AttendanceAccountingIntegrationTest {
         .andExpect(status().isBadRequest());
   }
 
+  /**
+   * Prüft alle Auditfelder eines durch einen Scan erzeugten Eintrags: Terminal-ID gesetzt, keine
+   * Staff-ID, korrekte Löschfrist und keine Statushistorie überschrieben
+   */
+  @Test
+  void scanAuditHasTerminalIdNoStaffIdAndTheCurrentDeletionDate() {
+    assertThat(scan(2, "2026-09-14T05:50:00Z")).isTrue();
+    var attendanceId =
+        jdbc.queryForObject("SELECT id FROM attendance WHERE student_id = 2", Long.class);
+    assertThat(jdbc.queryForMap("SELECT * FROM attendance_audit WHERE student_id = 2"))
+        .containsEntry("student_id", 2L)
+        .containsEntry("attendance_id", attendanceId)
+        .containsEntry("event_type", "SCAN")
+        .containsEntry("terminal_id", 9001L)
+        .containsEntry("changed_by_staff_id", null)
+        .containsEntry("deletion_date_id", 1L)
+        .containsEntry("old_status", "ABWESEND")
+        .containsEntry("new_status", "ANWESEND");
+  }
+
   /** Prüft Klassengrenzen und die Verwaltungsrechte der Klassenleitung über HTTP */
   @Test
   void enforcesClassAccessAndClassManagementThroughHttp() throws Exception {
