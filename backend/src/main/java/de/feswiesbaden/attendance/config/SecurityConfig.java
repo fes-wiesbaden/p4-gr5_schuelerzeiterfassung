@@ -7,14 +7,17 @@ import de.feswiesbaden.attendance.login.StaffLoginService;
 import jakarta.servlet.http.Cookie;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
+import java.time.Clock;
 import java.util.List;
 import java.util.Map;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.core.annotation.Order;
 import org.springframework.http.HttpMethod;
 import org.springframework.security.authentication.ProviderManager;
 import org.springframework.security.authentication.dao.DaoAuthenticationProvider;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
+import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
 import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.session.SessionRegistry;
@@ -33,7 +36,9 @@ import org.springframework.security.web.context.HttpSessionSecurityContextReposi
 import org.springframework.security.web.csrf.CookieCsrfTokenRepository;
 import org.springframework.security.web.csrf.CsrfAuthenticationStrategy;
 import org.springframework.security.web.csrf.CsrfLogoutHandler;
+import org.springframework.security.web.servlet.util.matcher.PathPatternRequestMatcher;
 import org.springframework.security.web.session.ConcurrentSessionFilter;
+import org.springframework.security.web.session.DisableEncodeUrlFilter;
 import org.springframework.security.web.session.HttpSessionEventPublisher;
 
 /** Legt Anmeldung, Sitzungen und CSRF-Schutz für das Backend fest */
@@ -55,6 +60,23 @@ public class SecurityConfig {
   @Bean
   HttpSessionEventPublisher httpSessionEventPublisher() {
     return new HttpSessionEventPublisher();
+  }
+
+  /** Schützt den Scanpfad mit nginx-Identität und ohne Staff-Sitzung */
+  @Bean
+  @Order(1)
+  SecurityFilterChain terminalScanSecurity(
+      HttpSecurity http, TerminalProxyAuthentication proxy, Clock clock, ObjectMapper mapper)
+      throws Exception {
+    return http.securityMatcher(
+            PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.POST, "/api/scans"))
+        .sessionManagement(
+            session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+        .csrf(AbstractHttpConfigurer::disable)
+        .requestCache(AbstractHttpConfigurer::disable)
+        .authorizeHttpRequests(authorization -> authorization.anyRequest().permitAll())
+        .addFilterBefore(new TerminalScanFilter(proxy, clock, mapper), DisableEncodeUrlFilter.class)
+        .build();
   }
 
   /** Richtet Zugriffsregeln, Anmeldung, Abmeldung und den Schutz der Sitzungen ein */
@@ -158,22 +180,13 @@ public class SecurityConfig {
                     .authenticated()
                     .requestMatchers(HttpMethod.DELETE, "/api/students/{studentId}")
                     .authenticated()
-                    // Terminals haben keine Staff-Session; die Identitaet bestaetigt stattdessen
-                    // nginx per mTLS, geprueft im Controller ueber TerminalProxyAuthentication.
-                    .requestMatchers(HttpMethod.POST, "/api/scans")
-                    .permitAll()
                     .anyRequest()
                     .denyAll())
         .securityContext(security -> security.securityContextRepository(context))
         .sessionManagement(
             session -> session.sessionCreationPolicy(SessionCreationPolicy.IF_REQUIRED))
         .requestCache(cache -> cache.disable())
-        .csrf(
-            config ->
-                config
-                    .csrfTokenRepository(csrf)
-                    .csrfTokenRequestHandler(csrfHandler)
-                    .ignoringRequestMatchers("/api/scans"))
+        .csrf(config -> config.csrfTokenRepository(csrf).csrfTokenRequestHandler(csrfHandler))
         .exceptionHandling(
             errors ->
                 errors

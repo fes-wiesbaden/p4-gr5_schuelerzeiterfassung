@@ -1,16 +1,27 @@
 package de.feswiesbaden.attendance.dtos;
 
-import com.fasterxml.jackson.annotation.JsonProperty;
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Size;
 import java.time.Instant;
 import java.util.UUID;
 
-/**
- * Bildet den vom JavaFX-Terminal gesendeten Scan ab. Die JSON-Feldnamen terminalNumber und
- * capturedAt entsprechen dem Terminal-seitigen Scan-Record; intern heissen die Felder terminalId
- * und scannedAt, wie an den uebrigen Stellen im Backend
- */
+/** Scanauftrag im JSON-Format des JavaFX-Terminals */
 public record RawScanDTO(
-    UUID scanId,
-    String rfidUid,
-    @JsonProperty("terminalNumber") Long terminalId,
-    @JsonProperty("capturedAt") Instant scannedAt) {}
+    @NotNull UUID scanId,
+    @NotBlank @Size(max = 64) String rfidUid,
+    @NotNull Integer terminalNumber,
+    @NotNull Instant capturedAt) {
+
+  private static final Instant EARLIEST_STORABLE = Instant.parse("1000-01-01T00:00:00Z");
+
+  private static final Instant FIRST_UNSTORABLE = Instant.parse("+10000-01-01T00:00:00Z");
+
+  /** Begrenzt den UTC-Zeitpunkt auf den Wertebereich der Rohscan-Tabelle */
+  public RawScanDTO {
+    if (capturedAt != null
+        && (capturedAt.isBefore(EARLIEST_STORABLE) || !capturedAt.isBefore(FIRST_UNSTORABLE))) {
+      throw new IllegalArgumentException("SCAN_REJECTED");
+    }
+  }
+}

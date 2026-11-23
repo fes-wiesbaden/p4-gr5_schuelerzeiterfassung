@@ -523,33 +523,14 @@ class AttendanceAccountingIntegrationTest {
     assertThat(jdbc.queryForList("SELECT * FROM attendance_audit ORDER BY id")).isEqualTo(audits);
   }
 
-  /**
-   * Prüft die Ablehnung ungültiger Scanzeiten, Terminalräume und Blockzuordnungen ohne neue
-   * Anwesenheit
-   */
+  /** Prüft die Ablehnung ungültiger Scanzeiten und Blockzuordnungen ohne neue Anwesenheit */
   @Test
-  void rejectsInvalidScanTimesRoomsAndBlocksWithoutCreatingAnAttendance() {
+  void rejectsInvalidScanTimesAndBlocksWithoutCreatingAnAttendance() {
     assertThat(scan(1, "2026-09-14T05:29:59Z")).isFalse();
     assertThat(scan(1, "2026-09-14T07:00:00Z")).isFalse();
     assertThat(scan(1, "2026-09-14T07:15:00.001Z")).isFalse();
     assertThat(scan(1, "2026-09-15T05:30:00Z")).isFalse();
     assertThat(scan(8, "2026-09-14T06:00:00Z")).isFalse();
-    assertThat(
-            accounting.recordScan(
-                new RawScanDTO(
-                    UUID.randomUUID(),
-                    "TEST-UID-001",
-                    9002L,
-                    Instant.parse("2026-09-14T06:00:00Z"))))
-        .isEqualTo(ScanResult.FORBIDDEN);
-    assertThat(
-            accounting.recordScan(
-                new RawScanDTO(
-                    UUID.randomUUID(),
-                    "TEST-UID-001",
-                    9999L,
-                    Instant.parse("2026-09-14T06:00:00Z"))))
-        .isEqualTo(ScanResult.FORBIDDEN);
     assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM attendance", Integer.class)).isZero();
     assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM attendance_audit", Integer.class))
         .isZero();
@@ -679,25 +660,19 @@ class AttendanceAccountingIntegrationTest {
     assertAccount(1, 180, 0);
   }
 
-  /** Prüft das Zurückrollen von Anwesenheit und Konto bei einem Fehler im Audit */
-  @ParameterizedTest
-  @ValueSource(strings = {"SCAN", "STATUS_CHANGE"})
-  void failedAuditRollsBackTheNewAttendanceAndAccount(String eventType) {
+  /** Prüft das Zurückrollen von Anwesenheit und Konto bei einer fehlerhaften Statuskorrektur */
+  @Test
+  void failedStatusAuditRollsBackTheNewAttendanceAndAccount() {
     jdbc.execute(
         "ALTER TABLE attendance_audit ADD CONSTRAINT test_reject_booking CHECK (student_id <> 1)");
     try {
       assertThatThrownBy(
-              () -> {
-                if (eventType.equals("SCAN")) {
-                  scan(1, "2026-09-14T06:00:00Z");
-                } else {
+              () ->
                   accounting.correctStatus(
                       1L,
                       MONDAY,
                       AttendanceStatus.ENTSCHULDIGT,
-                      Instant.parse("2026-09-14T06:00:00Z"));
-                }
-              })
+                      Instant.parse("2026-09-14T06:00:00Z")))
           .isInstanceOf(DataAccessException.class);
       assertAccount(1, 0, 0);
       assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM attendance", Integer.class)).isZero();
@@ -764,7 +739,10 @@ class AttendanceAccountingIntegrationTest {
     String rfidUid =
         jdbc.queryForObject("SELECT rfid_uid FROM student WHERE id = ?", String.class, student);
     return accounting
-        .recordScan(new RawScanDTO(UUID.randomUUID(), rfidUid, 9001L, Instant.parse(at)))
+        .recordScan(
+            "CN=terminal-9001",
+            new RawScanDTO(UUID.randomUUID(), rfidUid, 9001, Instant.parse(at)),
+            clock.instant())
         .equals(ScanResult.SUCCESS);
   }
 

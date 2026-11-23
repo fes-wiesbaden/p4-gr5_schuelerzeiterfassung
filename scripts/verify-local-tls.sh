@@ -19,18 +19,20 @@ openssl verify -CAfile "$client_ca_file" "$client_certificate"
 curl --fail --silent --show-error --cacert "$ca_file" "https://$tls_host:5173/" \
   | grep -Fq 'id="app"'
 
-if curl --fail --silent --show-error --cacert "$ca_file" \
-  "https://$tls_host:8444/api/__scan-endpoint-todo__" >/dev/null; then
-  echo 'mTLS endpoint unexpectedly accepted a request without client certificate' >&2
+scan_url="https://$tls_host:8444/api/scans"
+without_certificate=$(curl --silent --show-error --cacert "$ca_file" \
+  --header 'Content-Type: application/json' --data '{' "$scan_url")
+if ! printf '%s' "$without_certificate" | grep -Fq 'No required SSL certificate was sent'; then
+  echo 'Expected nginx to reject the request without a client certificate' >&2
   exit 1
 fi
 
-curl --fail --silent --show-error --cacert "$ca_file" --cert "$client_certificate" --key "$client_key" \
-  "https://$tls_host:8444/api/__scan-endpoint-todo__"
-
-if curl --fail --silent --show-error --cacert "$ca_file" --cert "$client_certificate" --key "$client_key" \
-  "https://$tls_host:8444/api/scans" >/dev/null; then
-  echo 'Scan endpoint unexpectedly available before Issue #26' >&2
+with_certificate=$(curl --silent --show-error --cacert "$ca_file" \
+  --cert "$client_certificate" --key "$client_key" \
+  --header 'Content-Type: application/json' --data '{' --write-out '\n%{http_code}' "$scan_url")
+if [ "$with_certificate" != '{"code":"SCAN_REJECTED"}
+400' ]; then
+  echo 'Expected the backend to reject malformed JSON after nginx mTLS' >&2
   exit 1
 fi
 

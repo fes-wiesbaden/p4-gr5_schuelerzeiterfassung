@@ -675,11 +675,13 @@ class ClassAccountsIntegrationTest {
     setTime("2026-08-31T05:40:00Z");
     assertThat(
             attendance.recordScan(
+                "CN=terminal-9001",
                 new RawScanDTO(
                     UUID.randomUUID(),
                     "TEST-UID-WECHSEL",
-                    9001L,
-                    Instant.parse("2026-08-31T05:40:00Z"))))
+                    9001,
+                    Instant.parse("2026-08-31T05:40:00Z")),
+                clock.instant()))
         .isEqualTo(ScanResult.SUCCESS);
     setTime("2026-08-31T08:45:00Z");
     attendance.closeDueDays();

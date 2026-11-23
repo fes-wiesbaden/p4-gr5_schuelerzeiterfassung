@@ -192,9 +192,8 @@ Testpasswort. Für den Start muss der Host in `server.url` exakt dem `TLS_HOST`
 entsprechen, weil die JVM den Namen beziehungsweise die IP im Serverzertifikat
 prüft. Ohne Client-PKCS#12 oder Truststore startet keine Zustellung.
 
-Der echte Pfad `/api/scans` wird erst mit Issue #26 bereitgestellt. Bis dahin
-kann nur nginx-mTLS über den separaten TLS-Test aus dem Repository-Root geprüft
-werden.
+nginx leitet `POST /api/scans` nach erfolgreicher mTLS-Prüfung ans Backend
+weiter. Das Backend prüft die Terminal-ID und ihre Raumzuordnung.
 
 ## Tests
 

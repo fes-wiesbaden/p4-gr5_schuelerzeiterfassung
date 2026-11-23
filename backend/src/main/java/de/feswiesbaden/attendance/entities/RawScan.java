@@ -26,13 +26,6 @@ import org.hibernate.type.SqlTypes;
 @NoArgsConstructor
 public class RawScan {
 
-  public RawScan(UUID scanId, String rfidUid, Long terminalId, LocalDateTime scannedAt) {
-    this.scanId = scanId;
-    this.rfidUid = rfidUid;
-    this.terminalId = terminalId;
-    this.scannedAt = scannedAt;
-  }
-
   @Id
   @JdbcTypeCode(SqlTypes.CHAR)
   @Column(name = "scan_id", length = 36, nullable = false)
@@ -41,10 +34,6 @@ public class RawScan {
   @NotNull
   @Column(name = "rfid_uid", length = 64, nullable = false)
   private String rfidUid;
-
-  @NotNull
-  @Column(name = "terminal_id", nullable = false)
-  private Long terminalId;
 
   @NotNull
   @Column(name = "scanned_at", nullable = false)
