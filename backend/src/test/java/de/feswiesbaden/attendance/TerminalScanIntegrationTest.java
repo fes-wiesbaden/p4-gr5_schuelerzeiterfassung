@@ -281,6 +281,27 @@ class TerminalScanIntegrationTest {
     assertThat(rawCount()).isEqualTo(2);
   }
 
+  /**
+   * Prüft die neutrale Ablehnung statt eines technischen Fehlers, wenn eine Blockzuordnung zu einem
+   * fremden Plan gehört. Das Terminal darf einen solchen Scan nicht endlos wiederholen
+   */
+  @Test
+  void rejectsScanWhenABlockAssignmentBelongsToAnotherPlan() throws Exception {
+    jdbc.update(
+        "INSERT INTO block_plan (id, name, starts_on, ends_on)"
+            + " VALUES (99, 'Fremdplan', '2030-01-01', '2030-01-05')");
+    jdbc.update(
+        "INSERT INTO block_assignment (id, block_plan_id, starts_on, ends_on)"
+            + " VALUES (99, 99, '2026-09-14', '2026-09-18')");
+    jdbc.update(
+        "INSERT INTO class_block_assignment (school_class_id, block_assignment_id)"
+            + " VALUES (1, 99)");
+    var response = send(terminal, scanRequest(UUID.randomUUID()));
+    assertThat(response.statusCode()).isEqualTo(400);
+    assertThat(response.body()).isEqualTo(REJECTED);
+    assertNoBooking();
+  }
+
   /** Prüft die von nginx gesetzte Identität am echten Scan-Endpunkt */
   @Test
   void nginxOverwritesClientSuppliedIdentityHeaders() throws Exception {
