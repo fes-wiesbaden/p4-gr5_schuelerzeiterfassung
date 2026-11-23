@@ -1,11 +1,12 @@
 package de.feswiesbaden.terminal.transport;
 
-/** Unterscheidet erfolgreiche, abgelehnte und erneut zu versuchende Zustellungen */
+/** Kennzeichnet die Antwort auf einen Scan oder die Wiederholung der Zustellung */
 public record SendResult(Status status, String code) {
 
   /** Kennzeichnet eine endgültige Antwort oder eine noch offene Zustellung */
   public enum Status {
     ACCEPTED,
+    ALREADY_RECEIVED,
     REJECTED,
     RETRY
   }
@@ -13,6 +14,11 @@ public record SendResult(Status status, String code) {
   /** Kennzeichnet die Zustellung als abgeschlossen und vom Sender als Erfolg eingeordnet */
   public static SendResult accepted() {
     return new SendResult(Status.ACCEPTED, null);
+  }
+
+  /** Der Server hat dieselbe Scan-ID bereits verarbeitet */
+  public static SendResult alreadyReceived() {
+    return new SendResult(Status.ALREADY_RECEIVED, null);
   }
 
   /** Kennzeichnet eine endgültige Ablehnung mit dem übergebenen Antwortcode */

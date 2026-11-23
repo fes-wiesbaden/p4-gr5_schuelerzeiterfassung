@@ -4,8 +4,9 @@ package de.feswiesbaden.terminal.model;
 public enum ScanState {
   READY("⌾", "Karte auflegen", "Halte deine Schulkarte an das Lesegerät."),
   PROCESSING("⧗", "Wird verarbeitet", "Der Scan wird an den Server geschickt."),
-  QUEUED("⇄", "Lokal vorgemerkt", "Keine Verbindung. Der Scan wird nachgereicht."),
+  QUEUED("⇄", "Lokal vorgemerkt", "Der Scan wird nachgereicht."),
   SUCCESS("✓", "Buchung erfolgreich", "Deine Anwesenheit wurde gespeichert."),
+  ALREADY_RECEIVED("ⓘ", "Scan bereits verarbeitet", "Der Server kennt diesen Scan bereits."),
   ERROR("✕", "Nicht gebucht", "Bitte wende dich an deine Lehrkraft.");
 
   private final String symbol;

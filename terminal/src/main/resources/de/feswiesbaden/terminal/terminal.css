@@ -73,9 +73,12 @@
 .state-queued .badge    { -fx-background-color: #fef3c7; -fx-border-color: #b45309; -fx-text-fill: #b45309; }
 
 /* Wird gerade verarbeitet */
-.state-processing .symbol   { -fx-background-color: #e2e8f0; -fx-border-color: #475569; -fx-text-fill: #475569; }
-.state-processing .headline { -fx-text-fill: #475569; }
-.state-processing .badge    { -fx-background-color: #e2e8f0; -fx-border-color: #475569; -fx-text-fill: #475569; }
+.state-processing .symbol,
+.state-already-received .symbol { -fx-background-color: #e2e8f0; -fx-border-color: #475569; -fx-text-fill: #475569; }
+.state-processing .headline,
+.state-already-received .headline { -fx-text-fill: #475569; }
+.state-processing .badge,
+.state-already-received .badge { -fx-background-color: #e2e8f0; -fx-border-color: #475569; -fx-text-fill: #475569; }
 
 .footer {
   -fx-background-color: white;

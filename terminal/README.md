@@ -148,9 +148,9 @@ ESP32 ──USB──> ScanSource ──> Puffer (Platte) ──> DeliveryWorker
 Ein Scan wird **zuerst gepuffert und dann erst gesendet**. Stürzt die Anwendung
 direkt nach dem Auflegen der Karte ab, ist der Scan trotzdem sicher.
 
-Aus dem Puffer verschwindet er erst, wenn der Server geantwortet hat egal ob
-angenommen oder abgelehnt. Nur wenn der Server gar nicht erreichbar ist, bleibt
-er liegen und wird alle 5 Sekunden erneut versucht.
+Eine Buchung, eine bestätigte Ablehnung oder eine bereits verarbeitete Scan-ID
+schließt die Zustellung ab. Bei Netzwerkfehlern oder anderen Antworten bleibt
+der Scan im Puffer. JavaFX versucht die Zustellung alle fünf Sekunden erneut.
 
 ## Zustände der Anzeige
 
@@ -158,8 +158,9 @@ er liegen und wird alle 5 Sekunden erneut versucht.
 |---|---|
 | ⌾ Karte auflegen | bereit, wartet auf eine Karte |
 | ⧗ Wird verarbeitet | Scan ist vorgemerkt und geht gerade raus |
-| ⇄ Lokal vorgemerkt | Server nicht erreichbar, wird nachgereicht |
-| ✓ Buchung erfolgreich | Server hat mit HTTP 200 geantwortet |
+| ⇄ Lokal vorgemerkt | Zustellung wird erneut versucht |
+| ✓ Buchung erfolgreich | Backend bestätigt die Buchung mit HTTP 204 |
+| ⓘ Scan bereits verarbeitet | Backend kennt die Scan-ID bereits |
 | ✕ Nicht gebucht | endgültig abgelehnt, mit öffentlichem Fehlercode |
 
 „Wird verarbeitet" steht mindestens 1 Sekunde, sonst blitzt es nur auf: eine

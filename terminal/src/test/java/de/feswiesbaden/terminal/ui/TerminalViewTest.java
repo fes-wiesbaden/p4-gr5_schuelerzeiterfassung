@@ -109,6 +109,8 @@ class TerminalViewTest {
     Label headline = (Label) view.node().lookup(".headline");
     view.showState(ScanState.SUCCESS);
     warteAufText(headline, "Buchung erfolgreich");
+    view.showState(ScanState.ALREADY_RECEIVED);
+    warteAufText(headline, "Scan bereits verarbeitet");
     view.showState(ScanState.QUEUED);
     warteAufText(headline, "Lokal vorgemerkt");
     view.showError("04A3B2C1");

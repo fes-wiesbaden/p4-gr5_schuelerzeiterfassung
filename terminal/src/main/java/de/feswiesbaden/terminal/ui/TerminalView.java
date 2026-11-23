@@ -3,6 +3,7 @@ package de.feswiesbaden.terminal.ui;
 import de.feswiesbaden.terminal.model.ScanState;
 import java.time.LocalTime;
 import java.time.format.DateTimeFormatter;
+import java.util.Locale;
 import javafx.animation.Animation;
 import javafx.animation.PauseTransition;
 import javafx.application.Platform;
@@ -159,12 +160,12 @@ public final class TerminalView {
           case READY -> "Bereit · " + LocalTime.now().format(UHRZEIT) + " Uhr";
           case PROCESSING -> "Bitte warten";
           case QUEUED -> "Wird nachgereicht";
-          case SUCCESS, ERROR ->
+          case SUCCESS, ALREADY_RECEIVED, ERROR ->
               "Zurück zu „Bereit“ in " + (int) RUECKKEHR_NACH_BEREIT.toSeconds() + " s";
         });
 
     stage.getStyleClass().removeIf(klasse -> klasse.startsWith("state-"));
-    stage.getStyleClass().add("state-" + state.name().toLowerCase());
+    stage.getStyleClass().add("state-" + state.name().toLowerCase(Locale.ROOT).replace('_', '-'));
   }
 
   /** Baut die Kopfzeile mit dem Titel der Anwendung */

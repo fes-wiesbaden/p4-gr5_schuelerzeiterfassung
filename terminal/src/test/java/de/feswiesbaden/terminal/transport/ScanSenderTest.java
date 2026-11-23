@@ -10,6 +10,9 @@ import org.junit.jupiter.params.provider.ValueSource;
 
 /** Prüft die Einordnung von Serverantworten für die Scanzustellung */
 class ScanSenderTest {
+  private static final String REJECTED = "{\"code\":\"SCAN_REJECTED\"}";
+
+  private static final String ALREADY_RECEIVED = "{\"code\":\"SCAN_ALREADY_RECEIVED\"}";
 
   /** Prüft die Ablehnung von Zieladressen ohne HTTPS-Schema oder Host */
   @ParameterizedTest
@@ -32,46 +35,39 @@ class ScanSenderTest {
         NullPointerException.class, () -> new ScanSender("https://127.0.0.1/api/scans", null));
   }
 
-  /** Prüft, dass der Sender HTTP 200 und 201 als ACCEPTED einordnet */
   @Test
-  void zweihundertIstEineErfolgreicheBuchung() {
-    assertEquals(SendResult.Status.ACCEPTED, ScanSender.interpret(200, null).status());
-    assertEquals(SendResult.Status.ACCEPTED, ScanSender.interpret(201, null).status());
+  void nurDieErwarteteErfolgsantwortBestaetigtDieBuchung() {
+    assertEquals(SendResult.accepted(), ScanSender.interpret(204, ""));
+    assertEquals(SendResult.retry(), ScanSender.interpret(200, ""));
   }
 
-  /** Prüft, dass eine fachliche Ablehnung die Zustellung endgültig beendet */
-  @Test
-  void vierhundertIstEndgueltigAbgelehnt() {
-    SendResult ergebnis = ScanSender.interpret(400, "SCAN_REJECTED");
-
-    assertEquals(SendResult.Status.REJECTED, ergebnis.status());
-    assertEquals("SCAN_REJECTED", ergebnis.code());
-    assertEquals(true, ergebnis.isFinal());
+  @ParameterizedTest
+  @ValueSource(ints = {400, 403})
+  void backendAblehnungIstEndgueltig(int status) {
+    assertEquals(SendResult.rejected("SCAN_REJECTED"), ScanSender.interpret(status, REJECTED));
   }
 
-  /** Prüft, dass ein bereits empfangener Scan als Erfolg behandelt wird */
   @Test
-  void schonEmpfangenerScanGiltAlsErfolg() {
-    assertEquals(
-        SendResult.Status.ACCEPTED, ScanSender.interpret(409, "SCAN_ALREADY_RECEIVED").status());
+  void schonVerarbeiteterScanHatEinEigenesErgebnis() {
+    assertEquals(SendResult.alreadyReceived(), ScanSender.interpret(409, ALREADY_RECEIVED));
+    assertEquals(SendResult.retry(), ScanSender.interpret(409, REJECTED));
   }
 
-  /** Prüft, dass Serverfehler einen erneuten Zustellversuch erlauben */
   @Test
-  void fuenfhundertWirdSpaeterNochmalVersucht() {
-    assertEquals(SendResult.Status.RETRY, ScanSender.interpret(500, null).status());
-    assertEquals(false, ScanSender.interpret(503, null).isFinal());
+  void technischeServerfehlerBleibenRetrybar() {
+    assertEquals(SendResult.retry(), ScanSender.interpret(500, REJECTED));
   }
 
-  /** Prüft die Übernahme des Duplikatcodes und die neutrale Behandlung anderer Antworten */
-  @Test
-  void ohneCodeGiltDerSammelcode() {
-    assertEquals("SCAN_REJECTED", ScanSender.readCode(""));
-    assertEquals("SCAN_REJECTED", ScanSender.readCode("kein json"));
-    assertEquals("SCAN_REJECTED", ScanSender.readCode("{}"));
-    assertEquals("SCAN_REJECTED", ScanSender.readCode("{\"code\":\"SCAN_ID_CONFLICT\"}"));
-    assertEquals("SCAN_REJECTED", ScanSender.readCode("{\"code\":\"04A3B2C1\"}"));
-    assertEquals(
-        "SCAN_ALREADY_RECEIVED", ScanSender.readCode("{\"code\":\"SCAN_ALREADY_RECEIVED\"}"));
+  @ParameterizedTest
+  @ValueSource(
+      strings = {
+        "",
+        "<html>Bad Request</html>",
+        "null",
+        "{\"code\":\"04A3B2C1\"}",
+        REJECTED + "{}"
+      })
+  void vierhundertOhneGueltigenBackendCodeBleibtRetrybar(String antwort) {
+    assertEquals(SendResult.retry(), ScanSender.interpret(400, antwort));
   }
 }

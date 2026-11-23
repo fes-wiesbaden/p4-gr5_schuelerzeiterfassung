@@ -43,7 +43,7 @@ class DeliveryWorkerTest {
           try (exchange) {
             var scan = Json.mapper().readValue(exchange.getRequestBody(), Scan.class);
             requests.add(scan.scanId());
-            exchange.sendResponseHeaders(connected.get() ? 200 : 503, -1);
+            exchange.sendResponseHeaders(connected.get() ? 204 : 404, -1);
           }
         });
     server.start();
