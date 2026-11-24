@@ -622,6 +622,31 @@ class AttendanceAccountingIntegrationTest {
     assertThat(scan(1, "2026-09-14T06:15:00Z")).isTrue();
   }
 
+  /**
+   * Eine andere Klasse blockiert den Raum nur, wenn auch ihr aktueller Blockplan den Scantag
+   * einschließt. Hier endet ihr Plan vor dem Scantag, obwohl ihr Block an diesem Tag beginnt
+   */
+  @Test
+  void acceptsScansWhenTheOtherClassPlanEndsBeforeTheScanDay() {
+    jdbc.update(
+        "INSERT INTO block_plan (id, name, starts_on, ends_on)"
+            + " VALUES (99, 'Beendeter-Plan', '2026-09-01', '2026-09-13')");
+    jdbc.update(
+        "INSERT INTO block_assignment (id, block_plan_id, starts_on, ends_on)"
+            + " VALUES (99, 99, '2026-09-14', '2026-09-18')");
+    jdbc.update("INSERT INTO timetable (id, name) VALUES (99, 'Beendeter-Plan-Stundenplan')");
+    jdbc.update(
+        "INSERT INTO timetable_slot (id, timetable_id, room_id, weekday, start_time, end_time)"
+            + " VALUES (99, 99, 1, 'MONTAG', '08:00:00', '08:45:00')");
+    jdbc.update(
+        "INSERT INTO school_class (id, class_code, class_teacher_id, block_plan_id, timetable_id)"
+            + " VALUES (99, 'PLANENDE', 1, 99, 99)");
+    jdbc.update(
+        "INSERT INTO class_block_assignment (school_class_id, block_assignment_id)"
+            + " VALUES (99, 99)");
+    assertThat(scan(1, "2026-09-14T06:15:00Z")).isTrue();
+  }
+
   /** Prüft Klassenrechte, Berliner Tagesgrenzen und das Verbot zukünftiger Korrekturzeiten */
   @Test
   void enforcesStaffAccessAndTheAffectedBerlinDay() {

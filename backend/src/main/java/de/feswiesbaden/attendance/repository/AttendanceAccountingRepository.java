@@ -130,9 +130,11 @@ public class AttendanceAccountingRepository {
             JOIN timetable_slot s ON s.timetable_id = c.timetable_id
             JOIN class_block_assignment cba ON cba.school_class_id = c.id
             JOIN block_assignment b ON b.id = cba.block_assignment_id
+            JOIN block_plan p ON p.id = c.block_plan_id
             WHERE c.id <> ? AND s.room_id = ? AND s.weekday = ?
               AND s.start_time < s.end_time AND s.start_time < ? AND s.end_time > ?
               AND b.block_plan_id = c.block_plan_id AND b.starts_on <= ? AND b.ends_on >= ?
+              AND p.starts_on <= ? AND p.ends_on >= ?
             """,
             Long.class,
             excludeClassId,
@@ -140,6 +142,8 @@ public class AttendanceAccountingRepository {
             Weekday.values()[weekday.getValue() - 1].name(),
             endsAt,
             startsAt,
+            date,
+            date,
             date,
             date)
         .isEmpty();
