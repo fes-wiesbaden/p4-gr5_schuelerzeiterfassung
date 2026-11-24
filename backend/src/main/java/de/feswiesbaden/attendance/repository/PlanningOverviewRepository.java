@@ -1,0 +1,106 @@
+package de.feswiesbaden.attendance.repository;
+
+import de.feswiesbaden.attendance.enums.Weekday;
+import java.time.LocalDate;
+import java.time.LocalTime;
+import java.util.List;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.stereotype.Repository;
+
+/** Liest Stundenpläne, Blockpläne, Räume und Klassen für die Planungsübersicht */
+@Repository
+public class PlanningOverviewRepository {
+  private final JdbcTemplate jdbc;
+
+  public PlanningOverviewRepository(JdbcTemplate jdbc) {
+    this.jdbc = jdbc;
+  }
+
+  /** Liefert alle Stundenpläne nach Namen sortiert */
+  public List<NamedRow> findTimetables() {
+    return jdbc.query(
+        "SELECT id, name FROM timetable ORDER BY name, id",
+        (row, index) -> new NamedRow(row.getLong("id"), row.getString("name")));
+  }
+
+  /** Liefert alle Slots mit Raumnummer, sortiert nach Stundenplan, Wochentag und Beginn */
+  public List<SlotRow> findSlots() {
+    return jdbc.query(
+        """
+        SELECT s.id, s.timetable_id, s.weekday, s.start_time, s.end_time, s.room_id, r.room_number
+        FROM timetable_slot s JOIN room r ON r.id = s.room_id
+        ORDER BY s.timetable_id, s.weekday, s.start_time
+        """,
+        (row, index) ->
+            new SlotRow(
+                row.getLong("id"),
+                row.getLong("timetable_id"),
+                Weekday.valueOf(row.getString("weekday")),
+                row.getObject("start_time", LocalTime.class),
+                row.getObject("end_time", LocalTime.class),
+                row.getLong("room_id"),
+                row.getString("room_number")));
+  }
+
+  /** Liefert alle Blockpläne, die neuesten zuerst */
+  public List<BlockPlanRow> findBlockPlans() {
+    return jdbc.query(
+        "SELECT id, name, starts_on, ends_on FROM block_plan ORDER BY starts_on DESC, id DESC",
+        (row, index) ->
+            new BlockPlanRow(
+                row.getLong("id"),
+                row.getString("name"),
+                row.getObject("starts_on", LocalDate.class),
+                row.getObject("ends_on", LocalDate.class)));
+  }
+
+  /** Liefert alle Blockzeiträume chronologisch */
+  public List<BlockRow> findBlocks() {
+    return jdbc.query(
+        "SELECT id, block_plan_id, starts_on, ends_on FROM block_assignment"
+            + " ORDER BY block_plan_id, starts_on",
+        (row, index) ->
+            new BlockRow(
+                row.getLong("id"),
+                row.getLong("block_plan_id"),
+                row.getObject("starts_on", LocalDate.class),
+                row.getObject("ends_on", LocalDate.class)));
+  }
+
+  /** Liefert alle Zuordnungen von Klassen zu Blockzeiträumen */
+  public List<ClassBlockRow> findClassBlocks() {
+    return jdbc.query(
+        "SELECT school_class_id, block_assignment_id FROM class_block_assignment",
+        (row, index) ->
+            new ClassBlockRow(row.getLong("school_class_id"), row.getLong("block_assignment_id")));
+  }
+
+  /** Liefert alle Räume nach Raumnummer sortiert */
+  public List<NamedRow> findRooms() {
+    return jdbc.query(
+        "SELECT id, room_number FROM room ORDER BY room_number",
+        (row, index) -> new NamedRow(row.getLong("id"), row.getString("room_number")));
+  }
+
+  /** Enthält ID und Anzeigenamen eines Stundenplans oder Raums */
+  public record NamedRow(Long id, String name) {}
+
+  /** Enthält einen Slot mit Wochentag, Uhrzeiten und Raum */
+  public record SlotRow(
+      Long id,
+      Long timetableId,
+      Weekday weekday,
+      LocalTime startsAt,
+      LocalTime endsAt,
+      Long roomId,
+      String roomNumber) {}
+
+  /** Enthält Name und Zeitraum eines Blockplans */
+  public record BlockPlanRow(Long id, String name, LocalDate startsOn, LocalDate endsOn) {}
+
+  /** Enthält einen Blockzeitraum und seinen Blockplan */
+  public record BlockRow(Long id, Long blockPlanId, LocalDate startsOn, LocalDate endsOn) {}
+
+  /** Enthält eine Zuordnung von Klasse zu Blockzeitraum */
+  public record ClassBlockRow(Long classId, Long blockId) {}
+}

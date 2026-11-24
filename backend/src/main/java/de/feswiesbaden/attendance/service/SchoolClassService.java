@@ -181,7 +181,11 @@ public class SchoolClassService {
         classId, plan.timetableId(), assignment.startsOn(), assignment.endsOn())) {
       throw new IllegalStateException("TIMETABLE_REUSE_NOT_ALLOWED");
     }
-    classes.insertClassBlockAssignment(classId, blockAssignmentId);
+    try {
+      classes.insertClassBlockAssignment(classId, blockAssignmentId);
+    } catch (DuplicateKeyException duplicate) {
+      throw new IllegalStateException("BLOCK_ALREADY_ASSIGNED");
+    }
   }
 
   /**

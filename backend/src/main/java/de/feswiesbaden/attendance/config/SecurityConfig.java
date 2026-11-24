@@ -176,6 +176,17 @@ public class SecurityConfig {
                         "/api/classes/{classId}/account-resets",
                         "/api/students/{studentId}/attendance/{date}/status-corrections")
                     .authenticated()
+                    .requestMatchers(HttpMethod.GET, "/api/planning")
+                    .authenticated()
+                    .requestMatchers(
+                        HttpMethod.POST,
+                        "/api/planning/timetables",
+                        "/api/planning/timetables/{timetableId}/slots",
+                        "/api/planning/block-plans",
+                        "/api/planning/block-plans/{blockPlanId}/blocks",
+                        "/api/planning/classes/{classId}/blocks",
+                        "/api/planning/classes/{classId}/block-plan-change")
+                    .authenticated()
                     .requestMatchers(HttpMethod.PUT, "/api/students/{studentId}")
                     .authenticated()
                     .requestMatchers(HttpMethod.DELETE, "/api/students/{studentId}")
