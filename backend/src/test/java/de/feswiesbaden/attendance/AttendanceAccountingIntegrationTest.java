@@ -594,6 +594,20 @@ class AttendanceAccountingIntegrationTest {
     assertThat(scan(1, "2026-09-14T06:15:00Z")).isTrue();
   }
 
+  /**
+   * Eine aktive Klasse belegt den Raum nur in ihren eigenen Zeitfenstern. Ein direkt anschließender
+   * Slot am Scantag und ein gleichzeitiger Slot an einem anderen Wochentag blockieren nicht
+   */
+  @Test
+  void acceptsScansWhenAnotherClassUsesTheRoomOnlyAtOtherTimes() {
+    insertPlan99("2026-09-14", "2026-09-14", "2026-09-14", "2026-09-14");
+    insertOtherClassInRoom1(99, 99, "09:00:00", "09:15:00");
+    jdbc.update(
+        "INSERT INTO timetable_slot (id, timetable_id, room_id, weekday, start_time, end_time)"
+            + " VALUES (98, 99, 1, 'DIENSTAG', '08:00:00', '08:45:00')");
+    assertThat(scan(1, "2026-09-14T06:15:00Z")).isTrue();
+  }
+
   /** Legt Blockplan 99 mit dem Block 99 an */
   private void insertPlan99(
       String planStartsOn, String planEndsOn, String blockStartsOn, String blockEndsOn) {
