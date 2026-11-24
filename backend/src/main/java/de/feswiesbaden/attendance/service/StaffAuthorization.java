@@ -1,5 +1,6 @@
 package de.feswiesbaden.attendance.service;
 
+import de.feswiesbaden.attendance.login.StaffPrincipal;
 import de.feswiesbaden.attendance.repository.SchoolClassRepository;
 import de.feswiesbaden.attendance.repository.StaffAccessRepository;
 import de.feswiesbaden.attendance.repository.StaffAccessRepository.StaffIdentity;
@@ -28,8 +29,11 @@ class StaffAuthorization {
         || authentication instanceof AnonymousAuthenticationToken) {
       throw new AccessDeniedException("STAFF_REQUIRED");
     }
+    if (!(authentication.getPrincipal() instanceof StaffPrincipal principal)) {
+      throw new AccessDeniedException("STAFF_REQUIRED");
+    }
     return staff
-        .findByUsername(authentication.getName())
+        .findById(principal.id())
         .orElseThrow(() -> new AccessDeniedException("STAFF_REQUIRED"));
   }
 

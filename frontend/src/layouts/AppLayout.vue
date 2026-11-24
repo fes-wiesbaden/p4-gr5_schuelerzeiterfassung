@@ -233,7 +233,7 @@ function handleSidebarKeydown(event: KeyboardEvent) {
 
 .app-nav__link:focus-visible,
 .app-header__menu-toggle:focus-visible {
-  outline: 2px solid var(--accent);
+  outline: 2px solid #ffffff;
   outline-offset: -2px;
 }
 

@@ -26,19 +26,37 @@ const busy = ref(false)
 const error = ref('')
 const loaded = ref(false)
 const editor = ref<HTMLFieldSetElement>()
+const createButton = ref<HTMLButtonElement>()
+let previousFocus: HTMLElement | null = null
+async function cancelEdit() {
+  editing.value = false
+  await nextTick()
+  const label = previousFocus?.getAttribute('aria-label')
+  const button = Array.from(
+    document.querySelectorAll<HTMLButtonElement>('button[aria-label]')
+  ).find((button) => button.getAttribute('aria-label') === label)
+  if (button) button.focus()
+  else createButton.value?.focus()
+}
 
 async function reload() {
   rows.value = await loadData<T[]>(props.url)
   loaded.value = true
 }
-onMounted(async () => {
+async function retryLoad() {
+  error.value = ''
+  busy.value = true
   try {
     await reload()
   } catch {
     error.value = 'Liste konnte nicht geladen werden.'
+  } finally {
+    busy.value = false
   }
-})
+}
+onMounted(retryLoad)
 async function edit(row?: T) {
+  previousFocus = document.activeElement as HTMLElement
   selected.value = row
   editing.value = true
   error.value = ''
@@ -65,9 +83,16 @@ async function submit(method: 'POST' | 'PUT' | 'DELETE', body?: unknown) {
         : (props.itemUrl ?? props.url) + '/' + selected.value!.id
     await changeData(url, method, body)
     editing.value = false
-    loaded.value = false
-    rows.value = []
-    await reload()
+    if (method === 'DELETE')
+      rows.value = rows.value.filter((row) => row.id !== selected.value?.id)
+    try {
+      await reload()
+    } catch {
+      error.value =
+        'Änderung gespeichert. Die Liste konnte nicht aktualisiert werden. Bitte erneut laden.'
+    }
+    await nextTick()
+    createButton.value?.focus()
   } catch (e) {
     error.value = e instanceof Error ? e.message : 'Server nicht erreichbar.'
   } finally {
@@ -81,6 +106,7 @@ async function submit(method: 'POST' | 'PUT' | 'DELETE', body?: unknown) {
       <h1>{{ title }}</h1>
       <button
         v-if="!editing && loaded && (canCreate || editable)"
+        ref="createButton"
         class="primary"
         :disabled="busy"
         @click="edit()"
@@ -89,7 +115,12 @@ async function submit(method: 'POST' | 'PUT' | 'DELETE', body?: unknown) {
       </button>
     </header>
 
-    <p v-if="error" role="alert">{{ error }}</p>
+    <div v-if="error" role="alert">
+      <p>{{ error }}</p>
+      <button v-if="!editing" :disabled="busy" @click="retryLoad">
+        Erneut laden
+      </button>
+    </div>
     <fieldset v-if="editing" ref="editor" :disabled="busy">
       <legend>
         {{ selected ? label(selected) + ' bearbeiten' : 'Neuer Eintrag' }}
@@ -100,7 +131,7 @@ async function submit(method: 'POST' | 'PUT' | 'DELETE', body?: unknown) {
           <button class="primary" type="submit">
             {{ busy ? 'Wird gespeichert …' : 'Speichern' }}
           </button>
-          <button type="button" @click="editing = false">Abbrechen</button>
+          <button type="button" @click="cancelEdit">Abbrechen</button>
         </div>
       </form>
     </fieldset>

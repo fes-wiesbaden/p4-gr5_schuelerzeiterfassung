@@ -16,6 +16,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import de.feswiesbaden.attendance.dtos.RawScanDTO;
 import de.feswiesbaden.attendance.enums.AttendanceStatus;
 import de.feswiesbaden.attendance.enums.ScanResult;
+import de.feswiesbaden.attendance.login.StaffPrincipal;
 import de.feswiesbaden.attendance.repository.RetentionRepository;
 import de.feswiesbaden.attendance.service.AttendanceAccountingService;
 import de.feswiesbaden.attendance.service.RetentionService;
@@ -231,6 +232,79 @@ class AttendanceAccountingIntegrationTest {
         .isOne();
   }
 
+  @Test
+  void deletesEmptyClassWithAssignmentsButKeepsPlansAndBlocks() throws Exception {
+    var admin = staffSession("test.admin");
+    jdbc.update(
+        "INSERT INTO school_class(id,class_code,class_teacher_id,block_plan_id,timetable_id) VALUES(99,'Leer',1,1,1)");
+    jdbc.update("INSERT INTO teacher_class VALUES(1,99)");
+    jdbc.update("INSERT INTO class_block_assignment SELECT 99,id FROM block_assignment LIMIT 1");
+    int blocks = jdbc.queryForObject("SELECT COUNT(*) FROM block_assignment", Integer.class);
+    int plans = jdbc.queryForObject("SELECT COUNT(*) FROM block_plan", Integer.class);
+    assertThat(
+            jdbc.queryForObject(
+                "SELECT COUNT(*) FROM class_block_assignment WHERE school_class_id=99",
+                Integer.class))
+        .isOne();
+    write(delete("/api/classes/99"), admin, "").andExpect(status().isNoContent());
+    for (String table : List.of("teacher_class", "class_block_assignment")) {
+      assertThat(
+              jdbc.queryForObject(
+                  "SELECT COUNT(*) FROM " + table + " WHERE school_class_id=99", Integer.class))
+          .isZero();
+    }
+    assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM school_class WHERE id=99", Integer.class))
+        .isZero();
+    assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM block_assignment", Integer.class))
+        .isEqualTo(blocks);
+    assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM block_plan", Integer.class))
+        .isEqualTo(plans);
+  }
+
+  @Test
+  void occupiedClassKeepsAllAssignments() throws Exception {
+    var admin = staffSession("test.admin");
+    var assignments =
+        jdbc.queryForList("SELECT * FROM class_block_assignment WHERE school_class_id=1");
+    write(delete("/api/classes/1"), admin, "").andExpect(status().isConflict());
+    assertThat(jdbc.queryForList("SELECT * FROM class_block_assignment WHERE school_class_id=1"))
+        .isEqualTo(assignments);
+    assertThat(
+            jdbc.queryForObject(
+                "SELECT COUNT(*) FROM student WHERE school_class_id=1", Integer.class))
+        .isPositive();
+  }
+
+  @Test
+  void teacherUpdateAcceptsNamesAndRejectsAccountFields() throws Exception {
+    var admin = staffSession("test.admin");
+    String names = "{\"firstName\":\"Neuer\",\"lastName\":\"Name\"}";
+    write(put("/api/teachers/1"), admin, names).andExpect(status().isNoContent());
+    for (String field : List.of("username", "password")) {
+      write(put("/api/teachers/1"), admin, names.replace("}", ",\"" + field + "\":\"anders\"}"))
+          .andExpect(status().isBadRequest());
+    }
+    assertThat(jdbc.queryForObject("SELECT first_name FROM staff WHERE id=1", String.class))
+        .isEqualTo("Neuer");
+    assertThat(jdbc.queryForObject("SELECT username FROM staff WHERE id=1", String.class))
+        .isEqualTo("test.teacher.a");
+  }
+
+  @Test
+  void lateSessionCannotUseReassignedUsername() throws Exception {
+    jdbc.update(
+        "INSERT INTO staff(id,first_name,last_name,username,password_hash,role) "
+            + "SELECT 99,'Test','Alt','reused',password_hash,role FROM staff WHERE id=1");
+    var lateSession = staffSession("reused");
+    write(delete("/api/teachers/99"), staffSession("test.admin"), "")
+        .andExpect(status().isNoContent());
+    jdbc.update(
+        "INSERT INTO staff(id,first_name,last_name,username,password_hash,role) "
+            + "SELECT 100,'Test','Neu','reused',password_hash,role FROM staff WHERE id=1");
+    mvc.perform(get("/api/me").session(lateSession)).andExpect(status().isUnauthorized());
+    mvc.perform(get("/api/me").session(staffSession("reused"))).andExpect(status().isOk());
+  }
+
   /** Prüft Schülerverwaltung und HTTP 409 bei bestehender Anwesenheitshistorie */
   @Test
   void managesStudentsButPreservesTheirHistory() throws Exception {
@@ -316,7 +390,14 @@ class AttendanceAccountingIntegrationTest {
   private MockHttpSession staffSession(String username) {
     var context = SecurityContextHolder.createEmptyContext();
     context.setAuthentication(
-        UsernamePasswordAuthenticationToken.authenticated(username, null, List.of()));
+        UsernamePasswordAuthenticationToken.authenticated(
+            new StaffPrincipal(
+                jdbc.queryForObject("SELECT id FROM staff WHERE username=?", Long.class, username),
+                username,
+                "unused",
+                List.of()),
+            null,
+            List.of()));
     var session = new MockHttpSession();
     session.setAttribute(HttpSessionSecurityContextRepository.SPRING_SECURITY_CONTEXT_KEY, context);
     return session;
@@ -861,6 +942,14 @@ class AttendanceAccountingIntegrationTest {
   private void signIn(String username) {
     SecurityContextHolder.getContext()
         .setAuthentication(
-            UsernamePasswordAuthenticationToken.authenticated(username, null, List.of()));
+            UsernamePasswordAuthenticationToken.authenticated(
+                new StaffPrincipal(
+                    jdbc.queryForObject(
+                        "SELECT id FROM staff WHERE username=?", Long.class, username),
+                    username,
+                    "unused",
+                    List.of()),
+                null,
+                List.of()));
   }
 }

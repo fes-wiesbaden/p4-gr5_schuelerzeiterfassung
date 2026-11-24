@@ -36,21 +36,23 @@ class StaffApiErrors {
     // einem Enum verwenden
     String code = String.valueOf(exception.getMessage());
     return switch (code) {
-      case "CLASS_ACCESS_DENIED", "CLASS_NOT_FOUND", "STUDENT_NOT_FOUND" ->
+      case "MASTER_DATA_NOT_FOUND", "CLASS_ACCESS_DENIED", "CLASS_NOT_FOUND", "STUDENT_NOT_FOUND" ->
           error(HttpStatus.NOT_FOUND, "NOT_FOUND");
       case "ADMINISTRATOR_REQUIRED",
               "CLASS_MANAGEMENT_DENIED",
               "CLASS_TEACHER_ASSIGNMENT_DENIED",
               "STAFF_REQUIRED" ->
           error(HttpStatus.FORBIDDEN, code);
-      case "CLASS_CODE_ALREADY_EXISTS",
+      case "CLASS_HAS_STUDENTS",
+              "CLASS_CODE_ALREADY_EXISTS",
               "STUDENT_HAS_HISTORY",
               "CLASS_PLAN_CHANGED",
               "CLASS_HAS_REMAINING_SLOTS",
               "CLASS_NOT_FULLY_ACCOUNTED",
               "ATTENDANCE_DAY_LOCKED_OR_UNPLANNED" ->
           error(HttpStatus.CONFLICT, code);
-      case "INVALID_CLASS",
+      case "INVALID_TEACHER_PASSWORD",
+              "INVALID_CLASS",
               "INVALID_STUDENT",
               "INVALID_STATUS_TIME",
               "INVALID_ATTENDANCE_DATE",
@@ -58,11 +60,6 @@ class StaffApiErrors {
           error(HttpStatus.BAD_REQUEST, code);
       default -> throw exception;
     };
-  }
-
-  @ExceptionHandler(org.springframework.dao.DataIntegrityViolationException.class)
-  ResponseEntity<Map<String, String>> conflict() {
-    return error(HttpStatus.CONFLICT, "MASTER_DATA_CONFLICT");
   }
 
   /** Erstellt die Antwort mit einem maschinenlesbaren Fehlercode */

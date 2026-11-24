@@ -1,5 +1,6 @@
 package de.feswiesbaden.attendance.api;
 
+import com.fasterxml.jackson.annotation.JsonAnySetter;
 import de.feswiesbaden.attendance.service.MasterDataService;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
@@ -7,8 +8,11 @@ import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
 import java.util.List;
 import java.util.Map;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
+import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -34,6 +38,24 @@ public class MasterDataController {
       @NotBlank @Size(max = 100) String lastName,
       @NotBlank @Size(max = 120) String username,
       String password) {}
+
+  public record TeacherUpdate(
+      @NotBlank @Size(max = 100) String firstName, @NotBlank @Size(max = 100) String lastName) {
+    @JsonAnySetter
+    public void rejectField(String field, Object value) {
+      throw new IllegalArgumentException("Unexpected field");
+    }
+  }
+
+  @GetMapping("/staff-id")
+  public Long currentStaffId() {
+    return data.currentStaffId();
+  }
+
+  @ExceptionHandler(DataIntegrityViolationException.class)
+  public ResponseEntity<Map<String, String>> conflict() {
+    return ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of("code", "MASTER_DATA_CONFLICT"));
+  }
 
   public record ClassUpdate(
       @NotBlank @Size(max = 30) String classCode, @NotNull Long classTeacherId) {}
@@ -79,8 +101,8 @@ public class MasterDataController {
 
   @PutMapping("/teachers/{id}")
   @ResponseStatus(HttpStatus.NO_CONTENT)
-  public void updateTeacher(@PathVariable Long id, @Valid @RequestBody TeacherRequest r) {
-    data.saveTeacher(id, r.firstName(), r.lastName(), r.username(), r.password());
+  public void updateTeacher(@PathVariable Long id, @Valid @RequestBody TeacherUpdate r) {
+    data.saveTeacher(id, r.firstName(), r.lastName(), null, null);
   }
 
   @DeleteMapping("/teachers/{id}")

@@ -4,6 +4,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import de.feswiesbaden.attendance.login.JsonLoginFilter;
 import de.feswiesbaden.attendance.login.SpaCsrfTokenRequestHandler;
 import de.feswiesbaden.attendance.login.StaffLoginService;
+import de.feswiesbaden.attendance.login.StaffRepository;
+import de.feswiesbaden.attendance.login.StaffSessionFilter;
 import jakarta.servlet.http.Cookie;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
@@ -25,6 +27,7 @@ import org.springframework.security.core.session.SessionRegistryImpl;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.security.web.access.intercept.AuthorizationFilter;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
 import org.springframework.security.web.authentication.logout.CookieClearingLogoutHandler;
 import org.springframework.security.web.authentication.logout.SecurityContextLogoutHandler;
@@ -85,6 +88,7 @@ public class SecurityConfig {
       HttpSecurity http,
       StaffLoginService staff,
       PasswordEncoder encoder,
+      StaffRepository staffAccounts,
       SessionRegistry sessions,
       ObjectMapper mapper)
       throws Exception {
@@ -127,8 +131,7 @@ public class SecurityConfig {
     login.setAuthenticationSuccessHandler(
         (request, response, authentication) -> {
           response.setContentType("application/json");
-          mapper.writeValue(
-              response.getOutputStream(), staff.currentUser(authentication.getName()));
+          mapper.writeValue(response.getOutputStream(), staff.currentUser(authentication));
         });
     login.setAuthenticationFailureHandler(
         (request, response, exception) -> {
@@ -165,6 +168,7 @@ public class SecurityConfig {
                         HttpMethod.GET,
                         "/api/me",
                         "/api/class-options",
+                        "/api/staff-id",
                         "/api/rooms",
                         "/api/teachers",
                         "/api/classes",
@@ -219,6 +223,7 @@ public class SecurityConfig {
                     .logoutSuccessHandler(
                         (request, response, authentication) ->
                             response.setStatus(HttpServletResponse.SC_NO_CONTENT)))
+        .addFilterBefore(new StaffSessionFilter(staffAccounts), AuthorizationFilter.class)
         .addFilterAt(login, UsernamePasswordAuthenticationFilter.class)
         .addFilterAt(expired, ConcurrentSessionFilter.class)
         .build();

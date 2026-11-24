@@ -5,9 +5,7 @@ import { ref, onMounted, computed } from 'vue'
 import { loadData } from '@/api/client'
 import { useAuthStore } from '@/stores/auth'
 const auth = useAuthStore()
-type Option = { id: number; name: string }
-type Options = { staffId: number; blockPlans: Option[]; timetables: Option[] }
-const options = ref<Options>()
+const staffId = ref<number>()
 const error = ref('')
 const classes = ref<
   { id: number; classCode: string; classTeacherId: number }[]
@@ -16,11 +14,11 @@ const selected = ref<number>()
 const own = computed(
   () =>
     classes.value.find((c) => c.id === selected.value)?.classTeacherId ===
-    options.value?.staffId
+    staffId.value
 )
 onMounted(async () => {
   try {
-    options.value = await loadData('/api/class-options')
+    staffId.value = await loadData('/api/staff-id')
     classes.value = await loadData('/api/classes')
     selected.value = classes.value[0]?.id
   } catch {
@@ -43,7 +41,7 @@ function label(r: Row) {
   <h1 v-if="!selected">Schüler</h1>
   <p v-if="error" role="alert">{{ error }}</p>
 
-  <p v-if="options && !classes.length && !error">Keine Klasse verfügbar.</p>
+  <p v-if="staffId && !classes.length && !error">Keine Klasse verfügbar.</p>
   <MasterDataList
     v-if="selected"
     :key="selected"

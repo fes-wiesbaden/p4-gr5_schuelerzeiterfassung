@@ -7,6 +7,7 @@ import static org.mockito.Mockito.when;
 
 import de.feswiesbaden.attendance.dtos.RawScanDTO;
 import de.feswiesbaden.attendance.enums.ScanResult;
+import de.feswiesbaden.attendance.login.StaffPrincipal;
 import de.feswiesbaden.attendance.service.AttendanceAccountingService;
 import de.feswiesbaden.attendance.service.BlockPlanService;
 import de.feswiesbaden.attendance.service.RetentionService;
@@ -174,7 +175,18 @@ class ClassAccountsIntegrationTest {
   private void signIn(String username) {
     SecurityContextHolder.getContext()
         .setAuthentication(
-            UsernamePasswordAuthenticationToken.authenticated(username, null, List.of()));
+            UsernamePasswordAuthenticationToken.authenticated(
+                new StaffPrincipal(
+                    jdbc
+                        .queryForList("SELECT id FROM staff WHERE username=?", Long.class, username)
+                        .stream()
+                        .findFirst()
+                        .orElse(-1L),
+                    username,
+                    "unused",
+                    List.of()),
+                null,
+                List.of()));
   }
 
   /** Prüft den auditierten Abschlussreset durch Admin oder Klassenleitung beim Planwechsel */

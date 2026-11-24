@@ -34,14 +34,13 @@ function label(r: Row) {
           required
         />
       </label>
-      <label>
+      <label v-if="!row">
         Benutzername
         <InputText
           name="username"
           type="text"
           :default-value="row?.username"
           maxlength="120"
-          :readonly="!!row"
           required
         />
       </label>
