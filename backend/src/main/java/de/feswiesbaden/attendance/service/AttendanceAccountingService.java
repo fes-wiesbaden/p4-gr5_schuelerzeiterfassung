@@ -87,8 +87,8 @@ public class AttendanceAccountingService {
   /**
    * Prüft die Terminalzuordnung und speichert Rohscan und Fachänderungen atomar. Neue Scans buchen
    * nur im zugeordneten Raum und Block aus ABWESEND oder BETRIEBLICH_ENTSCHULDIGT. Überlappende
-   * Slots desselben Stundenplans oder ein durch eine andere Klasse zur selben Zeit belegter Raum
-   * gelten als Datenproblem und lehnen den Scan neutral ab, statt ihn zu buchen
+   * Slots am Tag des Scans, ein durch eine andere Klasse zur selben Zeit belegter Raum oder eine
+   * Blockzuordnung zu einem fremden Plan gelten als Datenproblem und lehnen den Scan neutral ab
    */
   @Transactional
   public ScanResult recordScan(String verifiedSubject, RawScanDTO scan, Instant receivedAt) {
@@ -112,9 +112,13 @@ public class AttendanceAccountingService {
     Day day;
     try {
       day = lockDay(studentId, berlinDate(at));
-    } catch (IllegalStateException invalidPlanAssignment) {
-      // Eine Blockzuordnung zum falschen Plan ist ein Datenproblem, kein technischer Fehler;
-      // das Terminal soll denselben Scan deshalb nicht endlos wiederholen
+    } catch (IllegalStateException failure) {
+      // Nur eine Blockzuordnung zum falschen Plan ist ein Datenproblem, das der Scan nicht lösen
+      // kann. Das Terminal soll ihn deshalb nicht endlos wiederholen. Alle anderen Fehler bleiben
+      // technische Fehler, damit der Scan in der Warteschlange erhalten bleibt
+      if (!"INVALID_CLASS_BLOCK_ASSIGNMENT".equals(failure.getMessage())) {
+        throw failure;
+      }
       return ScanResult.REJECTED;
     }
     var slot =
@@ -129,7 +133,7 @@ public class AttendanceAccountingService {
                 .findFirst()
                 .orElse(null);
     if (slot == null
-        || overlapsAnotherSlot(day.slots(), slot)
+        || hasOverlappingSlots(day.slots())
         || accounting.roomDoubleBooked(
             day.plan().classId(),
             roomId,
@@ -704,16 +708,22 @@ public class AttendanceAccountingService {
   }
 
   /**
-   * Prüft, ob ein anderer Slot desselben Tages den angegebenen Slot zeitlich überschneidet. Slots
-   * desselben Stundenplans dürfen sich nicht überlappen
+   * Prüft, ob sich zwei Slots des Tages zeitlich überschneiden. Alle Slots gehen in die
+   * Tagesabrechnung ein, überlappende Slots würden Fehlminuten daher doppelt buchen. Slots ohne
+   * Dauer belegen keine Zeit und zählen nicht
    */
-  private static boolean overlapsAnotherSlot(List<Slot> daySlots, Slot slot) {
-    return daySlots.stream()
-        .anyMatch(
-            other ->
-                other != slot
-                    && other.startsAt().isBefore(slot.endsAt())
-                    && slot.startsAt().isBefore(other.endsAt()));
+  private static boolean hasOverlappingSlots(List<Slot> daySlots) {
+    var timed = daySlots.stream().filter(slot -> slot.startsAt().isBefore(slot.endsAt())).toList();
+    for (int first = 0; first < timed.size(); first++) {
+      for (int second = first + 1; second < timed.size(); second++) {
+        var a = timed.get(first);
+        var b = timed.get(second);
+        if (a.startsAt().isBefore(b.endsAt()) && b.startsAt().isBefore(a.endsAt())) {
+          return true;
+        }
+      }
+    }
+    return false;
   }
 
   /** Wandelt eine UTC-Zeit in den Berliner Kalendertag um */

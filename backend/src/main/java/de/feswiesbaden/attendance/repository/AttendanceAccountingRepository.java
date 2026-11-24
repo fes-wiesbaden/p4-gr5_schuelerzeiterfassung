@@ -114,7 +114,8 @@ public class AttendanceAccountingRepository {
 
   /**
    * Prüft, ob am angegebenen Tag eine andere Klasse denselben Raum in einem überlappenden Zeitraum
-   * belegt. Nur Klassen mit einem an diesem Tag aktiven Block zählen
+   * belegt. Nur Klassen mit einem an diesem Tag aktiven Block ihres aktuellen Blockplans zählen.
+   * Slots ohne Dauer belegen den Raum nicht
    */
   public boolean roomDoubleBooked(
       Long excludeClassId,
@@ -130,8 +131,8 @@ public class AttendanceAccountingRepository {
             JOIN class_block_assignment cba ON cba.school_class_id = c.id
             JOIN block_assignment b ON b.id = cba.block_assignment_id
             WHERE c.id <> ? AND s.room_id = ? AND s.weekday = ?
-              AND s.start_time < ? AND s.end_time > ?
-              AND b.starts_on <= ? AND b.ends_on >= ?
+              AND s.start_time < s.end_time AND s.start_time < ? AND s.end_time > ?
+              AND b.block_plan_id = c.block_plan_id AND b.starts_on <= ? AND b.ends_on >= ?
             """,
             Long.class,
             excludeClassId,

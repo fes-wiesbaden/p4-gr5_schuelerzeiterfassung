@@ -302,6 +302,21 @@ class TerminalScanIntegrationTest {
     assertNoBooking();
   }
 
+  /**
+   * Prüft, dass eine fehlerhafte Anwesenheitshistorie ein technischer Fehler bleibt. Das Terminal
+   * muss den Scan in der Warteschlange behalten und später erneut senden können
+   */
+  @Test
+  void keepsInvalidAttendanceHistoryATechnicalError() throws Exception {
+    jdbc.update(
+        "INSERT INTO attendance_audit (student_id, deletion_date_id, event_type, occurred_at)"
+            + " VALUES (1, 1, 'ACCOUNT_RESET', '2099-01-01 00:00:00')");
+    var response = send(terminal, scanRequest(UUID.randomUUID()));
+    assertThat(response.statusCode()).isEqualTo(500);
+    assertThat(response.body()).isEmpty();
+    assertThat(rawCount()).isZero();
+  }
+
   /** Prüft die von nginx gesetzte Identität am echten Scan-Endpunkt */
   @Test
   void nginxOverwritesClientSuppliedIdentityHeaders() throws Exception {
