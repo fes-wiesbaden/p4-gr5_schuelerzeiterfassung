@@ -231,10 +231,14 @@ function handleSidebarKeydown(event: KeyboardEvent) {
   color: white;
 }
 
-.app-nav__link:focus-visible,
-.app-header__menu-toggle:focus-visible {
+.app-nav__link:focus-visible {
   outline: 2px solid #ffffff;
   outline-offset: -2px;
+}
+
+.app-header__menu-toggle:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -3px;
 }
 
 .app-nav__link--active {
