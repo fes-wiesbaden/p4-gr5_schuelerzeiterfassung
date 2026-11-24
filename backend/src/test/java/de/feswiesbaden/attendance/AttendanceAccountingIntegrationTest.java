@@ -537,88 +537,47 @@ class AttendanceAccountingIntegrationTest {
   }
 
   /**
-   * Prüft die Ablehnung eines Scans, dessen Raum und Zeit zwei sich überlappende Slots desselben
-   * Stundenplans treffen
-   */
-  @Test
-  void rejectsScansMatchingOverlappingSlotsOfTheSameTimetable() {
-    jdbc.update(
-        "INSERT INTO timetable_slot (id, timetable_id, room_id, weekday, start_time, end_time)"
-            + " VALUES (99, 1, 1, 'MONTAG', '08:00:00', '08:45:00')");
-    assertThat(scan(1, "2026-09-14T06:15:00Z")).isFalse();
-    assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM attendance", Integer.class)).isZero();
-  }
-
-  /**
    * Prüft die Ablehnung eines Scans, dessen Raum zur selben Zeit von einer anderen, gleichzeitig
    * aktiven Klasse belegt ist
    */
   @Test
   void rejectsScansWhenAnotherActiveClassDoubleBooksTheRoom() {
-    jdbc.update("INSERT INTO timetable (id, name) VALUES (99, 'Konflikt-Stundenplan')");
-    jdbc.update(
-        "INSERT INTO timetable_slot (id, timetable_id, room_id, weekday, start_time, end_time)"
-            + " VALUES (99, 99, 1, 'MONTAG', '08:00:00', '08:45:00')");
-    jdbc.update(
-        "INSERT INTO school_class (id, class_code, class_teacher_id, block_plan_id, timetable_id)"
-            + " VALUES (99, 'KONFLIKT', 1, 1, 99)");
-    jdbc.update(
-        "INSERT INTO class_block_assignment (school_class_id, block_assignment_id)"
-            + " VALUES (99, 1)");
+    insertOtherClassInRoom1(1, 1, "08:00:00", "08:45:00");
     assertThat(scan(1, "2026-09-14T06:15:00Z")).isFalse();
     assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM attendance", Integer.class)).isZero();
   }
 
   /**
-   * Prüft die Ablehnung eines Scans, wenn sich frühere Slots des Tages überschneiden. Die
-   * Tagesabrechnung würde die Fehlminuten der überlappenden Zeit sonst doppelt buchen
+   * Überschneiden sich zwei Slots des Tages, auch abseits des gescannten Slots, lehnen Scan und
+   * Tagesabschluss den Tag ab, statt die überlappenden Minuten doppelt zu buchen
    */
   @Test
-  void rejectsScansWhenEarlierSlotsOfTheDayOverlap() {
+  void rejectsScanAndDailyCloseWhenSlotsOfTheDayOverlap() {
     jdbc.update(
         "INSERT INTO timetable_slot (id, timetable_id, room_id, weekday, start_time, end_time)"
             + " VALUES (99, 1, 2, 'MONTAG', '08:00:00', '08:45:00')");
     setTime("2026-09-14T07:20:00Z");
     assertThat(scan(1, "2026-09-14T07:15:00Z")).isFalse();
-    assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM attendance_audit", Integer.class))
+    setTime("2026-09-14T22:00:00Z");
+    accounting.closeDueDays();
+    assertThat(
+            jdbc.queryForObject(
+                "SELECT COUNT(*) FROM attendance_audit WHERE student_id = 1", Integer.class))
         .isZero();
   }
 
   /** Ein Slot ohne Dauer einer anderen Klasse belegt den Raum nicht */
   @Test
   void acceptsScansWhenAnotherClassHasOnlyAnEmptySlotInTheRoom() {
-    jdbc.update("INSERT INTO timetable (id, name) VALUES (99, 'Leerer-Slot')");
-    jdbc.update(
-        "INSERT INTO timetable_slot (id, timetable_id, room_id, weekday, start_time, end_time)"
-            + " VALUES (99, 99, 1, 'MONTAG', '08:15:00', '08:15:00')");
-    jdbc.update(
-        "INSERT INTO school_class (id, class_code, class_teacher_id, block_plan_id, timetable_id)"
-            + " VALUES (99, 'LEERSLOT', 1, 1, 99)");
-    jdbc.update(
-        "INSERT INTO class_block_assignment (school_class_id, block_assignment_id)"
-            + " VALUES (99, 1)");
+    insertOtherClassInRoom1(1, 1, "08:15:00", "08:15:00");
     assertThat(scan(1, "2026-09-14T06:15:00Z")).isTrue();
   }
 
   /** Der Block einer anderen Klasse aus einem fremden Plan macht diese Klasse nicht aktiv */
   @Test
   void acceptsScansWhenAnotherClassIsOnlyAssignedToABlockOfAForeignPlan() {
-    jdbc.update(
-        "INSERT INTO block_plan (id, name, starts_on, ends_on)"
-            + " VALUES (99, 'Fremdplan', '2026-09-01', '2026-12-31')");
-    jdbc.update(
-        "INSERT INTO block_assignment (id, block_plan_id, starts_on, ends_on)"
-            + " VALUES (99, 99, '2026-09-14', '2026-09-18')");
-    jdbc.update("INSERT INTO timetable (id, name) VALUES (99, 'Fremdplan-Stundenplan')");
-    jdbc.update(
-        "INSERT INTO timetable_slot (id, timetable_id, room_id, weekday, start_time, end_time)"
-            + " VALUES (99, 99, 1, 'MONTAG', '08:00:00', '08:45:00')");
-    jdbc.update(
-        "INSERT INTO school_class (id, class_code, class_teacher_id, block_plan_id, timetable_id)"
-            + " VALUES (99, 'FREMDPLAN', 1, 1, 99)");
-    jdbc.update(
-        "INSERT INTO class_block_assignment (school_class_id, block_assignment_id)"
-            + " VALUES (99, 99)");
+    insertPlan99WithBlockFrom0914("2026-12-31");
+    insertOtherClassInRoom1(1, 99, "08:00:00", "08:45:00");
     assertThat(scan(1, "2026-09-14T06:15:00Z")).isTrue();
   }
 
@@ -628,23 +587,37 @@ class AttendanceAccountingIntegrationTest {
    */
   @Test
   void acceptsScansWhenTheOtherClassPlanEndsBeforeTheScanDay() {
+    insertPlan99WithBlockFrom0914("2026-09-13");
+    insertOtherClassInRoom1(99, 99, "08:00:00", "08:45:00");
+    assertThat(scan(1, "2026-09-14T06:15:00Z")).isTrue();
+  }
+
+  /** Legt Blockplan 99 ab 01.09.2026 mit Block 99 vom 14. bis 18.09.2026 an */
+  private void insertPlan99WithBlockFrom0914(String planEndsOn) {
     jdbc.update(
         "INSERT INTO block_plan (id, name, starts_on, ends_on)"
-            + " VALUES (99, 'Beendeter-Plan', '2026-09-01', '2026-09-13')");
+            + " VALUES (99, 'Plan 99', '2026-09-01', ?)",
+        planEndsOn);
     jdbc.update(
         "INSERT INTO block_assignment (id, block_plan_id, starts_on, ends_on)"
             + " VALUES (99, 99, '2026-09-14', '2026-09-18')");
-    jdbc.update("INSERT INTO timetable (id, name) VALUES (99, 'Beendeter-Plan-Stundenplan')");
+  }
+
+  /** Legt Klasse 99 mit einem Montagsslot in Raum 1 an und weist ihr einen Block zu */
+  private void insertOtherClassInRoom1(long planId, long blockId, String startsAt, String endsAt) {
+    jdbc.update("INSERT INTO timetable (id, name) VALUES (99, 'Stundenplan 99')");
     jdbc.update(
         "INSERT INTO timetable_slot (id, timetable_id, room_id, weekday, start_time, end_time)"
-            + " VALUES (99, 99, 1, 'MONTAG', '08:00:00', '08:45:00')");
+            + " VALUES (99, 99, 1, 'MONTAG', ?, ?)",
+        startsAt,
+        endsAt);
     jdbc.update(
         "INSERT INTO school_class (id, class_code, class_teacher_id, block_plan_id, timetable_id)"
-            + " VALUES (99, 'PLANENDE', 1, 99, 99)");
+            + " VALUES (99, 'KLASSE99', 1, ?, 99)",
+        planId);
     jdbc.update(
-        "INSERT INTO class_block_assignment (school_class_id, block_assignment_id)"
-            + " VALUES (99, 99)");
-    assertThat(scan(1, "2026-09-14T06:15:00Z")).isTrue();
+        "INSERT INTO class_block_assignment (school_class_id, block_assignment_id) VALUES (99, ?)",
+        blockId);
   }
 
   /** Prüft Klassenrechte, Berliner Tagesgrenzen und das Verbot zukünftiger Korrekturzeiten */
