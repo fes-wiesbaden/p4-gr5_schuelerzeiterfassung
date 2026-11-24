@@ -478,6 +478,50 @@ class ClassAccountsIntegrationTest {
   }
 
   /**
+   * Prüft eine separate Tagesbuchung zwischen zwei Resets. Der zweite Reset bucht die zwischen den
+   * Resets angefallenen Minuten aus, ohne den bereits abgeschlossenen Tag erneut zu buchen
+   */
+  @Test
+  void aSecondResetRemovesMinutesBookedSeparatelyBetweenTheResets() {
+    assertThat(classes.resetAccounts(1L, 1L)).isEqualTo(6);
+    jdbc.update(
+        "INSERT INTO block_assignment (id, block_plan_id, starts_on, ends_on)"
+            + " VALUES (3, 1, '2026-09-28', '2026-10-02')");
+    jdbc.update(
+        "INSERT INTO class_block_assignment (school_class_id, block_assignment_id) VALUES (1, 3)");
+    setTime("2026-09-28T08:45:00Z");
+    attendance.closeDueDays();
+    assertThat(
+            jdbc.queryForObject(
+                "SELECT unexcused_minutes_account FROM student WHERE id = 1", Integer.class))
+        .isEqualTo(180);
+    var closes =
+        jdbc.queryForObject(
+            "SELECT COUNT(*) FROM attendance_audit WHERE event_type = 'DAILY_CLOSE'",
+            Integer.class);
+    setTime("2026-09-28T09:00:00Z");
+    assertThat(classes.resetAccounts(1L, 1L)).isEqualTo(6);
+    assertThat(
+            jdbc.queryForObject(
+                "SELECT COUNT(*) FROM attendance_audit WHERE event_type = 'DAILY_CLOSE'",
+                Integer.class))
+        .isEqualTo(closes);
+    assertThat(resetCount()).isEqualTo(12);
+    assertThat(
+            jdbc.queryForObject(
+                "SELECT unexcused_minutes_delta FROM attendance_audit"
+                    + " WHERE student_id = 1 AND event_type = 'ACCOUNT_RESET' ORDER BY id DESC LIMIT 1",
+                Integer.class))
+        .isEqualTo(-180);
+    assertThat(
+            jdbc.queryForObject(
+                "SELECT SUM(unexcused_minutes_account + excused_minutes_account)"
+                    + " FROM student WHERE school_class_id = 1",
+                Integer.class))
+        .isZero();
+  }
+
+  /**
    * Prüft, dass die Abrechnung mit dem ganzen Berliner Erstellungstag des Schülerdatensatzes
    * beginnt
    */

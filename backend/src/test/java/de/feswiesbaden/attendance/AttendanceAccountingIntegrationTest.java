@@ -181,11 +181,15 @@ class AttendanceAccountingIntegrationTest {
   }
 
   /**
-   * Prüft alle Auditfelder eines durch einen Scan erzeugten Eintrags: Terminal-ID gesetzt, keine
-   * Staff-ID, korrekte Löschfrist und keine Statushistorie überschrieben
+   * Prüft Schüler, Anwesenheit, Ereignisart, Terminal-ID, fehlende Staff-ID, Löschfrist sowie alten
+   * und neuen Status des Audits eines echten Scans. Weitere Löschfristen stellen sicher, dass die
+   * zum Blockplan passende Frist gewählt wird
    */
   @Test
   void scanAuditHasTerminalIdNoStaffIdAndTheCurrentDeletionDate() {
+    jdbc.update("UPDATE deletion_date SET delete_after = '2026-12-31' WHERE id = 1");
+    jdbc.update(
+        "INSERT INTO deletion_date (id, delete_after) VALUES (2, '2027-06-30'), (3, '2027-12-31')");
     assertThat(scan(2, "2026-09-14T05:50:00Z")).isTrue();
     var attendanceId =
         jdbc.queryForObject("SELECT id FROM attendance WHERE student_id = 2", Long.class);
@@ -195,7 +199,7 @@ class AttendanceAccountingIntegrationTest {
         .containsEntry("event_type", "SCAN")
         .containsEntry("terminal_id", 9001)
         .containsEntry("changed_by_staff_id", null)
-        .containsEntry("deletion_date_id", 1L)
+        .containsEntry("deletion_date_id", 2L)
         .containsEntry("old_status", "ABWESEND")
         .containsEntry("new_status", "ANWESEND");
   }
