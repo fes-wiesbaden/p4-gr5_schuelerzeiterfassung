@@ -538,11 +538,13 @@ class AttendanceAccountingIntegrationTest {
 
   /**
    * Prüft die Ablehnung eines Scans, dessen Raum zur selben Zeit von einer anderen, gleichzeitig
-   * aktiven Klasse belegt ist
+   * aktiven Klasse belegt ist. Plan und Block der anderen Klasse beginnen und enden am Scantag,
+   * damit alle Datumsgrenzen inklusive geprüft werden
    */
   @Test
   void rejectsScansWhenAnotherActiveClassDoubleBooksTheRoom() {
-    insertOtherClassInRoom1(1, 1, "08:00:00", "08:45:00");
+    insertPlan99("2026-09-14", "2026-09-14", "2026-09-14", "2026-09-14");
+    insertOtherClassInRoom1(99, 99, "08:00:00", "08:45:00");
     assertThat(scan(1, "2026-09-14T06:15:00Z")).isFalse();
     assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM attendance", Integer.class)).isZero();
   }
@@ -576,7 +578,7 @@ class AttendanceAccountingIntegrationTest {
   /** Der Block einer anderen Klasse aus einem fremden Plan macht diese Klasse nicht aktiv */
   @Test
   void acceptsScansWhenAnotherClassIsOnlyAssignedToABlockOfAForeignPlan() {
-    insertPlan99WithBlockFrom0914("2026-12-31");
+    insertPlan99("2026-09-01", "2026-12-31", "2026-09-14", "2026-09-18");
     insertOtherClassInRoom1(1, 99, "08:00:00", "08:45:00");
     assertThat(scan(1, "2026-09-14T06:15:00Z")).isTrue();
   }
@@ -587,20 +589,23 @@ class AttendanceAccountingIntegrationTest {
    */
   @Test
   void acceptsScansWhenTheOtherClassPlanEndsBeforeTheScanDay() {
-    insertPlan99WithBlockFrom0914("2026-09-13");
+    insertPlan99("2026-09-01", "2026-09-13", "2026-09-14", "2026-09-18");
     insertOtherClassInRoom1(99, 99, "08:00:00", "08:45:00");
     assertThat(scan(1, "2026-09-14T06:15:00Z")).isTrue();
   }
 
-  /** Legt Blockplan 99 ab 01.09.2026 mit Block 99 vom 14. bis 18.09.2026 an */
-  private void insertPlan99WithBlockFrom0914(String planEndsOn) {
+  /** Legt Blockplan 99 mit dem Block 99 an */
+  private void insertPlan99(
+      String planStartsOn, String planEndsOn, String blockStartsOn, String blockEndsOn) {
     jdbc.update(
-        "INSERT INTO block_plan (id, name, starts_on, ends_on)"
-            + " VALUES (99, 'Plan 99', '2026-09-01', ?)",
+        "INSERT INTO block_plan (id, name, starts_on, ends_on) VALUES (99, 'Plan 99', ?, ?)",
+        planStartsOn,
         planEndsOn);
     jdbc.update(
         "INSERT INTO block_assignment (id, block_plan_id, starts_on, ends_on)"
-            + " VALUES (99, 99, '2026-09-14', '2026-09-18')");
+            + " VALUES (99, 99, ?, ?)",
+        blockStartsOn,
+        blockEndsOn);
   }
 
   /** Legt Klasse 99 mit einem Montagsslot in Raum 1 an und weist ihr einen Block zu */

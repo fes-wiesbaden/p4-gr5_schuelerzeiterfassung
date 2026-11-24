@@ -472,9 +472,9 @@ public class AttendanceAccountingService {
   }
 
   /**
-   * Liefert die nach Beginn sortierten Slots des Wochentags innerhalb des Plans und eines
-   * zugeordneten Blocks. Überlappende Slots würden Fehlminuten doppelt buchen und gelten deshalb
-   * für Scan, Korrektur und Abrechnung als Datenfehler
+   * Liefert die Slots des Wochentags innerhalb des Plans und eines zugeordneten Blocks. Erwartet
+   * nach Beginn sortierte Slots. Überlappende Slots würden Fehlminuten doppelt buchen und gelten
+   * deshalb für Scan, Korrektur und Abrechnung als Datenfehler
    */
   private static List<Slot> slotsFor(
       ClassPlan plan, List<Period> periods, List<Slot> slots, LocalDate date) {
