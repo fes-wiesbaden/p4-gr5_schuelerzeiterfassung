@@ -484,13 +484,11 @@ class ClassAccountsIntegrationTest {
     assignFollowingBlock();
     setTime("2026-09-28T08:45:00Z");
     assertThat(attendance.closeDueDays()).isEqualTo(6);
-    assertThat(studentBalance(1)).isEqualTo(180);
+    assertThat(studentBalance()).isEqualTo(180);
     var closes =
         jdbc.queryForObject(
             "SELECT COUNT(*) FROM attendance_audit WHERE event_type = 'DAILY_CLOSE'",
             Integer.class);
-    // Spätere Uhrzeit, damit sich die beiden Reset-Zeitstempel unterscheiden
-    setTime("2026-09-28T09:00:00Z");
     assertThat(classes.resetAccounts(1L, 1L)).isEqualTo(6);
     assertThat(
             jdbc.queryForObject(
@@ -505,8 +503,8 @@ class ClassAccountsIntegrationTest {
         .extracting("occurred_at", "unexcused_minutes_delta", "deletion_date_id", "attendance_id")
         .containsExactly(
             tuple(LocalDateTime.of(2026, 9, 14, 8, 45), -180, 1L, null),
-            tuple(LocalDateTime.of(2026, 9, 28, 9, 0), -180, 1L, null));
-    assertThat(studentBalance(1)).isZero();
+            tuple(LocalDateTime.of(2026, 9, 28, 8, 45), -180, 1L, null));
+    assertThat(studentBalance()).isZero();
   }
 
   /** Weist Klasse 1 einen weiteren Block ab dem 28.09.2026 im aktuellen Plan zu */
@@ -518,12 +516,11 @@ class ClassAccountsIntegrationTest {
         "INSERT INTO class_block_assignment (school_class_id, block_assignment_id) VALUES (1, 3)");
   }
 
-  /** Liefert die Summe beider Fehlminutenkonten eines Schülers */
-  private int studentBalance(long studentId) {
+  /** Liefert die Summe beider Fehlminutenkonten von Schüler 1 */
+  private int studentBalance() {
     return jdbc.queryForObject(
-        "SELECT unexcused_minutes_account + excused_minutes_account FROM student WHERE id = ?",
-        Integer.class,
-        studentId);
+        "SELECT unexcused_minutes_account + excused_minutes_account FROM student WHERE id = 1",
+        Integer.class);
   }
 
   /**
