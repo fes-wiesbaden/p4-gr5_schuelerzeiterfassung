@@ -16,6 +16,7 @@ import java.time.Clock;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.Arrays;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
@@ -508,11 +509,19 @@ class ClassAccountsIntegrationTest {
         .isEqualTo(closes);
     assertThat(resetCount()).isEqualTo(12);
     assertThat(
-            jdbc.queryForObject(
-                "SELECT unexcused_minutes_delta FROM attendance_audit"
-                    + " WHERE student_id = 1 AND event_type = 'ACCOUNT_RESET' ORDER BY id DESC LIMIT 1",
-                Integer.class))
-        .isEqualTo(-180);
+            jdbc.query(
+                "SELECT occurred_at, unexcused_minutes_delta, deletion_date_id, attendance_id"
+                    + " FROM attendance_audit WHERE student_id = 1 AND event_type = 'ACCOUNT_RESET'"
+                    + " ORDER BY id",
+                (row, index) ->
+                    Arrays.asList(
+                        row.getObject("occurred_at", java.time.LocalDateTime.class),
+                        row.getInt("unexcused_minutes_delta"),
+                        row.getLong("deletion_date_id"),
+                        row.getObject("attendance_id"))))
+        .containsExactly(
+            Arrays.asList(java.time.LocalDateTime.of(2026, 9, 14, 8, 45), -180, 1L, null),
+            Arrays.asList(java.time.LocalDateTime.of(2026, 9, 28, 9, 0), -180, 1L, null));
     assertThat(
             jdbc.queryForObject(
                 "SELECT SUM(unexcused_minutes_account + excused_minutes_account)"
