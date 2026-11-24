@@ -1,8 +1,10 @@
 package de.feswiesbaden.attendance.api;
 
 import de.feswiesbaden.attendance.enums.AttendanceStatus;
+import de.feswiesbaden.attendance.repository.StudentRepository.RfidAssignment;
 import de.feswiesbaden.attendance.service.AttendanceAccountingService;
 import de.feswiesbaden.attendance.service.AttendanceAccountingService.DailyStudent;
+import de.feswiesbaden.attendance.service.RfidUidService;
 import de.feswiesbaden.attendance.service.SchoolClassService;
 import de.feswiesbaden.attendance.service.SchoolClassService.ClassView;
 import de.feswiesbaden.attendance.service.StudentService;
@@ -15,7 +17,9 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.util.List;
 import org.springframework.format.annotation.DateTimeFormat;
+import org.springframework.http.CacheControl;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -37,12 +41,18 @@ public class StaffController {
 
   private final AttendanceAccountingService attendance;
 
+  private final RfidUidService rfidUids;
+
   /** Übernimmt die Services für Klassen, Schüler und Anwesenheit */
   public StaffController(
-      SchoolClassService classes, StudentService students, AttendanceAccountingService attendance) {
+      SchoolClassService classes,
+      StudentService students,
+      AttendanceAccountingService attendance,
+      RfidUidService rfidUids) {
     this.classes = classes;
     this.students = students;
     this.attendance = attendance;
+    this.rfidUids = rfidUids;
   }
 
   /** Liefert die für den angemeldeten Mitarbeiter sichtbaren Klassen */
@@ -83,11 +93,31 @@ public class StaffController {
     return students.get(studentId);
   }
 
+  /** Liefert Lehrkräften Kartenzuordnungen ohne Zwischenspeicherung im Browser */
+  @GetMapping("/students/rfid-uids")
+  public ResponseEntity<List<RfidAssignment>> listRfidAssignments() {
+    return ResponseEntity.ok().cacheControl(CacheControl.noStore()).body(rfidUids.listForTeacher());
+  }
+
   /** Ändert Namen und Geburtsdatum eines Schülers */
   @PutMapping("/students/{studentId}")
   @ResponseStatus(HttpStatus.NO_CONTENT)
   public void updateStudent(@PathVariable Long studentId, @RequestBody StudentRequest request) {
     students.update(studentId, request.firstName(), request.lastName(), request.birthDate());
+  }
+
+  /** Weist dem Schüler eine neue Karte zu oder ersetzt die bisherige Karte */
+  @PutMapping("/students/{studentId}/rfid-uid")
+  @ResponseStatus(HttpStatus.NO_CONTENT)
+  public void assignRfidUid(@PathVariable Long studentId, @RequestBody RfidUidRequest request) {
+    rfidUids.assign(studentId, request.uid());
+  }
+
+  /** Entfernt die Kartenzuordnung des Schülers */
+  @DeleteMapping("/students/{studentId}/rfid-uid")
+  @ResponseStatus(HttpStatus.NO_CONTENT)
+  public void removeRfidUid(@PathVariable Long studentId) {
+    rfidUids.remove(studentId);
   }
 
   /** Löscht einen Schüler, sofern keine Anwesenheiten oder Audits auf ihn verweisen */
@@ -134,6 +164,9 @@ public class StaffController {
 
   /** Enthält die änderbaren Stammdaten eines Schülers */
   public record StudentRequest(String firstName, String lastName, LocalDate birthDate) {}
+
+  /** Enthält ausschließlich die neu zuzuweisende Kartenkennung */
+  public record RfidUidRequest(String uid) {}
 
   /** Enthält den gewünschten Status und den Zeitpunkt, ab dem er gelten soll */
   public record CorrectionRequest(@NotBlank String status, @NotNull Instant occurredAt) {}
