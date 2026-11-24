@@ -186,7 +186,7 @@ class AttendanceAccountingIntegrationTest {
    * zum Blockplan passende Frist gewählt wird
    */
   @Test
-  void scanAuditHasTerminalIdNoStaffIdAndTheCurrentDeletionDate() {
+  void scanAuditHasTerminalIdNoStaffIdAndThePlanDeletionDate() {
     jdbc.update("UPDATE deletion_date SET delete_after = '2026-12-31' WHERE id = 1");
     jdbc.update(
         "INSERT INTO deletion_date (id, delete_after) VALUES (2, '2027-06-30'), (3, '2027-12-31')");

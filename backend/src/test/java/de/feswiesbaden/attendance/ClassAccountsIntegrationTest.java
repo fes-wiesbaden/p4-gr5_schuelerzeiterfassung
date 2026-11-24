@@ -2,6 +2,7 @@ package de.feswiesbaden.attendance;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.tuple;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.when;
 
@@ -16,7 +17,6 @@ import java.time.Clock;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
-import java.util.Arrays;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
@@ -462,11 +462,7 @@ class ClassAccountsIntegrationTest {
   @Test
   void aLaterResetFirstBooksTheNewPlannedDayAndThenResetsItsMinutes() {
     classes.resetAccounts(1L, 1L);
-    jdbc.update(
-        "INSERT INTO block_assignment (id, block_plan_id, starts_on, ends_on)"
-            + " VALUES (3, 1, '2026-09-28', '2026-10-02')");
-    jdbc.update(
-        "INSERT INTO class_block_assignment (school_class_id, block_assignment_id) VALUES (1, 3)");
+    assignFollowingBlock();
     setTime("2026-09-28T08:45:00Z");
     assertThat(classes.resetAccounts(1L, 1L)).isEqualTo(6);
     assertThat(resetCount()).isEqualTo(12);
@@ -485,21 +481,15 @@ class ClassAccountsIntegrationTest {
   @Test
   void aSecondResetRemovesMinutesBookedSeparatelyBetweenTheResets() {
     assertThat(classes.resetAccounts(1L, 1L)).isEqualTo(6);
-    jdbc.update(
-        "INSERT INTO block_assignment (id, block_plan_id, starts_on, ends_on)"
-            + " VALUES (3, 1, '2026-09-28', '2026-10-02')");
-    jdbc.update(
-        "INSERT INTO class_block_assignment (school_class_id, block_assignment_id) VALUES (1, 3)");
+    assignFollowingBlock();
     setTime("2026-09-28T08:45:00Z");
-    attendance.closeDueDays();
-    assertThat(
-            jdbc.queryForObject(
-                "SELECT unexcused_minutes_account FROM student WHERE id = 1", Integer.class))
-        .isEqualTo(180);
+    assertThat(attendance.closeDueDays()).isEqualTo(6);
+    assertThat(studentBalance(1)).isEqualTo(180);
     var closes =
         jdbc.queryForObject(
             "SELECT COUNT(*) FROM attendance_audit WHERE event_type = 'DAILY_CLOSE'",
             Integer.class);
+    // Spätere Uhrzeit, damit sich die beiden Reset-Zeitstempel unterscheiden
     setTime("2026-09-28T09:00:00Z");
     assertThat(classes.resetAccounts(1L, 1L)).isEqualTo(6);
     assertThat(
@@ -507,27 +497,33 @@ class ClassAccountsIntegrationTest {
                 "SELECT COUNT(*) FROM attendance_audit WHERE event_type = 'DAILY_CLOSE'",
                 Integer.class))
         .isEqualTo(closes);
-    assertThat(resetCount()).isEqualTo(12);
     assertThat(
-            jdbc.query(
+            jdbc.queryForList(
                 "SELECT occurred_at, unexcused_minutes_delta, deletion_date_id, attendance_id"
                     + " FROM attendance_audit WHERE student_id = 1 AND event_type = 'ACCOUNT_RESET'"
-                    + " ORDER BY id",
-                (row, index) ->
-                    Arrays.asList(
-                        row.getObject("occurred_at", java.time.LocalDateTime.class),
-                        row.getInt("unexcused_minutes_delta"),
-                        row.getLong("deletion_date_id"),
-                        row.getObject("attendance_id"))))
+                    + " ORDER BY id"))
+        .extracting("occurred_at", "unexcused_minutes_delta", "deletion_date_id", "attendance_id")
         .containsExactly(
-            Arrays.asList(java.time.LocalDateTime.of(2026, 9, 14, 8, 45), -180, 1L, null),
-            Arrays.asList(java.time.LocalDateTime.of(2026, 9, 28, 9, 0), -180, 1L, null));
-    assertThat(
-            jdbc.queryForObject(
-                "SELECT SUM(unexcused_minutes_account + excused_minutes_account)"
-                    + " FROM student WHERE school_class_id = 1",
-                Integer.class))
-        .isZero();
+            tuple(LocalDateTime.of(2026, 9, 14, 8, 45), -180, 1L, null),
+            tuple(LocalDateTime.of(2026, 9, 28, 9, 0), -180, 1L, null));
+    assertThat(studentBalance(1)).isZero();
+  }
+
+  /** Weist Klasse 1 einen weiteren Block ab dem 28.09.2026 im aktuellen Plan zu */
+  private void assignFollowingBlock() {
+    jdbc.update(
+        "INSERT INTO block_assignment (id, block_plan_id, starts_on, ends_on)"
+            + " VALUES (3, 1, '2026-09-28', '2026-10-02')");
+    jdbc.update(
+        "INSERT INTO class_block_assignment (school_class_id, block_assignment_id) VALUES (1, 3)");
+  }
+
+  /** Liefert die Summe beider Fehlminutenkonten eines Schülers */
+  private int studentBalance(long studentId) {
+    return jdbc.queryForObject(
+        "SELECT unexcused_minutes_account + excused_minutes_account FROM student WHERE id = ?",
+        Integer.class,
+        studentId);
   }
 
   /**
