@@ -9,7 +9,7 @@ import org.springframework.security.core.userdetails.UserDetailsService;
 import org.springframework.security.core.userdetails.UsernameNotFoundException;
 import org.springframework.stereotype.Service;
 
-/** Lädt Mitarbeiterkonten für die Anmeldung und die Nutzeranzeige */
+/** Lädt Mitarbeiterkonten für Anmeldung, Sitzungsprüfung und Nutzeranzeige */
 @Service
 public class StaffLoginService implements UserDetailsService {
   private final StaffRepository staff;
@@ -29,6 +29,11 @@ public class StaffLoginService implements UserDetailsService {
             .build();
     return new StaffPrincipal(
         account.getId(), user.getUsername(), user.getPassword(), user.getAuthorities());
+  }
+
+  /** Prüft, ob das an eine Sitzung gebundene Konto noch existiert */
+  boolean accountExists(long id) {
+    return staff.existsById(id);
   }
 
   /** Liefert Vor- und Nachnamen sowie die Frontend-Rolle admin oder lehrkraft */

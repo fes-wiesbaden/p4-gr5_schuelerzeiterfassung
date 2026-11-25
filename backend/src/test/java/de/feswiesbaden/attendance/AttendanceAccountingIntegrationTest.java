@@ -3,6 +3,7 @@ package de.feswiesbaden.attendance;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.hamcrest.Matchers.contains;
+import static org.hamcrest.Matchers.hasItem;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
@@ -10,6 +11,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -28,6 +30,7 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CyclicBarrier;
@@ -37,6 +40,7 @@ import java.util.concurrent.TimeoutException;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.EnumSource;
@@ -44,6 +48,8 @@ import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.system.CapturedOutput;
+import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
 import org.springframework.dao.DataAccessException;
 import org.springframework.http.MediaType;
@@ -69,6 +75,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 @AutoConfigureMockMvc
 @Testcontainers
 @Sql("/fixtures/attendance.sql")
+@ExtendWith(OutputCaptureExtension.class)
 class AttendanceAccountingIntegrationTest {
   private static final LocalDate MONDAY = LocalDate.of(2026, 9, 14);
 
@@ -181,6 +188,30 @@ class AttendanceAccountingIntegrationTest {
         .andExpect(status().isBadRequest());
   }
 
+  /**
+   * Prüft Schüler, Anwesenheit, Ereignisart, Terminal-ID, fehlende Staff-ID, Löschfrist sowie alten
+   * und neuen Status des Audits eines echten Scans. Weitere Löschfristen stellen sicher, dass die
+   * zum Blockplan passende Frist gewählt wird
+   */
+  @Test
+  void scanAuditHasTerminalIdNoStaffIdAndThePlanDeletionDate() {
+    jdbc.update("UPDATE deletion_date SET delete_after = '2026-12-31' WHERE id = 1");
+    jdbc.update(
+        "INSERT INTO deletion_date (id, delete_after) VALUES (2, '2027-06-30'), (3, '2027-12-31')");
+    assertThat(scan(2, "2026-09-14T05:50:00Z")).isTrue();
+    var attendanceId =
+        jdbc.queryForObject("SELECT id FROM attendance WHERE student_id = 2", Long.class);
+    assertThat(jdbc.queryForMap("SELECT * FROM attendance_audit WHERE student_id = 2"))
+        .containsEntry("student_id", 2L)
+        .containsEntry("attendance_id", attendanceId)
+        .containsEntry("event_type", "SCAN")
+        .containsEntry("terminal_id", 9001)
+        .containsEntry("changed_by_staff_id", null)
+        .containsEntry("deletion_date_id", 2L)
+        .containsEntry("old_status", "ABWESEND")
+        .containsEntry("new_status", "ANWESEND");
+  }
+
   /** Prüft Klassengrenzen und die Verwaltungsrechte der Klassenleitung über HTTP */
   @Test
   void enforcesClassAccessAndClassManagementThroughHttp() throws Exception {
@@ -217,7 +248,7 @@ class AttendanceAccountingIntegrationTest {
   }
 
   @Test
-  void onlyAdminCanManageMasterDataAndBlockedDeleteKeepsAssignments() throws Exception {
+  void onlyAdminCanManageRoomsAndListTeachers() throws Exception {
     var admin = staffSession("test.admin");
     var teacher = staffSession("test.teacher.b");
     String room = "{\"roomNumber\":\"A104\"}";
@@ -225,11 +256,6 @@ class AttendanceAccountingIntegrationTest {
     write(post("/api/rooms"), admin, room).andExpect(status().isCreated());
     write(post("/api/rooms"), admin, room).andExpect(status().isConflict());
     mvc.perform(get("/api/teachers").session(teacher)).andExpect(status().isForbidden());
-    write(delete("/api/classes/1"), admin, "").andExpect(status().isConflict());
-    assertThat(
-            jdbc.queryForObject(
-                "SELECT COUNT(*) FROM teacher_class WHERE school_class_id=1", Integer.class))
-        .isOne();
   }
 
   @Test
@@ -266,9 +292,15 @@ class AttendanceAccountingIntegrationTest {
     var admin = staffSession("test.admin");
     var assignments =
         jdbc.queryForList("SELECT * FROM class_block_assignment WHERE school_class_id=1");
-    write(delete("/api/classes/1"), admin, "").andExpect(status().isConflict());
+    write(delete("/api/classes/1"), admin, "")
+        .andExpect(status().isConflict())
+        .andExpect(jsonPath("$.code").value("CLASS_HAS_STUDENTS"));
+    assertThat(
+            jdbc.queryForObject(
+                "SELECT COUNT(*) FROM teacher_class WHERE school_class_id=1", Integer.class))
+        .isOne();
     assertThat(jdbc.queryForList("SELECT * FROM class_block_assignment WHERE school_class_id=1"))
-        .isEqualTo(assignments);
+        .containsExactlyInAnyOrderElementsOf(assignments);
     assertThat(
             jdbc.queryForObject(
                 "SELECT COUNT(*) FROM student WHERE school_class_id=1", Integer.class))
@@ -331,6 +363,73 @@ class AttendanceAccountingIntegrationTest {
                 "SELECT COUNT(*) FROM attendance_audit WHERE student_id = 1", Integer.class))
         .isEqualTo(1);
     assertAccount(1, 20, 0);
+  }
+
+  /** Prüft Kartenzuordnung über HTTP mit CSRF, Rollenprüfung und neutralen Antworten */
+  @Test
+  @ExtendWith(RfidLoggingExtension.class)
+  void managesRfidCardsThroughAdminHttp(CapturedOutput output) throws Exception {
+    var admin = staffSession("test.admin");
+    var teacher = staffSession("test.teacher.a");
+    String card = "/api/students/1/rfid-uid";
+    String newUid = "{\"uid\":\"04A3B2C1\"}";
+
+    mvc.perform(put(card).session(admin).contentType(MediaType.APPLICATION_JSON).content(newUid))
+        .andExpect(status().isForbidden());
+    write(put(card), teacher, newUid).andExpect(status().isForbidden());
+    write(delete(card), teacher, "").andExpect(status().isForbidden());
+    write(put(card), admin, "{\"uid\":\"invalid\"}")
+        .andExpect(status().isBadRequest())
+        .andExpect(content().json("{\"code\":\"INVALID_RFID_UID\"}"));
+    write(put(card), admin, newUid)
+        .andExpect(status().isNoContent())
+        .andExpect(content().string(""));
+    assertThat(jdbc.queryForObject("SELECT rfid_uid FROM student WHERE id = 1", String.class))
+        .isEqualTo("04A3B2C1");
+    write(put("/api/students/2/rfid-uid"), admin, newUid)
+        .andExpect(status().isConflict())
+        .andExpect(content().json("{\"code\":\"RFID_UID_ALREADY_ASSIGNED\"}"));
+    mvc.perform(get("/api/students/1").session(admin))
+        .andExpect(jsonPath("$.rfidUid").doesNotExist());
+    write(delete(card), admin, "")
+        .andExpect(status().isNoContent())
+        .andExpect(content().string(""));
+    assertThat(jdbc.queryForObject("SELECT rfid_uid FROM student WHERE id = 1", String.class))
+        .isNull();
+    assertThat(output.getAll())
+        .contains("to [RfidUidRequest]", "Setting SQL statement parameter value")
+        .doesNotContain("04A3B2C1");
+  }
+
+  /** Prüft den klassenübergreifenden UID-Lesezugriff und die Begrenzung auf den Leseendpunkt */
+  @Test
+  @ExtendWith(RfidLoggingExtension.class)
+  void teacherReadsRfidAssignmentsAcrossClassBoundaries(CapturedOutput output) throws Exception {
+    String endpoint = "/api/students/rfid-uids";
+    var teacher = staffSession("test.teacher.a");
+    jdbc.update("UPDATE student SET rfid_uid = NULL WHERE id = 8");
+
+    mvc.perform(get(endpoint)).andExpect(status().isUnauthorized());
+    mvc.perform(get(endpoint).session(staffSession("test.admin")))
+        .andExpect(status().isForbidden());
+    mvc.perform(get("/api/students/7").session(teacher)).andExpect(status().isNotFound());
+    mvc.perform(get("/api/students/1").session(teacher))
+        .andExpect(jsonPath("$.rfidUid").doesNotExist());
+    mvc.perform(get(endpoint).session(teacher))
+        .andExpect(status().isOk())
+        .andExpect(header().string("Cache-Control", "no-store"))
+        .andExpect(jsonPath("$.length()").value(7))
+        .andExpect(
+            jsonPath("$")
+                .value(
+                    hasItem(
+                        Map.of(
+                            "studentName", "Raum-B, Test",
+                            "classCode", "26TEST-B",
+                            "rfidUid", "TEST-UID-007"))));
+    assertThat(output.getAll())
+        .contains("Writing [[RfidAssignment")
+        .doesNotContain("TEST-UID-007", "TEST-UID-005");
   }
 
   /** Prüft Administratorrechte, Planbindung, wiederholte Resets und erhaltene Tageswerte */
@@ -631,6 +730,130 @@ class AttendanceAccountingIntegrationTest {
     assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM attendance", Integer.class)).isZero();
     assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM attendance_audit", Integer.class))
         .isZero();
+  }
+
+  /**
+   * Prüft die Ablehnung eines Scans, dessen Raum zur selben Zeit von einer anderen, gleichzeitig
+   * aktiven Klasse belegt ist. Plan und Block der anderen Klasse beginnen und enden am Scantag,
+   * damit alle Datumsgrenzen inklusive geprüft werden
+   */
+  @Test
+  void rejectsScansWhenAnotherActiveClassDoubleBooksTheRoom() {
+    insertPlan99("2026-09-14", "2026-09-14", "2026-09-14", "2026-09-14");
+    insertOtherClassInRoom1(99, 99, "08:00:00", "08:45:00");
+    assertThat(scan(1, "2026-09-14T06:15:00Z")).isFalse();
+    assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM attendance", Integer.class)).isZero();
+  }
+
+  /**
+   * Überschneiden sich frühere Slots des Tages, wird auch ein Scan im späteren, selbst nicht
+   * überlappenden Slot neutral abgelehnt. Der Rohscan bleibt gespeichert und der Tagesabruf für die
+   * Lehrkraft bleibt möglich
+   */
+  @Test
+  void rejectsScansWhenEarlierSlotsOfTheDayOverlap() throws Exception {
+    jdbc.update(
+        "INSERT INTO timetable_slot (id, timetable_id, room_id, weekday, start_time, end_time)"
+            + " VALUES (99, 1, 2, 'MONTAG', '08:00:00', '08:45:00')");
+    var rawScans = jdbc.queryForObject("SELECT COUNT(*) FROM raw_scan", Integer.class);
+    assertThat(scan(1, "2026-09-14T07:15:00Z")).isFalse();
+    assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM raw_scan", Integer.class))
+        .isEqualTo(rawScans + 1);
+    assertThat(
+            jdbc.queryForObject(
+                "SELECT COUNT(*) FROM attendance_audit WHERE student_id = 1", Integer.class))
+        .isZero();
+    mvc.perform(get(CLASS_DAY).session(staffSession("test.teacher.a")))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$[0].status").value("ABWESEND"));
+  }
+
+  /** Ein Slot ohne Dauer einer anderen Klasse belegt den Raum nicht */
+  @Test
+  void acceptsScansWhenAnotherClassHasOnlyAnEmptySlotInTheRoom() {
+    insertOtherClassInRoom1(1, 1, "08:15:00", "08:15:00");
+    assertThat(scan(1, "2026-09-14T06:15:00Z")).isTrue();
+  }
+
+  /** Der Block einer anderen Klasse aus einem fremden Plan macht diese Klasse nicht aktiv */
+  @Test
+  void acceptsScansWhenAnotherClassIsOnlyAssignedToABlockOfAForeignPlan() {
+    insertPlan99("2026-09-01", "2026-12-31", "2026-09-14", "2026-09-18");
+    insertOtherClassInRoom1(1, 99, "08:00:00", "08:45:00");
+    assertThat(scan(1, "2026-09-14T06:15:00Z")).isTrue();
+  }
+
+  /**
+   * Eine andere Klasse blockiert den Raum nur, wenn ihr aktueller Blockplan und ihr Block den
+   * Scantag einschließen. Jeweils eine der beiden Spannen endet vor oder beginnt nach dem 14.09.
+   */
+  @ParameterizedTest
+  @CsvSource({
+    "2026-09-01, 2026-09-13, 2026-09-14, 2026-09-18",
+    "2026-09-15, 2026-12-31, 2026-09-14, 2026-09-18",
+    "2026-09-01, 2026-12-31, 2026-09-07, 2026-09-13"
+  })
+  void acceptsScansWhenTheOtherClassPlanOrBlockExcludesTheScanDay(
+      String planStartsOn, String planEndsOn, String blockStartsOn, String blockEndsOn) {
+    insertPlan99(planStartsOn, planEndsOn, blockStartsOn, blockEndsOn);
+    insertOtherClassInRoom1(99, 99, "08:00:00", "08:45:00");
+    assertThat(scan(1, "2026-09-14T06:15:00Z")).isTrue();
+  }
+
+  /** Direkt aneinander anschließende Slots des Tages gelten nicht als Überlappung */
+  @Test
+  void acceptsScansWhenSlotsOfTheDayOnlyTouch() {
+    jdbc.update(
+        "INSERT INTO timetable_slot (id, timetable_id, room_id, weekday, start_time, end_time)"
+            + " VALUES (99, 1, 2, 'MONTAG', '09:00:00', '09:15:00')");
+    assertThat(scan(1, "2026-09-14T06:15:00Z")).isTrue();
+  }
+
+  /**
+   * Eine aktive Klasse belegt den Raum nur in ihren eigenen Zeitfenstern. Direkt vor und nach dem
+   * gescannten Slot anschließende Slots am Scantag und ein gleichzeitiger Slot an einem anderen
+   * Wochentag blockieren nicht
+   */
+  @Test
+  void acceptsScansWhenAnotherClassUsesTheRoomOnlyAtOtherTimes() {
+    insertPlan99("2026-09-14", "2026-09-14", "2026-09-14", "2026-09-14");
+    insertOtherClassInRoom1(99, 99, "09:00:00", "09:15:00");
+    jdbc.update(
+        "INSERT INTO timetable_slot (id, timetable_id, room_id, weekday, start_time, end_time)"
+            + " VALUES (98, 99, 1, 'DIENSTAG', '08:00:00', '08:45:00'),"
+            + " (97, 99, 1, 'MONTAG', '07:00:00', '07:30:00')");
+    assertThat(scan(1, "2026-09-14T06:15:00Z")).isTrue();
+  }
+
+  /** Legt Blockplan 99 mit dem Block 99 an */
+  private void insertPlan99(
+      String planStartsOn, String planEndsOn, String blockStartsOn, String blockEndsOn) {
+    jdbc.update(
+        "INSERT INTO block_plan (id, name, starts_on, ends_on) VALUES (99, 'Plan 99', ?, ?)",
+        planStartsOn,
+        planEndsOn);
+    jdbc.update(
+        "INSERT INTO block_assignment (id, block_plan_id, starts_on, ends_on)"
+            + " VALUES (99, 99, ?, ?)",
+        blockStartsOn,
+        blockEndsOn);
+  }
+
+  /** Legt Klasse 99 mit einem Montagsslot in Raum 1 an und weist ihr einen Block zu */
+  private void insertOtherClassInRoom1(long planId, long blockId, String startsAt, String endsAt) {
+    jdbc.update("INSERT INTO timetable (id, name) VALUES (99, 'Stundenplan 99')");
+    jdbc.update(
+        "INSERT INTO timetable_slot (id, timetable_id, room_id, weekday, start_time, end_time)"
+            + " VALUES (99, 99, 1, 'MONTAG', ?, ?)",
+        startsAt,
+        endsAt);
+    jdbc.update(
+        "INSERT INTO school_class (id, class_code, class_teacher_id, block_plan_id, timetable_id)"
+            + " VALUES (99, 'KLASSE99', 1, ?, 99)",
+        planId);
+    jdbc.update(
+        "INSERT INTO class_block_assignment (school_class_id, block_assignment_id) VALUES (99, ?)",
+        blockId);
   }
 
   /** Prüft Klassenrechte, Berliner Tagesgrenzen und das Verbot zukünftiger Korrekturzeiten */

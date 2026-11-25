@@ -1,9 +1,12 @@
 package de.feswiesbaden.attendance.service;
 
 import de.feswiesbaden.attendance.repository.StudentRepository;
+import de.feswiesbaden.attendance.repository.StudentRepository.RfidAssignment;
+import java.util.List;
 import java.util.regex.Pattern;
 import org.springframework.dao.DataAccessException;
 import org.springframework.dao.DuplicateKeyException;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -19,6 +22,15 @@ public class RfidUidService {
   public RfidUidService(StudentRepository students, StaffAuthorization authorization) {
     this.students = students;
     this.authorization = authorization;
+  }
+
+  /** Liefert Lehrkräften die RFID-Kartenzuordnungen der Schüler aus allen Klassen */
+  @Transactional(readOnly = true)
+  public List<RfidAssignment> listForTeacher() {
+    if (authorization.currentStaff().administrator()) {
+      throw new AccessDeniedException("TEACHER_REQUIRED");
+    }
+    return students.findRfidAssignments();
   }
 
   /**

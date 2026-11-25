@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import InputText from 'primevue/inputtext'
 import MasterDataList from '@/components/MasterDataList.vue'
+import StudentRfidCards from '@/components/StudentRfidCards.vue'
 import { ref, onMounted, computed } from 'vue'
 import { loadData } from '@/api/client'
 import { useAuthStore } from '@/stores/auth'
@@ -11,6 +12,7 @@ const classes = ref<
   { id: number; classCode: string; classTeacherId: number }[]
 >([])
 const selected = ref<number>()
+const cardFormVersion = ref(0)
 const own = computed(
   () =>
     classes.value.find((c) => c.id === selected.value)?.classTeacherId ===
@@ -55,6 +57,7 @@ function label(r: Row) {
       { field: 'excusedMinutes', title: 'Entschuldigt (min)' }
     ]"
     :label="label"
+    @saved="cardFormVersion++"
   >
     <template #filter>
       <label class="class-filter">
@@ -98,4 +101,5 @@ function label(r: Row) {
       </label>
     </template>
   </MasterDataList>
+  <StudentRfidCards :key="cardFormVersion" :classes="classes" />
 </template>

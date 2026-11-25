@@ -12,6 +12,7 @@ const props = defineProps<{
   title: string
   label: (row: T) => string
 }>()
+const emit = defineEmits<{ saved: [] }>()
 const rows = shallowRef<T[]>([])
 const query = ref('')
 const visibleRows = computed(() => {
@@ -25,25 +26,33 @@ const editing = ref(false)
 const busy = ref(false)
 const error = ref('')
 const loaded = ref(false)
+const list = ref<HTMLElement>()
+const heading = ref<HTMLHeadingElement>()
 const editor = ref<HTMLFieldSetElement>()
 const createButton = ref<HTMLButtonElement>()
-let previousFocus: HTMLElement | null = null
+const retryButton = ref<HTMLButtonElement>()
+
+function focusListAction() {
+  const target = retryButton.value ?? createButton.value ?? heading.value
+  target?.focus()
+}
+
 async function cancelEdit() {
+  const id = selected.value?.id
   editing.value = false
   await nextTick()
-  const label = previousFocus?.getAttribute('aria-label')
-  const button = Array.from(
-    document.querySelectorAll<HTMLButtonElement>('button[aria-label]')
-  ).find((button) => button.getAttribute('aria-label') === label)
-  if (button) button.focus()
-  else createButton.value?.focus()
+  const editButton = list.value?.querySelector<HTMLButtonElement>(
+    `button[data-edit-id="${id}"]`
+  )
+  if (editButton) editButton.focus()
+  else focusListAction()
 }
 
 async function reload() {
   rows.value = await loadData<T[]>(props.url)
   loaded.value = true
 }
-async function retryLoad() {
+async function retryLoad(restoreFocus = false) {
   error.value = ''
   busy.value = true
   try {
@@ -52,11 +61,14 @@ async function retryLoad() {
     error.value = 'Liste konnte nicht geladen werden.'
   } finally {
     busy.value = false
+    if (restoreFocus) {
+      await nextTick()
+      focusListAction()
+    }
   }
 }
-onMounted(retryLoad)
+onMounted(() => retryLoad())
 async function edit(row?: T) {
-  previousFocus = document.activeElement as HTMLElement
   selected.value = row
   editing.value = true
   error.value = ''
@@ -65,23 +77,35 @@ async function edit(row?: T) {
 }
 async function save(event: Event) {
   const body = Object.fromEntries(new FormData(event.target as HTMLFormElement))
-  await submit(selected.value ? 'PUT' : 'POST', body)
+  if (!(await submit(selected.value ? 'PUT' : 'POST', body))) {
+    editor.value
+      ?.querySelector<HTMLButtonElement>('button[type="submit"]')
+      ?.focus()
+  }
 }
 async function remove(row: T) {
   if (!window.confirm(props.label(row) + ' wirklich löschen?')) return
   selected.value = row
-  await submit('DELETE')
+  if (!(await submit('DELETE'))) {
+    const deleteButton = list.value?.querySelector<HTMLButtonElement>(
+      `button[data-delete-id="${row.id}"]`
+    )
+    deleteButton?.focus()
+  }
 }
 async function submit(method: 'POST' | 'PUT' | 'DELETE', body?: unknown) {
-  if (busy.value) return
+  if (busy.value) return false
   busy.value = true
   error.value = ''
+  let saved = false
   try {
     const url =
       method === 'POST'
         ? props.url
         : (props.itemUrl ?? props.url) + '/' + selected.value!.id
     await changeData(url, method, body)
+    saved = true
+    emit('saved')
     editing.value = false
     if (method === 'DELETE')
       rows.value = rows.value.filter((row) => row.id !== selected.value?.id)
@@ -91,19 +115,20 @@ async function submit(method: 'POST' | 'PUT' | 'DELETE', body?: unknown) {
       error.value =
         'Änderung gespeichert. Die Liste konnte nicht aktualisiert werden. Bitte erneut laden.'
     }
-    await nextTick()
-    createButton.value?.focus()
   } catch (e) {
     error.value = e instanceof Error ? e.message : 'Server nicht erreichbar.'
   } finally {
     busy.value = false
   }
+  await nextTick()
+  if (saved) focusListAction()
+  return saved
 }
 </script>
 <template>
-  <section>
+  <section ref="list">
     <header class="list-heading">
-      <h1>{{ title }}</h1>
+      <h1 ref="heading" tabindex="-1">{{ title }}</h1>
       <button
         v-if="!editing && loaded && (canCreate || editable)"
         ref="createButton"
@@ -117,7 +142,12 @@ async function submit(method: 'POST' | 'PUT' | 'DELETE', body?: unknown) {
 
     <div v-if="error" role="alert">
       <p>{{ error }}</p>
-      <button v-if="!editing" :disabled="busy" @click="retryLoad">
+      <button
+        v-if="!editing"
+        ref="retryButton"
+        :disabled="busy"
+        @click="retryLoad(true)"
+      >
         Erneut laden
       </button>
     </div>
@@ -190,6 +220,7 @@ async function submit(method: 'POST' | 'PUT' | 'DELETE', body?: unknown) {
               <td v-if="editable" class="actions">
                 <button
                   :disabled="busy"
+                  :data-edit-id="row.id"
                   :aria-label="'Bearbeiten: ' + label(row)"
                   @click="edit(row)"
                 >
@@ -198,6 +229,7 @@ async function submit(method: 'POST' | 'PUT' | 'DELETE', body?: unknown) {
                 </button>
                 <button
                   :disabled="busy"
+                  :data-delete-id="row.id"
                   :aria-label="'Löschen: ' + label(row)"
                   @click="remove(row)"
                 >

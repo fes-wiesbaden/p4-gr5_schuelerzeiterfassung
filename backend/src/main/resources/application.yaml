@@ -30,6 +30,11 @@ server:
         same-site: strict
         path: /
 
+logging:
+  level:
+    # MVC-Validierungsfehler können abgelehnte Kartenkennungen enthalten.
+    org.springframework.web.servlet.mvc.method.annotation.ExceptionHandlerExceptionResolver: INFO
+
 management:
   endpoints:
     web:

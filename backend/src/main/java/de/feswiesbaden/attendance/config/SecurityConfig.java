@@ -4,7 +4,6 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import de.feswiesbaden.attendance.login.JsonLoginFilter;
 import de.feswiesbaden.attendance.login.SpaCsrfTokenRequestHandler;
 import de.feswiesbaden.attendance.login.StaffLoginService;
-import de.feswiesbaden.attendance.login.StaffRepository;
 import de.feswiesbaden.attendance.login.StaffSessionFilter;
 import jakarta.servlet.http.Cookie;
 import jakarta.servlet.http.HttpServletRequest;
@@ -88,7 +87,6 @@ public class SecurityConfig {
       HttpSecurity http,
       StaffLoginService staff,
       PasswordEncoder encoder,
-      StaffRepository staffAccounts,
       SessionRegistry sessions,
       ObjectMapper mapper)
       throws Exception {
@@ -174,6 +172,7 @@ public class SecurityConfig {
                         "/api/classes",
                         "/api/classes/{classId}/students",
                         "/api/classes/{classId}/attendance",
+                        "/api/students/rfid-uids",
                         "/api/students/{studentId}")
                     .authenticated()
                     .requestMatchers(
@@ -190,14 +189,16 @@ public class SecurityConfig {
                         "/api/classes/{id}",
                         "/api/rooms/{id}",
                         "/api/teachers/{id}",
-                        "/api/students/{studentId}")
+                        "/api/students/{studentId}",
+                        "/api/students/{studentId}/rfid-uid")
                     .authenticated()
                     .requestMatchers(
                         HttpMethod.DELETE,
                         "/api/classes/{id}",
                         "/api/rooms/{id}",
                         "/api/teachers/{id}",
-                        "/api/students/{studentId}")
+                        "/api/students/{studentId}",
+                        "/api/students/{studentId}/rfid-uid")
                     .authenticated()
                     .anyRequest()
                     .denyAll())
@@ -223,7 +224,7 @@ public class SecurityConfig {
                     .logoutSuccessHandler(
                         (request, response, authentication) ->
                             response.setStatus(HttpServletResponse.SC_NO_CONTENT)))
-        .addFilterBefore(new StaffSessionFilter(staffAccounts), AuthorizationFilter.class)
+        .addFilterBefore(new StaffSessionFilter(staff), AuthorizationFilter.class)
         .addFilterAt(login, UsernamePasswordAuthenticationFilter.class)
         .addFilterAt(expired, ConcurrentSessionFilter.class)
         .build();

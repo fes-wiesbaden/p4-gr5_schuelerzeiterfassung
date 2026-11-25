@@ -10,9 +10,9 @@ import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 public class StaffSessionFilter extends OncePerRequestFilter {
-  private final StaffRepository staff;
+  private final StaffLoginService staff;
 
-  public StaffSessionFilter(StaffRepository staff) {
+  public StaffSessionFilter(StaffLoginService staff) {
     this.staff = staff;
   }
 
@@ -25,7 +25,7 @@ public class StaffSessionFilter extends OncePerRequestFilter {
         && authentication.isAuthenticated()
         && !(authentication instanceof AnonymousAuthenticationToken)) {
       if (!(authentication.getPrincipal() instanceof StaffPrincipal principal)
-          || staff.findById(principal.id()).isEmpty()) {
+          || !staff.accountExists(principal.id())) {
         SecurityContextHolder.clearContext();
         var session = request.getSession(false);
         if (session != null) {

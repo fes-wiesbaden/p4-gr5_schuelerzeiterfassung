@@ -39,12 +39,14 @@ class StaffApiErrors {
       case "MASTER_DATA_NOT_FOUND", "CLASS_ACCESS_DENIED", "CLASS_NOT_FOUND", "STUDENT_NOT_FOUND" ->
           error(HttpStatus.NOT_FOUND, "NOT_FOUND");
       case "ADMINISTRATOR_REQUIRED",
+              "TEACHER_REQUIRED",
               "CLASS_MANAGEMENT_DENIED",
               "CLASS_TEACHER_ASSIGNMENT_DENIED",
               "STAFF_REQUIRED" ->
           error(HttpStatus.FORBIDDEN, code);
       case "CLASS_HAS_STUDENTS",
               "CLASS_CODE_ALREADY_EXISTS",
+              "RFID_UID_ALREADY_ASSIGNED",
               "STUDENT_HAS_HISTORY",
               "CLASS_PLAN_CHANGED",
               "CLASS_HAS_REMAINING_SLOTS",
@@ -53,11 +55,13 @@ class StaffApiErrors {
           error(HttpStatus.CONFLICT, code);
       case "INVALID_TEACHER_PASSWORD",
               "INVALID_CLASS",
+              "INVALID_RFID_UID",
               "INVALID_STUDENT",
               "INVALID_STATUS_TIME",
               "INVALID_ATTENDANCE_DATE",
               "INVALID_ATTENDANCE_STATUS" ->
           error(HttpStatus.BAD_REQUEST, code);
+      case "RFID_UID_UPDATE_FAILED" -> error(HttpStatus.INTERNAL_SERVER_ERROR, code);
       default -> throw exception;
     };
   }

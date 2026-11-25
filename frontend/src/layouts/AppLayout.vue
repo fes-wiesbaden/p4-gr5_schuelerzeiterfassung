@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import Button from 'primevue/button'
 
@@ -12,6 +12,7 @@ const route = useRoute()
 
 const sidebarOpen = ref(false)
 const menuButton = ref<HTMLButtonElement>()
+const pageContent = ref<HTMLElement>()
 
 const roleLabel = computed(() => {
   switch (auth.user?.role) {
@@ -26,8 +27,11 @@ const roleLabel = computed(() => {
 
 watch(
   () => route.fullPath,
-  () => {
+  async () => {
+    if (!sidebarOpen.value) return
     sidebarOpen.value = false
+    await nextTick()
+    pageContent.value?.focus()
   }
 )
 
@@ -112,7 +116,7 @@ function handleSidebarKeydown(event: KeyboardEvent) {
         </nav>
       </aside>
 
-      <main class="app-content">
+      <main ref="pageContent" class="app-content" tabindex="-1">
         <p v-if="auth.errorMessage" class="app-content__error" role="alert">
           {{ auth.errorMessage }}
         </p>
