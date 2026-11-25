@@ -2,6 +2,7 @@ package de.feswiesbaden.attendance;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.tuple;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.when;
 
@@ -461,11 +462,7 @@ class ClassAccountsIntegrationTest {
   @Test
   void aLaterResetFirstBooksTheNewPlannedDayAndThenResetsItsMinutes() {
     classes.resetAccounts(1L, 1L);
-    jdbc.update(
-        "INSERT INTO block_assignment (id, block_plan_id, starts_on, ends_on)"
-            + " VALUES (3, 1, '2026-09-28', '2026-10-02')");
-    jdbc.update(
-        "INSERT INTO class_block_assignment (school_class_id, block_assignment_id) VALUES (1, 3)");
+    assignFollowingBlock();
     setTime("2026-09-28T08:45:00Z");
     assertThat(classes.resetAccounts(1L, 1L)).isEqualTo(6);
     assertThat(resetCount()).isEqualTo(12);
@@ -475,6 +472,55 @@ class ClassAccountsIntegrationTest {
                     + " WHERE student_id = 1 AND event_type = 'ACCOUNT_RESET' ORDER BY id DESC LIMIT 1",
                 Integer.class))
         .isEqualTo(-180);
+  }
+
+  /**
+   * Prüft eine separate Tagesbuchung zwischen zwei Resets. Der zweite Reset bucht die zwischen den
+   * Resets angefallenen Minuten aus, ohne den bereits abgeschlossenen Tag erneut zu buchen
+   */
+  @Test
+  void aSecondResetRemovesMinutesBookedSeparatelyBetweenTheResets() {
+    assertThat(classes.resetAccounts(1L, 1L)).isEqualTo(6);
+    assignFollowingBlock();
+    setTime("2026-09-28T08:45:00Z");
+    assertThat(attendance.closeDueDays()).isEqualTo(6);
+    assertThat(studentBalance()).isEqualTo(180);
+    var closes =
+        jdbc.queryForObject(
+            "SELECT COUNT(*) FROM attendance_audit WHERE event_type = 'DAILY_CLOSE'",
+            Integer.class);
+    assertThat(classes.resetAccounts(1L, 1L)).isEqualTo(6);
+    assertThat(
+            jdbc.queryForObject(
+                "SELECT COUNT(*) FROM attendance_audit WHERE event_type = 'DAILY_CLOSE'",
+                Integer.class))
+        .isEqualTo(closes);
+    assertThat(
+            jdbc.queryForList(
+                "SELECT occurred_at, unexcused_minutes_delta, deletion_date_id, attendance_id"
+                    + " FROM attendance_audit WHERE student_id = 1 AND event_type = 'ACCOUNT_RESET'"
+                    + " ORDER BY id"))
+        .extracting("occurred_at", "unexcused_minutes_delta", "deletion_date_id", "attendance_id")
+        .containsExactly(
+            tuple(LocalDateTime.of(2026, 9, 14, 8, 45), -180, 1L, null),
+            tuple(LocalDateTime.of(2026, 9, 28, 8, 45), -180, 1L, null));
+    assertThat(studentBalance()).isZero();
+  }
+
+  /** Weist Klasse 1 einen weiteren Block ab dem 28.09.2026 im aktuellen Plan zu */
+  private void assignFollowingBlock() {
+    jdbc.update(
+        "INSERT INTO block_assignment (id, block_plan_id, starts_on, ends_on)"
+            + " VALUES (3, 1, '2026-09-28', '2026-10-02')");
+    jdbc.update(
+        "INSERT INTO class_block_assignment (school_class_id, block_assignment_id) VALUES (1, 3)");
+  }
+
+  /** Liefert die Summe beider Fehlminutenkonten von Schüler 1 */
+  private int studentBalance() {
+    return jdbc.queryForObject(
+        "SELECT unexcused_minutes_account + excused_minutes_account FROM student WHERE id = 1",
+        Integer.class);
   }
 
   /**
