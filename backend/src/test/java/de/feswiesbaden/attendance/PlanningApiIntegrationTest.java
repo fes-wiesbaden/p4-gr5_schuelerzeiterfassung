@@ -190,6 +190,9 @@ class PlanningApiIntegrationTest {
     write(blocks, admin, "{\"startsOn\":\"2027-07-12\",\"endsOn\":\"2027-07-19\"}")
         .andExpect(status().isBadRequest())
         .andExpect(jsonPath("$.code").value("INVALID_BLOCK_ASSIGNMENT"));
+    write(blocks, admin, "{\"startsOn\":\"2026-12-28\",\"endsOn\":\"2027-01-08\"}")
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.code").value("INVALID_BLOCK_ASSIGNMENT"));
     assertThat(
             jdbc.queryForObject(
                 "SELECT COUNT(*) FROM block_assignment WHERE block_plan_id = ?",
