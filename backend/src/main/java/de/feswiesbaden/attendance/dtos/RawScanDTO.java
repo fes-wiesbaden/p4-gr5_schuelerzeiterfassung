@@ -24,4 +24,10 @@ public record RawScanDTO(
       throw new IllegalArgumentException("SCAN_REJECTED");
     }
   }
+
+  /** Hält die UID aus technischen Logs heraus und erhält die Scan-ID zur Zuordnung */
+  @Override
+  public String toString() {
+    return "RawScanDTO[scanId=" + scanId + "]";
+  }
 }

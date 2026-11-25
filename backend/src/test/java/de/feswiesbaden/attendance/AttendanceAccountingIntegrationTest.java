@@ -3,7 +3,7 @@ package de.feswiesbaden.attendance;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.hamcrest.Matchers.contains;
-import static org.hamcrest.Matchers.is;
+import static org.hamcrest.Matchers.hasItem;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
@@ -39,6 +39,7 @@ import java.util.concurrent.TimeoutException;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.EnumSource;
@@ -46,6 +47,8 @@ import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.system.CapturedOutput;
+import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
 import org.springframework.dao.DataAccessException;
 import org.springframework.http.MediaType;
@@ -71,6 +74,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 @AutoConfigureMockMvc
 @Testcontainers
 @Sql("/fixtures/attendance.sql")
+@ExtendWith(OutputCaptureExtension.class)
 class AttendanceAccountingIntegrationTest {
   private static final LocalDate MONDAY = LocalDate.of(2026, 9, 14);
 
@@ -272,7 +276,8 @@ class AttendanceAccountingIntegrationTest {
 
   /** Prüft Kartenzuordnung über HTTP mit CSRF, Rollenprüfung und neutralen Antworten */
   @Test
-  void managesRfidCardsThroughAdminHttp() throws Exception {
+  @ExtendWith(RfidLoggingExtension.class)
+  void managesRfidCardsThroughAdminHttp(CapturedOutput output) throws Exception {
     var admin = staffSession("test.admin");
     var teacher = staffSession("test.teacher.a");
     String card = "/api/students/1/rfid-uid";
@@ -300,11 +305,15 @@ class AttendanceAccountingIntegrationTest {
         .andExpect(content().string(""));
     assertThat(jdbc.queryForObject("SELECT rfid_uid FROM student WHERE id = 1", String.class))
         .isNull();
+    assertThat(output.getAll())
+        .contains("to [RfidUidRequest]", "Setting SQL statement parameter value")
+        .doesNotContain("04A3B2C1");
   }
 
   /** Prüft den klassenübergreifenden UID-Lesezugriff und die Begrenzung auf den Leseendpunkt */
   @Test
-  void teacherReadsRfidAssignmentsAcrossClassBoundaries() throws Exception {
+  @ExtendWith(RfidLoggingExtension.class)
+  void teacherReadsRfidAssignmentsAcrossClassBoundaries(CapturedOutput output) throws Exception {
     String endpoint = "/api/students/rfid-uids";
     var teacher = staffSession("test.teacher.a");
     jdbc.update("UPDATE student SET rfid_uid = NULL WHERE id = 8");
@@ -320,13 +329,16 @@ class AttendanceAccountingIntegrationTest {
         .andExpect(header().string("Cache-Control", "no-store"))
         .andExpect(jsonPath("$.length()").value(7))
         .andExpect(
-            jsonPath("$[6]")
+            jsonPath("$")
                 .value(
-                    is(
+                    hasItem(
                         Map.of(
                             "studentName", "Raum-B, Test",
                             "classCode", "26TEST-B",
                             "rfidUid", "TEST-UID-007"))));
+    assertThat(output.getAll())
+        .contains("Writing [[RfidAssignment")
+        .doesNotContain("TEST-UID-007", "TEST-UID-005");
   }
 
   /** Prüft Administratorrechte, Planbindung, wiederholte Resets und erhaltene Tageswerte */
