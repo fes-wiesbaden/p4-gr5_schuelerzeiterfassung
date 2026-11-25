@@ -558,7 +558,6 @@ class AttendanceAccountingIntegrationTest {
     jdbc.update(
         "INSERT INTO timetable_slot (id, timetable_id, room_id, weekday, start_time, end_time)"
             + " VALUES (99, 1, 2, 'MONTAG', '08:00:00', '08:45:00')");
-    setTime("2026-09-14T07:20:00Z");
     var rawScans = jdbc.queryForObject("SELECT COUNT(*) FROM raw_scan", Integer.class);
     assertThat(scan(1, "2026-09-14T07:15:00Z")).isFalse();
     assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM raw_scan", Integer.class))
