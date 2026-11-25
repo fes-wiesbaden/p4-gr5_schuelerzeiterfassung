@@ -9,6 +9,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import de.feswiesbaden.attendance.login.StaffPrincipal;
 import jakarta.servlet.http.Cookie;
 import java.time.Clock;
 import java.time.Instant;
@@ -290,7 +291,14 @@ class PlanningApiIntegrationTest {
   private MockHttpSession staffSession(String username) {
     var context = SecurityContextHolder.createEmptyContext();
     context.setAuthentication(
-        UsernamePasswordAuthenticationToken.authenticated(username, null, List.of()));
+        UsernamePasswordAuthenticationToken.authenticated(
+            new StaffPrincipal(
+                jdbc.queryForObject("SELECT id FROM staff WHERE username=?", Long.class, username),
+                username,
+                "unused",
+                List.of()),
+            null,
+            List.of()));
     var session = new MockHttpSession();
     session.setAttribute(HttpSessionSecurityContextRepository.SPRING_SECURITY_CONTEXT_KEY, context);
     return session;

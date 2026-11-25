@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import de.feswiesbaden.attendance.enums.Weekday;
+import de.feswiesbaden.attendance.login.StaffPrincipal;
 import de.feswiesbaden.attendance.service.BlockPlanService;
 import de.feswiesbaden.attendance.service.SchoolClassService;
 import de.feswiesbaden.attendance.service.TimetableService;
@@ -155,6 +156,14 @@ class Issue40IntegrationTest {
   private void signIn(String username) {
     SecurityContextHolder.getContext()
         .setAuthentication(
-            UsernamePasswordAuthenticationToken.authenticated(username, null, List.of()));
+            UsernamePasswordAuthenticationToken.authenticated(
+                new StaffPrincipal(
+                    jdbc.queryForObject(
+                        "SELECT id FROM staff WHERE username=?", Long.class, username),
+                    username,
+                    "unused",
+                    List.of()),
+                null,
+                List.of()));
   }
 }
