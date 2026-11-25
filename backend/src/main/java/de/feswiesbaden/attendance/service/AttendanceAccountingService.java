@@ -86,7 +86,9 @@ public class AttendanceAccountingService {
 
   /**
    * Prüft die Terminalzuordnung und speichert Rohscan und Fachänderungen atomar. Neue Scans buchen
-   * nur im zugeordneten Raum und Block aus ABWESEND oder BETRIEBLICH_ENTSCHULDIGT
+   * nur im zugeordneten Raum und Block aus ABWESEND oder BETRIEBLICH_ENTSCHULDIGT. Überlappende
+   * Slots am Tag des Scans, ein durch eine andere Klasse zur selben Zeit belegter Raum oder eine
+   * Blockzuordnung zu einem fremden Plan gelten als Datenproblem und lehnen den Scan neutral ab
    */
   @Transactional
   public ScanResult recordScan(String verifiedSubject, RawScanDTO scan, Instant receivedAt) {
@@ -107,14 +109,31 @@ public class AttendanceAccountingService {
       return ScanResult.REJECTED;
     }
     var berlinTime = capturedAt.atZone(BERLIN).toLocalTime();
-    var day = lockDay(studentId, berlinDate(at));
-    if (day == null
-        || day.slots().stream()
-            .noneMatch(
-                slot ->
-                    slot.roomId() == roomId
-                        && !berlinTime.isBefore(slot.startsAt())
-                        && berlinTime.isBefore(slot.endsAt()))) {
+    Day day;
+    try {
+      day = lockDay(studentId, berlinDate(at));
+    } catch (InvalidClassBlockAssignmentException dataProblem) {
+      // Ein Datenproblem, das der Scan nicht lösen kann. Der Rohscan bleibt gespeichert und das
+      // Terminal wiederholt ihn nicht. Technische Fehler rollen dagegen zurück, damit das Terminal
+      // den Scan erneut senden kann
+      return ScanResult.REJECTED;
+    }
+    if (day == null) {
+      return ScanResult.REJECTED;
+    }
+    var slot =
+        day.slots().stream()
+            .filter(
+                candidate ->
+                    candidate.roomId() == roomId
+                        && !berlinTime.isBefore(candidate.startsAt())
+                        && berlinTime.isBefore(candidate.endsAt()))
+            .findFirst()
+            .orElse(null);
+    if (slot == null
+        || hasOverlappingSlots(day.slots())
+        || accounting.roomDoubleBooked(
+            day.plan().classId(), roomId, slot.startsAt(), slot.endsAt(), day.date())) {
       return ScanResult.REJECTED;
     }
 
@@ -441,7 +460,7 @@ public class AttendanceAccountingService {
   /** Verlangt, dass alle zugeordneten Blöcke zum aktuellen Klassenplan gehören */
   private static void requirePlanPeriods(ClassPlan plan, List<Period> periods) {
     if (periods.stream().anyMatch(period -> !period.planId().equals(plan.planId()))) {
-      throw new IllegalStateException("INVALID_CLASS_BLOCK_ASSIGNMENT");
+      throw new InvalidClassBlockAssignmentException();
     }
   }
 
@@ -452,6 +471,19 @@ public class AttendanceAccountingService {
       return List.of();
     }
     return slots.stream().filter(slot -> slot.weekday() == date.getDayOfWeek()).toList();
+  }
+
+  /**
+   * Prüft, ob sich Slots des Tages überschneiden. Erwartet nach Beginn sortierte Slots, daher
+   * genügt der Vergleich mit dem Vorgänger. Direkt anschließende Slots überschneiden sich nicht
+   */
+  private static boolean hasOverlappingSlots(List<Slot> daySlots) {
+    for (int i = 1; i < daySlots.size(); i++) {
+      if (daySlots.get(i).startsAt().isBefore(daySlots.get(i - 1).endsAt())) {
+        return true;
+      }
+    }
+    return false;
   }
 
   /**

@@ -167,6 +167,7 @@ public class SecurityConfig {
                         "/api/classes",
                         "/api/classes/{classId}/students",
                         "/api/classes/{classId}/attendance",
+                        "/api/students/rfid-uids",
                         "/api/students/{studentId}")
                     .authenticated()
                     .requestMatchers(
@@ -187,9 +188,15 @@ public class SecurityConfig {
                         "/api/planning/classes/{classId}/blocks",
                         "/api/planning/classes/{classId}/block-plan-change")
                     .authenticated()
-                    .requestMatchers(HttpMethod.PUT, "/api/students/{studentId}")
+                    .requestMatchers(
+                        HttpMethod.PUT,
+                        "/api/students/{studentId}",
+                        "/api/students/{studentId}/rfid-uid")
                     .authenticated()
-                    .requestMatchers(HttpMethod.DELETE, "/api/students/{studentId}")
+                    .requestMatchers(
+                        HttpMethod.DELETE,
+                        "/api/students/{studentId}",
+                        "/api/students/{studentId}/rfid-uid")
                     .authenticated()
                     .anyRequest()
                     .denyAll())
