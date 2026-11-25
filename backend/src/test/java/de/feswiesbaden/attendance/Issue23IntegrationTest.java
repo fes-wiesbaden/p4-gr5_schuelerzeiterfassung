@@ -4,12 +4,14 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import de.feswiesbaden.attendance.login.StaffPrincipal;
 import de.feswiesbaden.attendance.service.BlockPlanService;
 import de.feswiesbaden.attendance.service.RfidUidService;
 import de.feswiesbaden.attendance.service.SchoolClassService;
 import de.feswiesbaden.attendance.service.StudentService;
 import java.time.LocalDate;
 import java.util.List;
+import java.util.Map.Entry;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -97,7 +99,15 @@ class Issue23IntegrationTest {
   private void signIn(String username) {
     SecurityContextHolder.getContext()
         .setAuthentication(
-            UsernamePasswordAuthenticationToken.authenticated(username, null, List.of()));
+            UsernamePasswordAuthenticationToken.authenticated(
+                new StaffPrincipal(
+                    jdbc.queryForObject(
+                        "SELECT id FROM staff WHERE username=?", Long.class, username),
+                    username,
+                    "unused",
+                    List.of()),
+                null,
+                List.of()));
   }
 
   /** Prüft die Schülerverwaltung durch die Klassenleitung ohne zusätzliche Unterrichtszuordnung */
@@ -152,7 +162,9 @@ class Issue23IntegrationTest {
     SecurityContextHolder.getContext()
         .setAuthentication(
             UsernamePasswordAuthenticationToken.authenticated(
-                "test.teacher.b", null, List.of(new SimpleGrantedAuthority("ROLE_ADMINISTRATOR"))));
+                new StaffPrincipal(2L, "test.teacher.b", "unused", List.of()),
+                null,
+                List.of(new SimpleGrantedAuthority("ROLE_ADMINISTRATOR"))));
     assertThatThrownBy(() -> uids.remove(1L)).isInstanceOf(AccessDeniedException.class);
     assertThatThrownBy(
             () -> plans.create("Verboten", LocalDate.of(2027, 1, 1), LocalDate.of(2027, 12, 31)))
@@ -217,7 +229,13 @@ class Issue23IntegrationTest {
           SecurityContextHolder.getContext()
               .setAuthentication(
                   UsernamePasswordAuthenticationToken.unauthenticated("test.admin", null));
-      case "unknown" -> signIn("test.unknown");
+      case "unknown" ->
+          SecurityContextHolder.getContext()
+              .setAuthentication(
+                  UsernamePasswordAuthenticationToken.authenticated(
+                      new StaffPrincipal(-1L, "test.unknown", "unused", List.of()),
+                      null,
+                      List.of()));
       default -> throw new AssertionError(principal);
     }
     assertThatThrownBy(classes::list).isInstanceOf(AccessDeniedException.class);
@@ -352,7 +370,7 @@ class Issue23IntegrationTest {
     signIn("test.teacher.a");
     String view = mapper.writeValueAsString(students.get(1L));
     assertThat(mapper.readTree(view).properties())
-        .extracting(java.util.Map.Entry::getKey)
+        .extracting(Entry::getKey)
         .containsExactlyInAnyOrder(
             "id",
             "firstName",

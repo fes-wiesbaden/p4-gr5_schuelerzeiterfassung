@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.when;
 
+import de.feswiesbaden.attendance.login.StaffPrincipal;
 import de.feswiesbaden.attendance.service.RetentionService;
 import de.feswiesbaden.attendance.service.StudentService;
 import java.time.Clock;
@@ -114,6 +115,14 @@ class Issue25IntegrationTest {
   private void signIn(String username) {
     SecurityContextHolder.getContext()
         .setAuthentication(
-            UsernamePasswordAuthenticationToken.authenticated(username, null, List.of()));
+            UsernamePasswordAuthenticationToken.authenticated(
+                new StaffPrincipal(
+                    jdbc.queryForObject(
+                        "SELECT id FROM staff WHERE username=?", Long.class, username),
+                    username,
+                    "unused",
+                    List.of()),
+                null,
+                List.of()));
   }
 }

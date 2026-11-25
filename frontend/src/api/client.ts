@@ -57,3 +57,38 @@ export function deleteResource(url: string): Promise<Response> {
 export function getJson(url: string): Promise<Response> {
   return request(url, {})
 }
+
+export async function changeData(
+  url: string,
+  method: 'POST' | 'PUT' | 'DELETE',
+  body?: unknown
+) {
+  const response = await request(url, {
+    method,
+    headers: {
+      'Content-Type': 'application/json',
+      'X-XSRF-TOKEN': readCsrfToken()
+    },
+    body: JSON.stringify(body)
+  })
+  if (response.status === 409) {
+    if (method === 'DELETE') {
+      throw new Error(
+        'Löschen nicht möglich (409). Der Eintrag wird noch verwendet, etwa in der Anwesenheitshistorie.'
+      )
+    }
+    throw new Error(
+      'Speichern nicht möglich (409). Bitte prüfe, ob der Eintrag bereits vorhanden ist.'
+    )
+  }
+  if (!response.ok)
+    throw new Error(
+      'Änderung fehlgeschlagen. Bitte Eingaben und Berechtigung prüfen.'
+    )
+}
+
+export async function loadData<T>(url: string): Promise<T> {
+  const response = await getJson(url)
+  if (!response.ok) throw new Error('Daten konnten nicht geladen werden.')
+  return response.json()
+}

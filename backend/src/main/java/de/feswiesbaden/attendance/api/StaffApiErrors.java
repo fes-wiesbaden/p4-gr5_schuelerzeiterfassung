@@ -12,7 +12,7 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 
 /** Übersetzt bekannte Fehler der Mitarbeiter-API in HTTP-Status und feste Fehlercodes */
-@RestControllerAdvice(assignableTypes = StaffController.class)
+@RestControllerAdvice(assignableTypes = {StaffController.class, MasterDataController.class})
 class StaffApiErrors {
   /** Meldet ungültige Anfragen ohne Eingabewerte in der Antwort */
   @ExceptionHandler({
@@ -36,7 +36,7 @@ class StaffApiErrors {
     // einem Enum verwenden
     String code = String.valueOf(exception.getMessage());
     return switch (code) {
-      case "CLASS_ACCESS_DENIED", "CLASS_NOT_FOUND", "STUDENT_NOT_FOUND" ->
+      case "MASTER_DATA_NOT_FOUND", "CLASS_ACCESS_DENIED", "CLASS_NOT_FOUND", "STUDENT_NOT_FOUND" ->
           error(HttpStatus.NOT_FOUND, "NOT_FOUND");
       case "ADMINISTRATOR_REQUIRED",
               "TEACHER_REQUIRED",
@@ -44,7 +44,8 @@ class StaffApiErrors {
               "CLASS_TEACHER_ASSIGNMENT_DENIED",
               "STAFF_REQUIRED" ->
           error(HttpStatus.FORBIDDEN, code);
-      case "CLASS_CODE_ALREADY_EXISTS",
+      case "CLASS_HAS_STUDENTS",
+              "CLASS_CODE_ALREADY_EXISTS",
               "RFID_UID_ALREADY_ASSIGNED",
               "STUDENT_HAS_HISTORY",
               "CLASS_PLAN_CHANGED",
@@ -52,7 +53,8 @@ class StaffApiErrors {
               "CLASS_NOT_FULLY_ACCOUNTED",
               "ATTENDANCE_DAY_LOCKED_OR_UNPLANNED" ->
           error(HttpStatus.CONFLICT, code);
-      case "INVALID_CLASS",
+      case "INVALID_TEACHER_PASSWORD",
+              "INVALID_CLASS",
               "INVALID_RFID_UID",
               "INVALID_STUDENT",
               "INVALID_STATUS_TIME",

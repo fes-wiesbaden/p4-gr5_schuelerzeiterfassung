@@ -1,6 +1,6 @@
 package de.feswiesbaden.attendance.login;
 
-import java.security.Principal;
+import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -15,7 +15,7 @@ public class LoginController {
 
   /** Liefert Name und Rolle des angemeldeten Nutzers */
   @GetMapping("/api/me")
-  public StaffLoginService.AuthUser currentUser(Principal principal) {
-    return staff.currentUser(principal.getName());
+  public StaffLoginService.AuthUser currentUser(Authentication principal) {
+    return staff.currentUser(principal);
   }
 }

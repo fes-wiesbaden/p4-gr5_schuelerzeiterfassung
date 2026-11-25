@@ -97,7 +97,7 @@ async function handleSubmit() {
   place-items: center;
   min-height: 100vh;
   padding: 24px;
-  background: #f5f6f8;
+  background: var(--paper);
 }
 
 .login__card {
@@ -106,16 +106,16 @@ async function handleSubmit() {
   gap: 16px;
   width: 100%;
   max-width: 380px;
-  padding: 32px;
+  padding: clamp(20px, 5vw, 32px);
   background: #ffffff;
   border: 1px solid #e2e5ea;
-  border-radius: 10px;
+  border-radius: 16px;
 }
 
 .login__title {
   margin: 0;
   font-size: 1.15rem;
-  color: #1e3a5c;
+  color: var(--ink);
 }
 
 .login__subtitle {
@@ -147,11 +147,15 @@ async function handleSubmit() {
 }
 
 .login__submit {
+  background: var(--accent);
+  border-color: var(--accent);
   margin-top: 4px;
 }
 
 .login__field :deep(input) {
   width: 100%;
+  min-height: 44px;
+  border-radius: 10px;
 }
 
 .login__password {

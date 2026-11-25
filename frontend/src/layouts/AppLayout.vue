@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import Button from 'primevue/button'
 
@@ -11,6 +11,8 @@ const router = useRouter()
 const route = useRoute()
 
 const sidebarOpen = ref(false)
+const menuButton = ref<HTMLButtonElement>()
+const pageContent = ref<HTMLElement>()
 
 const roleLabel = computed(() => {
   switch (auth.user?.role) {
@@ -25,8 +27,11 @@ const roleLabel = computed(() => {
 
 watch(
   () => route.fullPath,
-  () => {
+  async () => {
+    if (!sidebarOpen.value) return
     sidebarOpen.value = false
+    await nextTick()
+    pageContent.value?.focus()
   }
 )
 
@@ -39,6 +44,7 @@ async function handleLogout() {
 function handleSidebarKeydown(event: KeyboardEvent) {
   if (event.key === 'Escape') {
     sidebarOpen.value = false
+    menuButton.value?.focus()
   }
 }
 </script>
@@ -48,9 +54,12 @@ function handleSidebarKeydown(event: KeyboardEvent) {
     <header class="app-header">
       <div class="app-header__start">
         <button
+          ref="menuButton"
           type="button"
           class="app-header__menu-toggle"
-          aria-label="Navigation öffnen"
+          :aria-label="
+            sidebarOpen ? 'Navigation schließen' : 'Navigation öffnen'
+          "
           :aria-expanded="sidebarOpen"
           aria-controls="app-sidebar"
           @click="sidebarOpen = !sidebarOpen"
@@ -75,12 +84,6 @@ function handleSidebarKeydown(event: KeyboardEvent) {
     </header>
 
     <div class="app-body">
-      <div
-        v-if="sidebarOpen"
-        class="app-sidebar__backdrop"
-        @click="sidebarOpen = false"
-      />
-
       <aside
         id="app-sidebar"
         class="app-sidebar"
@@ -113,7 +116,7 @@ function handleSidebarKeydown(event: KeyboardEvent) {
         </nav>
       </aside>
 
-      <main class="app-content">
+      <main ref="pageContent" class="app-content" tabindex="-1">
         <p v-if="auth.errorMessage" class="app-content__error" role="alert">
           {{ auth.errorMessage }}
         </p>
@@ -136,9 +139,10 @@ function handleSidebarKeydown(event: KeyboardEvent) {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  height: var(--app-header-height);
+  min-height: var(--app-header-height);
   padding: 0 24px;
-  background: #ffffff;
+  background: #171b21;
+  color: white;
   border-bottom: 1px solid #e2e5ea;
 }
 
@@ -146,26 +150,28 @@ function handleSidebarKeydown(event: KeyboardEvent) {
   display: flex;
   align-items: center;
   gap: 12px;
+  min-width: 0;
 }
 
 .app-header__menu-toggle {
   display: none;
   align-items: center;
   justify-content: center;
-  width: 36px;
-  height: 36px;
+  width: 44px;
+  height: 44px;
   border: 1px solid #d7dce3;
-  border-radius: 6px;
+  border-radius: 10px;
   background: #ffffff;
-  color: #1e3a5c;
+  color: var(--ink);
   font-size: 1rem;
   cursor: pointer;
 }
 
 .app-header__title {
+  overflow-wrap: anywhere;
   font-weight: 700;
   font-size: 1.05rem;
-  color: #1e3a5c;
+  color: white;
 }
 
 .app-header__user {
@@ -174,13 +180,23 @@ function handleSidebarKeydown(event: KeyboardEvent) {
   gap: 16px;
 }
 
+.app-header__user :deep(button) {
+  min-height: 44px;
+  border-radius: 10px;
+  color: white;
+  border-color: #737f91;
+  background: transparent;
+}
+.app-header__user :deep(button:hover) {
+  background: #353d49;
+}
 .app-header__user-info {
   font-size: 0.9rem;
-  color: #2b3648;
+  color: white;
 }
 
 .app-header__user-role {
-  color: #6b7688;
+  color: #c2cad5;
 }
 
 .app-body {
@@ -190,12 +206,9 @@ function handleSidebarKeydown(event: KeyboardEvent) {
 }
 
 .app-sidebar {
-  background: #1e3a5c;
-  padding: 16px 0;
-}
-
-.app-sidebar__backdrop {
-  display: none;
+  background: #252a32;
+  border-right: 1px solid var(--line);
+  padding: 20px 10px;
 }
 
 .app-nav {
@@ -208,28 +221,34 @@ function handleSidebarKeydown(event: KeyboardEvent) {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 11px 20px;
-  color: #c9d4e3;
+  padding: 12px;
+  min-height: 44px;
+  border-radius: 10px;
+  margin-bottom: 4px;
+  color: #e0e4ea;
   text-decoration: none;
   font-size: 0.9rem;
-  border-left: 3px solid transparent;
 }
 
 .app-nav__link:hover {
-  background: rgba(255, 255, 255, 0.06);
-  color: #ffffff;
+  background: #383f49;
+  color: white;
 }
 
-.app-nav__link:focus-visible,
-.app-header__menu-toggle:focus-visible {
-  outline: 2px solid #4f8ef7;
+.app-nav__link:focus-visible {
+  outline: 2px solid #ffffff;
   outline-offset: -2px;
 }
 
+.app-header__menu-toggle:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -3px;
+}
+
 .app-nav__link--active {
-  background: rgba(255, 255, 255, 0.1);
-  border-left-color: #4f8ef7;
-  color: #ffffff;
+  background: var(--accent);
+
+  color: white;
   font-weight: 600;
 }
 
@@ -240,12 +259,12 @@ function handleSidebarKeydown(event: KeyboardEvent) {
   font-weight: 700;
   letter-spacing: 0.06em;
   text-transform: uppercase;
-  color: #7c8aa3;
+  color: #bbc2cc;
 }
 
 .app-content {
-  padding: 32px;
-  background: #f5f6f8;
+  padding: clamp(1rem, 4vw, 3.5rem);
+  background: var(--paper);
   min-width: 0;
 }
 
@@ -253,64 +272,72 @@ function handleSidebarKeydown(event: KeyboardEvent) {
   margin: 0 0 16px;
   padding: 10px 12px;
   border: 1px solid #f0b4b4;
-  border-radius: 6px;
+  border-radius: 10px;
   background: #fdf2f2;
   color: #a12525;
 }
 
 @media (max-width: 960px) {
-  .app-header__menu-toggle {
-    display: inline-flex;
-  }
-
-  .app-body {
-    grid-template-columns: 1fr;
-  }
-
-  .app-sidebar {
-    position: fixed;
-    inset: var(--app-header-height) 0 0 0;
-    width: 260px;
-    height: calc(100vh - var(--app-header-height));
-    transform: translateX(-100%);
-    visibility: hidden;
-    transition:
-      transform 0.2s ease,
-      visibility 0s linear 0.2s;
-    z-index: 20;
-    overflow-y: auto;
-  }
-
-  .app-sidebar--open {
-    transform: translateX(0);
-    visibility: visible;
-    transition: transform 0.2s ease;
-  }
-
-  .app-sidebar__backdrop {
-    display: block;
-    position: fixed;
-    inset: var(--app-header-height) 0 0 0;
-    background: rgba(15, 23, 42, 0.4);
-    z-index: 10;
-  }
-}
-
-@media (max-width: 600px) {
-  .app-shell {
-    --app-header-height: 112px;
-  }
-
   .app-header {
     flex-wrap: wrap;
-    gap: 8px;
-    padding: 12px;
+    gap: 0.75rem;
+    padding: 12px 16px;
   }
-
+  .app-header__menu-toggle {
+    display: inline-flex;
+    flex-shrink: 0;
+  }
+  .app-header__user {
+    margin-left: auto;
+  }
+  .app-body {
+    grid-template-columns: minmax(0, 1fr);
+    align-content: start;
+  }
+  .app-sidebar {
+    display: none;
+    border: 0;
+    padding: 12px 16px;
+  }
+  .app-sidebar--open {
+    display: block;
+  }
+  .app-nav {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 4px 12px;
+  }
+  .app-nav__link {
+    height: 100%;
+  }
+  .app-content {
+    padding: 24px;
+  }
+}
+@media (max-width: 600px) {
+  .app-header__start {
+    width: 100%;
+  }
+  .app-header__title {
+    font-size: 1rem;
+  }
   .app-header__user {
     width: 100%;
     justify-content: space-between;
-    gap: 8px;
+    gap: 12px;
+  }
+  .app-header__user-info {
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+  .app-header__user-role {
+    display: block;
+  }
+  .app-content {
+    padding: 24px 16px;
+  }
+  .app-nav {
+    grid-template-columns: minmax(0, 1fr);
   }
 }
 </style>

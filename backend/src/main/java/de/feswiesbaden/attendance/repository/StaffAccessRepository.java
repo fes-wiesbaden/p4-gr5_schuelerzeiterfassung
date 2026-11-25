@@ -25,6 +25,17 @@ public class StaffAccessRepository {
         .findFirst();
   }
 
+  public Optional<StaffIdentity> findById(Long id) {
+    return jdbc
+        .query(
+            "SELECT id, role FROM staff WHERE id = ?",
+            (row, index) ->
+                new StaffIdentity(row.getLong("id"), "ADMINISTRATOR".equals(row.getString("role"))),
+            id)
+        .stream()
+        .findFirst();
+  }
+
   /** Enthält die Mitarbeiter-ID und die aktuelle Administratorberechtigung */
   public record StaffIdentity(Long id, boolean administrator) {}
 }

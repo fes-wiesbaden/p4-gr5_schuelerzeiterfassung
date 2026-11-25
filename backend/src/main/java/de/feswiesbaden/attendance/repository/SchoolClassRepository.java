@@ -3,6 +3,7 @@ package de.feswiesbaden.attendance.repository;
 import java.sql.Statement;
 import java.time.LocalDate;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.support.GeneratedKeyHolder;
@@ -177,4 +178,34 @@ public class SchoolClassRepository {
   /** Enthält Klassenkennung, Klassenlehrkraft und aktuelle Planverweise */
   public record ClassData(
       Long id, String classCode, Long classTeacherId, Long blockPlanId, Long timetableId) {}
+
+  public int updateClass(Long id, String code, Long teacher) {
+    return jdbc.update(
+        "UPDATE school_class SET class_code=?,class_teacher_id=? WHERE id=? "
+            + "AND EXISTS (SELECT id FROM staff WHERE id=? AND role='LEHRKRAFT')",
+        code.strip(),
+        teacher,
+        id,
+        teacher);
+  }
+
+  public Map<String, Object> options() {
+    return Map.of(
+        "blockPlans",
+        jdbc.queryForList("SELECT id,name FROM block_plan ORDER BY name"),
+        "timetables",
+        jdbc.queryForList("SELECT id,name FROM timetable ORDER BY name"));
+  }
+
+  public boolean hasStudents(Long id) {
+    return jdbc.queryForObject(
+            "SELECT COUNT(*) FROM student WHERE school_class_id=?", Integer.class, id)
+        > 0;
+  }
+
+  public int deleteEmptyClass(Long id) {
+    jdbc.update("DELETE FROM teacher_class WHERE school_class_id=?", id);
+    jdbc.update("DELETE FROM class_block_assignment WHERE school_class_id=?", id);
+    return jdbc.update("DELETE FROM school_class WHERE id=?", id);
+  }
 }

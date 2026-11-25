@@ -2,13 +2,14 @@ package de.feswiesbaden.attendance.login;
 
 import de.feswiesbaden.attendance.entities.Staff;
 import de.feswiesbaden.attendance.enums.Role;
+import org.springframework.security.core.Authentication;
 import org.springframework.security.core.userdetails.User;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.security.core.userdetails.UserDetailsService;
 import org.springframework.security.core.userdetails.UsernameNotFoundException;
 import org.springframework.stereotype.Service;
 
-/** Lädt Mitarbeiterkonten für die Anmeldung und die Nutzeranzeige */
+/** Lädt Mitarbeiterkonten für Anmeldung, Sitzungsprüfung und Nutzeranzeige */
 @Service
 public class StaffLoginService implements UserDetailsService {
   private final StaffRepository staff;
@@ -21,15 +22,27 @@ public class StaffLoginService implements UserDetailsService {
   @Override
   public UserDetails loadUserByUsername(String username) {
     Staff account = find(username);
-    return User.withUsername(account.getUsername())
-        .password(account.getPasswordHash())
-        .roles(account.getRole().name())
-        .build();
+    var user =
+        User.withUsername(account.getUsername())
+            .password(account.getPasswordHash())
+            .roles(account.getRole().name())
+            .build();
+    return new StaffPrincipal(
+        account.getId(), user.getUsername(), user.getPassword(), user.getAuthorities());
+  }
+
+  /** Prüft, ob das an eine Sitzung gebundene Konto noch existiert */
+  boolean accountExists(long id) {
+    return staff.existsById(id);
   }
 
   /** Liefert Vor- und Nachnamen sowie die Frontend-Rolle admin oder lehrkraft */
-  public AuthUser currentUser(String username) {
-    Staff account = find(username);
+  public AuthUser currentUser(Authentication authentication) {
+    StaffPrincipal principal = (StaffPrincipal) authentication.getPrincipal();
+    Staff account =
+        staff
+            .findById(principal.id())
+            .orElseThrow(() -> new UsernameNotFoundException("LOGIN_FAILED"));
     return new AuthUser(
         account.getFirstName() + " " + account.getLastName(),
         account.getRole() == Role.ADMINISTRATOR ? "admin" : "lehrkraft");
