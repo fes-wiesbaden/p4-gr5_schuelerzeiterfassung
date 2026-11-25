@@ -70,7 +70,7 @@ const ERROR_MESSAGES: Record<string, string> = {
   INVALID_BLOCK_PLAN:
     'Bitte Namen angeben; der Beginn darf nicht nach dem Ende liegen.',
   INVALID_BLOCK_ASSIGNMENT:
-    'Der Beginn des Blocks darf nicht nach dem Ende liegen.',
+    'Der Block muss innerhalb des Blockplans liegen; der Beginn darf nicht nach dem Ende liegen.',
   OVERLAPPING_TIMETABLE_SLOT:
     'Der Slot überschneidet sich mit einem vorhandenen Slot dieses Stundenplans.',
   OVERLAPPING_BLOCK_ASSIGNMENT:
@@ -107,8 +107,6 @@ export function errorMessage(code: string | undefined): string {
   )
 }
 
-export class PlanningError extends Error {}
-
 // Wirft bei einer fehlgeschlagenen Antwort einen Fehler mit deutschem Hinweistext
 async function expectOk(response: Response): Promise<Response> {
   if (response.ok) {
@@ -120,7 +118,7 @@ async function expectOk(response: Response): Promise<Response> {
   } catch {
     code = undefined
   }
-  throw new PlanningError(errorMessage(code))
+  throw new Error(errorMessage(code))
 }
 
 export async function loadOverview(): Promise<PlanningOverview> {

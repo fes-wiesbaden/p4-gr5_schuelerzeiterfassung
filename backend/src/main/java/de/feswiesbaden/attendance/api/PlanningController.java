@@ -1,5 +1,6 @@
 package de.feswiesbaden.attendance.api;
 
+import de.feswiesbaden.attendance.api.StaffController.Created;
 import de.feswiesbaden.attendance.enums.Weekday;
 import de.feswiesbaden.attendance.service.BlockPlanService;
 import de.feswiesbaden.attendance.service.PlanningService;
@@ -20,7 +21,10 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
-/** Stellt die Stunden- und Blockplanung für Administratoren und Klassenleitungen bereit */
+/**
+ * Stellt Administratoren die Stunden- und Blockplanung bereit. Den Planwechsel einer Klasse darf
+ * auch deren Klassenleitung auslösen
+ */
 @RestController
 @RequestMapping("/api/planning")
 public class PlanningController {
@@ -118,7 +122,4 @@ public class PlanningController {
   /** Enthält den erwarteten aktuellen und den gewünschten nächsten Blockplan */
   public record PlanChangeRequest(
       @NotNull @Positive Long expectedBlockPlanId, @NotNull @Positive Long nextBlockPlanId) {}
-
-  /** Enthält die ID des angelegten Datensatzes */
-  public record Created(Long id) {}
 }

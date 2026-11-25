@@ -25,10 +25,9 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
 /**
- * Prüft die Ablehnung von Zeit- und Zuordnungskonflikten beim Anlegen oder Ändern der
- * Stunden-/Blockplanung (Issue #40). Diese Tests waren laut #20 für dessen Abschluss ausdrücklich
- * dorthin verschoben: überlappende Slots, überlappende Blöcke, Raumkonflikte, Blockzuordnungen zu
- * einem fremden Plan und unzulässige Stundenplan-Wiederverwendung
+ * Prüft Raumkonflikte und unzulässige Stundenplan-Wiederverwendung der Stunden-/Blockplanung (Issue
+ * #40, offene Tests aus #20). Überlappende Slots und Blöcke sowie planfremde Zuordnungen prüft
+ * PlanningApiIntegrationTest über die API
  */
 @SpringBootTest
 @Testcontainers
@@ -75,61 +74,6 @@ class Issue40IntegrationTest {
             "deletion_date")) {
       jdbc.update("DELETE FROM " + table);
     }
-  }
-
-  /** Slots desselben Stundenplans dürfen sich nicht überlappen */
-  @Test
-  void rejectsOverlappingTimetableSlots() {
-    Long timetableId = timetables.create("Testplan");
-    timetables.addSlot(timetableId, Weekday.MONTAG, LocalTime.of(7, 30), LocalTime.of(9, 0), 90L);
-    assertThatThrownBy(
-            () ->
-                timetables.addSlot(
-                    timetableId, Weekday.MONTAG, LocalTime.of(8, 0), LocalTime.of(8, 45), 90L))
-        .hasMessage("OVERLAPPING_TIMETABLE_SLOT");
-    assertThat(
-            jdbc.queryForObject(
-                "SELECT COUNT(*) FROM timetable_slot WHERE timetable_id = ?",
-                Integer.class,
-                timetableId))
-        .isEqualTo(1);
-  }
-
-  /** Blöcke eines Blockplans dürfen sich nicht überlappen */
-  @Test
-  void rejectsOverlappingBlockAssignmentsInTheSamePlan() {
-    Long planId =
-        plans.create("Testblockplan", LocalDate.of(2030, 1, 1), LocalDate.of(2030, 6, 30));
-    plans.addBlockAssignment(planId, LocalDate.of(2030, 1, 1), LocalDate.of(2030, 1, 5));
-    assertThatThrownBy(
-            () ->
-                plans.addBlockAssignment(
-                    planId, LocalDate.of(2030, 1, 3), LocalDate.of(2030, 1, 10)))
-        .hasMessage("OVERLAPPING_BLOCK_ASSIGNMENT");
-    assertThat(
-            jdbc.queryForObject(
-                "SELECT COUNT(*) FROM block_assignment WHERE block_plan_id = ?",
-                Integer.class,
-                planId))
-        .isEqualTo(1);
-  }
-
-  /** Eine Blockzuordnung muss zum aktuellen Blockplan der Klasse gehören */
-  @Test
-  void rejectsBlockAssignmentBelongingToAnotherPlan() {
-    Long foreignPlanId =
-        plans.create("Fremdplan", LocalDate.of(2030, 1, 1), LocalDate.of(2030, 6, 30));
-    Long foreignBlockId =
-        plans.addBlockAssignment(foreignPlanId, LocalDate.of(2030, 1, 1), LocalDate.of(2030, 1, 5));
-    // Klasse 1 aus der Fixture nutzt Blockplan 1, nicht den soeben angelegten Fremdplan
-    assertThatThrownBy(() -> classes.assignBlock(1L, foreignBlockId))
-        .hasMessage("BLOCK_ASSIGNMENT_BELONGS_TO_ANOTHER_PLAN");
-    assertThat(
-            jdbc.queryForObject(
-                "SELECT COUNT(*) FROM class_block_assignment WHERE block_assignment_id = ?",
-                Integer.class,
-                foreignBlockId))
-        .isZero();
   }
 
   /**

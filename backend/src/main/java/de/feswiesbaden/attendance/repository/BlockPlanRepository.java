@@ -2,7 +2,6 @@ package de.feswiesbaden.attendance.repository;
 
 import de.feswiesbaden.attendance.entities.BlockAssignment;
 import de.feswiesbaden.attendance.entities.BlockPlan;
-import de.feswiesbaden.attendance.repository.AttendanceAccountingRepository.Period;
 import jakarta.persistence.EntityManager;
 import java.time.LocalDate;
 import java.util.Optional;
@@ -50,12 +49,12 @@ public class BlockPlanRepository {
   }
 
   /** Sperrt den Blockzeitraum und liefert seinen Blockplan sowie Beginn und Ende */
-  public Optional<Period> lockBlockAssignment(Long blockAssignmentId) {
+  public Optional<BlockPeriod> lockBlockAssignment(Long blockAssignmentId) {
     return jdbc
         .query(
             "SELECT block_plan_id, starts_on, ends_on FROM block_assignment WHERE id = ? FOR UPDATE",
             (row, index) ->
-                new Period(
+                new BlockPeriod(
                     row.getLong("block_plan_id"),
                     row.getDate("starts_on").toLocalDate(),
                     row.getDate("ends_on").toLocalDate()),
@@ -63,4 +62,7 @@ public class BlockPlanRepository {
         .stream()
         .findFirst();
   }
+
+  /** Enthält den Blockplan sowie Beginn und Ende eines Blockzeitraums */
+  public record BlockPeriod(Long blockPlanId, LocalDate startsOn, LocalDate endsOn) {}
 }

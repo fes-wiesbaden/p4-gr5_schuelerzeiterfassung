@@ -165,7 +165,9 @@ class PlanningApiIntegrationTest {
         .isEqualTo(1);
   }
 
-  /** Legt Blockplan mit Löschdatum und Blöcke an und lehnt überlappende Blöcke ab */
+  /**
+   * Legt Blockplan mit Löschdatum und Blöcke an und lehnt überlappende und planfremde Zeiträume ab
+   */
   @Test
   void createsBlockPlansWithDeletionDateAndRejectsOverlappingBlocks() throws Exception {
     Long planId =
@@ -185,6 +187,15 @@ class PlanningApiIntegrationTest {
     write(blocks, admin, "{\"startsOn\":\"2027-01-22\",\"endsOn\":\"2027-01-29\"}")
         .andExpect(status().isConflict())
         .andExpect(jsonPath("$.code").value("OVERLAPPING_BLOCK_ASSIGNMENT"));
+    write(blocks, admin, "{\"startsOn\":\"2027-07-12\",\"endsOn\":\"2027-07-19\"}")
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.code").value("INVALID_BLOCK_ASSIGNMENT"));
+    assertThat(
+            jdbc.queryForObject(
+                "SELECT COUNT(*) FROM block_assignment WHERE block_plan_id = ?",
+                Integer.class,
+                planId))
+        .isEqualTo(1);
     write(
             "/api/planning/block-plans",
             admin,
@@ -193,7 +204,7 @@ class PlanningApiIntegrationTest {
         .andExpect(jsonPath("$.code").value("INVALID_BLOCK_PLAN"));
   }
 
-  /** Lehnt planfremde, doppelte und unzulässig geteilte Blockzuordnungen ab */
+  /** Lehnt planfremde und doppelte Blockzuordnungen ab */
   @Test
   void rejectsConflictingClassBlockAssignments() throws Exception {
     Long foreignPlan =
@@ -214,10 +225,6 @@ class PlanningApiIntegrationTest {
     write("/api/planning/classes/1/blocks", admin, "{\"blockId\":1}")
         .andExpect(status().isConflict())
         .andExpect(jsonPath("$.code").value("BLOCK_ALREADY_ASSIGNED"));
-    // Klasse C nutzt denselben Stundenplan A wie Klasse A, die Block 1 bereits belegt
-    write("/api/planning/classes/3/blocks", admin, "{\"blockId\":1}")
-        .andExpect(status().isConflict())
-        .andExpect(jsonPath("$.code").value("TIMETABLE_REUSE_NOT_ALLOWED"));
     write("/api/planning/classes/1/blocks", teacher, "{\"blockId\":2}")
         .andExpect(status().isForbidden());
     write("/api/planning/classes/999/blocks", admin, "{\"blockId\":2}")

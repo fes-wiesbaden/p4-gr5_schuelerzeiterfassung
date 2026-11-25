@@ -56,19 +56,22 @@ public class BlockPlanService {
   }
 
   /**
-   * Fügt dem Blockplan einen Blockzeitraum hinzu, sofern der Plan existiert, Beginn vor oder am
-   * Ende liegt und sich der Zeitraum nicht mit einem bereits vorhandenen Block desselben Plans
-   * überlappt. Blöcke eines Blockplans dürfen sich nicht überlappen
+   * Fügt dem Blockplan einen Blockzeitraum hinzu, sofern der Plan existiert, der Zeitraum innerhalb
+   * des Plans liegt, Beginn vor oder am Ende liegt und sich der Zeitraum nicht mit einem bereits
+   * vorhandenen Block desselben Plans überlappt. Blöcke eines Blockplans dürfen sich nicht
+   * überlappen
    */
   // SERIALIZABLE, damit parallele Planungsänderungen die Konfliktprüfung nicht umgehen
   @Transactional(isolation = Isolation.SERIALIZABLE)
   public Long addBlockAssignment(Long blockPlanId, LocalDate startsOn, LocalDate endsOn) {
     authorization.requireAdministrator();
-    if (blockPlanId == null
+    var plan = blockPlanId == null ? null : classes.lockPlanDates(blockPlanId).orElse(null);
+    if (plan == null
         || startsOn == null
         || endsOn == null
         || startsOn.isAfter(endsOn)
-        || !classes.hasBlockPlan(blockPlanId)) {
+        || startsOn.isBefore(plan.startsOn())
+        || endsOn.isAfter(plan.endsOn())) {
       throw new IllegalArgumentException("INVALID_BLOCK_ASSIGNMENT");
     }
     if (plans.hasOverlappingBlockAssignment(blockPlanId, startsOn, endsOn)) {

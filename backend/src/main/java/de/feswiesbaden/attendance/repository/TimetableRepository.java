@@ -53,33 +53,24 @@ public class TimetableRepository {
   }
 
   /**
-   * Prüft, ob eine andere Klasse den Raum im angegebenen Zeitfenster belegt, während einer ihrer
-   * zugeordneten Blöcke den angegebenen Zeitraum überschneidet
+   * Prüft, ob ein Slot des Stundenplans einen Raum zur selben Zeit belegt wie eine andere Klasse,
+   * deren zugeordneter Block den angegebenen Zeitraum überschneidet
    */
-  public boolean isRoomOccupied(
-      Long excludeClassId,
-      Long roomId,
-      Weekday weekday,
-      LocalTime startsAt,
-      LocalTime endsAt,
-      LocalDate periodStart,
-      LocalDate periodEnd) {
+  public boolean hasRoomConflict(
+      Long excludeClassId, Long timetableId, LocalDate periodStart, LocalDate periodEnd) {
     return !jdbc.queryForList(
             """
-            SELECT c.id FROM school_class c
-            JOIN timetable_slot s ON s.timetable_id = c.timetable_id
+            SELECT c.id FROM timetable_slot own
+            JOIN timetable_slot s ON s.room_id = own.room_id AND s.weekday = own.weekday
+              AND s.start_time < own.end_time AND s.end_time > own.start_time
+            JOIN school_class c ON c.timetable_id = s.timetable_id
             JOIN class_block_assignment cba ON cba.school_class_id = c.id
             JOIN block_assignment b ON b.id = cba.block_assignment_id
-            WHERE c.id <> ? AND s.room_id = ? AND s.weekday = ?
-              AND s.start_time < ? AND s.end_time > ?
-              AND b.starts_on <= ? AND b.ends_on >= ?
+            WHERE own.timetable_id = ? AND c.id <> ? AND b.starts_on <= ? AND b.ends_on >= ?
             """,
             Long.class,
+            timetableId,
             excludeClassId,
-            roomId,
-            weekday.name(),
-            endsAt,
-            startsAt,
             periodEnd,
             periodStart)
         .isEmpty();

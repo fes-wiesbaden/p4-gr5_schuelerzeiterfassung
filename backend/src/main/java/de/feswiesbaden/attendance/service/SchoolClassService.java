@@ -1,6 +1,5 @@
 package de.feswiesbaden.attendance.service;
 
-import de.feswiesbaden.attendance.enums.Weekday;
 import de.feswiesbaden.attendance.repository.AttendanceAccountingRepository;
 import de.feswiesbaden.attendance.repository.BlockPlanRepository;
 import de.feswiesbaden.attendance.repository.SchoolClassRepository;
@@ -185,7 +184,7 @@ public class SchoolClassService {
         blockPlans
             .lockBlockAssignment(blockAssignmentId)
             .orElseThrow(() -> new IllegalArgumentException("BLOCK_ASSIGNMENT_NOT_FOUND"));
-    if (!block.planId().equals(plan.planId())) {
+    if (!block.blockPlanId().equals(plan.planId())) {
       throw new IllegalArgumentException("BLOCK_ASSIGNMENT_BELONGS_TO_ANOTHER_PLAN");
     }
     // Vor der Raumprüfung, da eine geteilte Stundenplannutzung sonst als Raumkonflikt erscheint
@@ -196,17 +195,8 @@ public class SchoolClassService {
                     && other.overlaps(block.startsOn(), block.endsOn()))) {
       throw new IllegalStateException("TIMETABLE_REUSE_NOT_ALLOWED");
     }
-    for (var slot : accounting.findSlots(plan.timetableId())) {
-      if (timetables.isRoomOccupied(
-          classId,
-          slot.roomId(),
-          Weekday.of(slot.weekday()),
-          slot.startsAt(),
-          slot.endsAt(),
-          block.startsOn(),
-          block.endsOn())) {
-        throw new IllegalStateException("ROOM_ALREADY_ASSIGNED");
-      }
+    if (timetables.hasRoomConflict(classId, plan.timetableId(), block.startsOn(), block.endsOn())) {
+      throw new IllegalStateException("ROOM_ALREADY_ASSIGNED");
     }
     try {
       classes.insertClassBlockAssignment(classId, blockAssignmentId);

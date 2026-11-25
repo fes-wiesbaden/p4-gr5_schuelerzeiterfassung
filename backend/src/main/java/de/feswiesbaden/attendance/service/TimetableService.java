@@ -39,7 +39,8 @@ public class TimetableService {
   /**
    * Fügt einen Slot hinzu, sofern Stundenplan und Raum existieren, Beginn vor Ende liegt, sich der
    * Slot nicht mit einem vorhandenen Slot desselben Wochentags überlappt und keine Klasse mit
-   * diesem Stundenplan dadurch einen Raum belegt, den eine gleichzeitig aktive Klasse nutzt
+   * diesem Stundenplan dadurch einen Raum belegt, den eine gleichzeitig aktive Klasse nutzt. Der
+   * Raumkonflikt wird nach dem Einfügen geprüft; eine Ablehnung rollt den Slot zurück
    */
   // SERIALIZABLE, damit parallele Planungsänderungen die Konfliktprüfung nicht umgehen
   @Transactional(isolation = Isolation.SERIALIZABLE)
@@ -59,18 +60,13 @@ public class TimetableService {
     if (timetables.hasOverlappingSlot(timetableId, weekday, startsAt, endsAt)) {
       throw new IllegalArgumentException("OVERLAPPING_TIMETABLE_SLOT");
     }
+    Long slotId = timetables.insertSlot(timetableId, roomId, weekday, startsAt, endsAt);
     for (var period : classes.findPeriodsByTimetable(timetableId)) {
-      if (timetables.isRoomOccupied(
-          period.classId(),
-          roomId,
-          weekday,
-          startsAt,
-          endsAt,
-          period.startsOn(),
-          period.endsOn())) {
+      if (timetables.hasRoomConflict(
+          period.classId(), timetableId, period.startsOn(), period.endsOn())) {
         throw new IllegalStateException("ROOM_ALREADY_ASSIGNED");
       }
     }
-    return timetables.insertSlot(timetableId, roomId, weekday, startsAt, endsAt);
+    return slotId;
   }
 }
