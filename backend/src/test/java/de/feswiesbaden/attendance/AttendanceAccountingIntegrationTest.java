@@ -248,38 +248,81 @@ class AttendanceAccountingIntegrationTest {
   }
 
   @Test
-  void onlyAdminCanManageRoomsAndListTeachers() throws Exception {
+  void adminManagesRoomsThroughHttp() throws Exception {
     var admin = staffSession("test.admin");
     var teacher = staffSession("test.teacher.b");
     String room = "{\"roomNumber\":\"A104\"}";
     write(post("/api/rooms"), teacher, room).andExpect(status().isForbidden());
     write(post("/api/rooms"), admin, room).andExpect(status().isCreated());
     write(post("/api/rooms"), admin, room).andExpect(status().isConflict());
-    mvc.perform(get("/api/teachers").session(teacher)).andExpect(status().isForbidden());
+
+    long id = jdbc.queryForObject("SELECT id FROM room WHERE room_number = 'A104'", Long.class);
+    String item = "/api/rooms/" + id;
+    String entry = "$[?(@.id == " + id + ")]";
+    mvc.perform(get("/api/rooms").session(admin))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath(entry + ".roomNumber", contains("A104")));
+    write(put(item), admin, "{\"roomNumber\":\"A105\"}").andExpect(status().isNoContent());
+    mvc.perform(get("/api/rooms").session(admin))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath(entry + ".roomNumber", contains("A105")));
+    write(delete(item), admin, "").andExpect(status().isNoContent());
+    mvc.perform(get("/api/rooms").session(admin))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath(entry).isEmpty());
   }
 
   @Test
-  void deletesEmptyClassWithAssignmentsButKeepsPlansAndBlocks() throws Exception {
+  void adminManagesEmptyClassAndKeepsPlansAndBlocksWhenDeletingIt() throws Exception {
     var admin = staffSession("test.admin");
+    write(
+            post("/api/classes"),
+            admin,
+            """
+            {"classCode":"26TEST-LEER","classTeacherId":1,"blockPlanId":1,"timetableId":1}
+            """)
+        .andExpect(status().isCreated());
+    long id =
+        jdbc.queryForObject(
+            "SELECT id FROM school_class WHERE class_code = '26TEST-LEER'", Long.class);
+    String item = "/api/classes/" + id;
+    String entry = "$[?(@.id == " + id + ")]";
+    mvc.perform(get("/api/classes").session(admin))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath(entry + ".classTeacherId", contains(1)));
+    write(put(item), admin, "{\"classCode\":\"26TEST-NEU\",\"classTeacherId\":2}")
+        .andExpect(status().isNoContent());
+    mvc.perform(get("/api/classes").session(admin))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath(entry + ".classCode", contains("26TEST-NEU")))
+        .andExpect(jsonPath(entry + ".classTeacherId", contains(2)));
+
+    jdbc.update("INSERT INTO teacher_class VALUES (1, ?)", id);
     jdbc.update(
-        "INSERT INTO school_class(id,class_code,class_teacher_id,block_plan_id,timetable_id) VALUES(99,'Leer',1,1,1)");
-    jdbc.update("INSERT INTO teacher_class VALUES(1,99)");
-    jdbc.update("INSERT INTO class_block_assignment SELECT 99,id FROM block_assignment LIMIT 1");
+        "INSERT INTO class_block_assignment SELECT ?, id FROM block_assignment LIMIT 1", id);
     int blocks = jdbc.queryForObject("SELECT COUNT(*) FROM block_assignment", Integer.class);
     int plans = jdbc.queryForObject("SELECT COUNT(*) FROM block_plan", Integer.class);
     assertThat(
             jdbc.queryForObject(
-                "SELECT COUNT(*) FROM class_block_assignment WHERE school_class_id=99",
-                Integer.class))
+                "SELECT COUNT(*) FROM class_block_assignment WHERE school_class_id = ?",
+                Integer.class,
+                id))
         .isOne();
-    write(delete("/api/classes/99"), admin, "").andExpect(status().isNoContent());
+    write(delete(item), admin, "").andExpect(status().isNoContent());
+    mvc.perform(get("/api/classes").session(admin))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath(entry).isEmpty());
     for (String table : List.of("teacher_class", "class_block_assignment")) {
       assertThat(
               jdbc.queryForObject(
-                  "SELECT COUNT(*) FROM " + table + " WHERE school_class_id=99", Integer.class))
+                  "SELECT COUNT(*) FROM " + table + " WHERE school_class_id = ?",
+                  Integer.class,
+                  id))
           .isZero();
     }
-    assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM school_class WHERE id=99", Integer.class))
+    assertThat(
+            jdbc.queryForObject(
+                "SELECT COUNT(*) FROM school_class WHERE id = ?", Integer.class, id))
         .isZero();
     assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM block_assignment", Integer.class))
         .isEqualTo(blocks);
@@ -308,18 +351,38 @@ class AttendanceAccountingIntegrationTest {
   }
 
   @Test
-  void teacherUpdateAcceptsNamesAndRejectsAccountFields() throws Exception {
+  void adminManagesTeachersButCannotChangeAccountFields() throws Exception {
     var admin = staffSession("test.admin");
+    mvc.perform(get("/api/teachers").session(staffSession("test.teacher.b")))
+        .andExpect(status().isForbidden());
+    write(
+            post("/api/teachers"),
+            admin,
+            """
+            {"firstName":"Test","lastName":"Lehrkraft","username":"test.crud","password":"Fixture-Passwort"}
+            """)
+        .andExpect(status().isCreated());
+    long id = jdbc.queryForObject("SELECT id FROM staff WHERE username = 'test.crud'", Long.class);
+    String item = "/api/teachers/" + id;
+    String entry = "$[?(@.id == " + id + ")]";
+    mvc.perform(get("/api/teachers").session(admin))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath(entry + ".username", contains("test.crud")));
     String names = "{\"firstName\":\"Neuer\",\"lastName\":\"Name\"}";
-    write(put("/api/teachers/1"), admin, names).andExpect(status().isNoContent());
+    write(put(item), admin, names).andExpect(status().isNoContent());
     for (String field : List.of("username", "password")) {
-      write(put("/api/teachers/1"), admin, names.replace("}", ",\"" + field + "\":\"anders\"}"))
+      write(put(item), admin, names.replace("}", ",\"" + field + "\":\"anders\"}"))
           .andExpect(status().isBadRequest());
     }
-    assertThat(jdbc.queryForObject("SELECT first_name FROM staff WHERE id=1", String.class))
-        .isEqualTo("Neuer");
-    assertThat(jdbc.queryForObject("SELECT username FROM staff WHERE id=1", String.class))
-        .isEqualTo("test.teacher.a");
+    mvc.perform(get("/api/teachers").session(admin))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath(entry + ".firstName", contains("Neuer")))
+        .andExpect(jsonPath(entry + ".lastName", contains("Name")))
+        .andExpect(jsonPath(entry + ".username", contains("test.crud")));
+    write(delete(item), admin, "").andExpect(status().isNoContent());
+    mvc.perform(get("/api/teachers").session(admin))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath(entry).isEmpty());
   }
 
   @Test
@@ -335,6 +398,28 @@ class AttendanceAccountingIntegrationTest {
             + "SELECT 100,'Test','Neu','reused',password_hash,role FROM staff WHERE id=1");
     mvc.perform(get("/api/me").session(lateSession)).andExpect(status().isUnauthorized());
     mvc.perform(get("/api/me").session(staffSession("reused"))).andExpect(status().isOk());
+  }
+
+  @Test
+  void adminManagesStudentsThroughHttp() throws Exception {
+    var admin = staffSession("test.admin");
+    String collection = "/api/classes/1/students";
+    write(post(collection), admin, STUDENT).andExpect(status().isCreated());
+    long id = jdbc.queryForObject("SELECT id FROM student WHERE first_name = 'Neu'", Long.class);
+    String item = "/api/students/" + id;
+    String entry = "$[?(@.id == " + id + ")]";
+    mvc.perform(get(collection).session(admin))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath(entry + ".unexcusedMinutes", contains(0)))
+        .andExpect(jsonPath(entry + ".excusedMinutes", contains(0)));
+    write(put(item), admin, STUDENT.replace("Neu", "Geändert")).andExpect(status().isNoContent());
+    mvc.perform(get(item).session(admin))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.firstName").value("Geändert"));
+    write(delete(item), admin, "").andExpect(status().isNoContent());
+    mvc.perform(get(collection).session(admin))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath(entry).isEmpty());
   }
 
   /** Prüft Schülerverwaltung und HTTP 409 bei bestehender Anwesenheitshistorie */
