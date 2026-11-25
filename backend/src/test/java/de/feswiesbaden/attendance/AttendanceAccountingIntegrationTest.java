@@ -551,10 +551,11 @@ class AttendanceAccountingIntegrationTest {
 
   /**
    * Überschneiden sich frühere Slots des Tages, wird auch ein Scan im späteren, selbst nicht
-   * überlappenden Slot neutral abgelehnt. Der Rohscan bleibt gespeichert
+   * überlappenden Slot neutral abgelehnt. Der Rohscan bleibt gespeichert und der Tagesabruf für die
+   * Lehrkraft bleibt möglich
    */
   @Test
-  void rejectsScansWhenEarlierSlotsOfTheDayOverlap() {
+  void rejectsScansWhenEarlierSlotsOfTheDayOverlap() throws Exception {
     jdbc.update(
         "INSERT INTO timetable_slot (id, timetable_id, room_id, weekday, start_time, end_time)"
             + " VALUES (99, 1, 2, 'MONTAG', '08:00:00', '08:45:00')");
@@ -566,6 +567,9 @@ class AttendanceAccountingIntegrationTest {
             jdbc.queryForObject(
                 "SELECT COUNT(*) FROM attendance_audit WHERE student_id = 1", Integer.class))
         .isZero();
+    mvc.perform(get(CLASS_DAY).session(staffSession("test.teacher.a")))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$[0].status").value("ABWESEND"));
   }
 
   /** Ein Slot ohne Dauer einer anderen Klasse belegt den Raum nicht */
