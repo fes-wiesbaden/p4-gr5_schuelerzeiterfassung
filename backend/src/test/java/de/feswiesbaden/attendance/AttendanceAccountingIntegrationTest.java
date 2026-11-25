@@ -584,13 +584,28 @@ class AttendanceAccountingIntegrationTest {
   }
 
   /**
-   * Eine andere Klasse blockiert den Raum nur, wenn auch ihr aktueller Blockplan den Scantag
-   * einschließt. Hier endet ihr Plan vor dem Scantag, obwohl ihr Block an diesem Tag beginnt
+   * Eine andere Klasse blockiert den Raum nur, wenn ihr aktueller Blockplan und ihr Block den
+   * Scantag einschließen. Jeweils eine der beiden Spannen endet vor oder beginnt nach dem 14.09.
    */
-  @Test
-  void acceptsScansWhenTheOtherClassPlanEndsBeforeTheScanDay() {
-    insertPlan99("2026-09-01", "2026-09-13", "2026-09-14", "2026-09-18");
+  @ParameterizedTest
+  @CsvSource({
+    "2026-09-01, 2026-09-13, 2026-09-14, 2026-09-18",
+    "2026-09-15, 2026-12-31, 2026-09-14, 2026-09-18",
+    "2026-09-01, 2026-12-31, 2026-09-07, 2026-09-13"
+  })
+  void acceptsScansWhenTheOtherClassPlanOrBlockExcludesTheScanDay(
+      String planStartsOn, String planEndsOn, String blockStartsOn, String blockEndsOn) {
+    insertPlan99(planStartsOn, planEndsOn, blockStartsOn, blockEndsOn);
     insertOtherClassInRoom1(99, 99, "08:00:00", "08:45:00");
+    assertThat(scan(1, "2026-09-14T06:15:00Z")).isTrue();
+  }
+
+  /** Direkt aneinander anschließende Slots des Tages gelten nicht als Überlappung */
+  @Test
+  void acceptsScansWhenSlotsOfTheDayOnlyTouch() {
+    jdbc.update(
+        "INSERT INTO timetable_slot (id, timetable_id, room_id, weekday, start_time, end_time)"
+            + " VALUES (99, 1, 2, 'MONTAG', '09:00:00', '09:15:00')");
     assertThat(scan(1, "2026-09-14T06:15:00Z")).isTrue();
   }
 
