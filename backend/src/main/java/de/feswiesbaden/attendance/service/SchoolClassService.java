@@ -1,10 +1,12 @@
 package de.feswiesbaden.attendance.service;
 
+import de.feswiesbaden.attendance.enums.Weekday;
 import de.feswiesbaden.attendance.repository.AttendanceAccountingRepository;
+import de.feswiesbaden.attendance.repository.BlockPlanRepository;
 import de.feswiesbaden.attendance.repository.SchoolClassRepository;
 import de.feswiesbaden.attendance.repository.SchoolClassRepository.ClassPlan;
+import de.feswiesbaden.attendance.repository.TimetableRepository;
 import java.time.Clock;
-import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.time.temporal.ChronoUnit;
@@ -12,6 +14,7 @@ import java.util.List;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 
 /** Verwaltet berechtigte Klassenzugriffe, Klassenanlage, Kontenresets und Planwechsel */
@@ -31,6 +34,10 @@ public class SchoolClassService {
 
   private final Clock clock;
 
+  private final BlockPlanRepository blockPlans;
+
+  private final TimetableRepository timetables;
+
   public SchoolClassService(
       SchoolClassRepository classes,
       StaffAuthorization authorization,
@@ -38,7 +45,9 @@ public class SchoolClassService {
       AttendanceAccountingService verification,
       DeletionDateService deletionDates,
       RetentionService retention,
-      Clock clock) {
+      Clock clock,
+      BlockPlanRepository blockPlans,
+      TimetableRepository timetables) {
     this.classes = classes;
     this.authorization = authorization;
     this.accounting = accounting;
@@ -46,6 +55,8 @@ public class SchoolClassService {
     this.deletionDates = deletionDates;
     this.retention = retention;
     this.clock = clock;
+    this.blockPlans = blockPlans;
+    this.timetables = timetables;
   }
 
   /** Liefert die für den angemeldeten Mitarbeiter zugänglichen Klassen */
@@ -159,52 +170,48 @@ public class SchoolClassService {
 
   /**
    * Ordnet der Klasse einen Blockzeitraum zu. Der Block muss zum aktuellen Blockplan der Klasse
-   * gehören, keinen bereits durch eine andere gleichzeitig aktive Klasse belegten Raum verwenden
-   * und keinen mit einer anderen, denselben Stundenplan nutzenden Klasse überlappenden Block bilden
+   * gehören, darf sich nicht mit dem Block einer anderen Klasse mit demselben Stundenplan
+   * überschneiden und keinen Raum verwenden, den eine gleichzeitig aktive Klasse belegt
    */
-  @Transactional
+  // SERIALIZABLE, damit parallele Planungsänderungen die Konfliktprüfung nicht umgehen
+  @Transactional(isolation = Isolation.SERIALIZABLE)
   public void assignBlock(Long classId, Long blockAssignmentId) {
     authorization.requireAdministrator();
     var plan =
         classes
             .lockPlan(classId)
             .orElseThrow(() -> new IllegalArgumentException("CLASS_NOT_FOUND"));
-    var assignment =
-        classes
+    var block =
+        blockPlans
             .lockBlockAssignment(blockAssignmentId)
             .orElseThrow(() -> new IllegalArgumentException("BLOCK_ASSIGNMENT_NOT_FOUND"));
-    if (!assignment.blockPlanId().equals(plan.planId())) {
+    if (!block.planId().equals(plan.planId())) {
       throw new IllegalArgumentException("BLOCK_ASSIGNMENT_BELONGS_TO_ANOTHER_PLAN");
     }
-    requireNoRoomConflict(classId, plan.timetableId(), assignment.startsOn(), assignment.endsOn());
-    if (classes.timetableSharedWithOverlappingBlock(
-        classId, plan.timetableId(), assignment.startsOn(), assignment.endsOn())) {
+    // Vor der Raumprüfung, da eine geteilte Stundenplannutzung sonst als Raumkonflikt erscheint
+    if (classes.findPeriodsByTimetable(plan.timetableId()).stream()
+        .anyMatch(
+            other ->
+                !other.classId().equals(classId)
+                    && other.overlaps(block.startsOn(), block.endsOn()))) {
       throw new IllegalStateException("TIMETABLE_REUSE_NOT_ALLOWED");
+    }
+    for (var slot : accounting.findSlots(plan.timetableId())) {
+      if (timetables.isRoomOccupied(
+          classId,
+          slot.roomId(),
+          Weekday.of(slot.weekday()),
+          slot.startsAt(),
+          slot.endsAt(),
+          block.startsOn(),
+          block.endsOn())) {
+        throw new IllegalStateException("ROOM_ALREADY_ASSIGNED");
+      }
     }
     try {
       classes.insertClassBlockAssignment(classId, blockAssignmentId);
     } catch (DuplicateKeyException duplicate) {
       throw new IllegalStateException("BLOCK_ALREADY_ASSIGNED");
-    }
-  }
-
-  /**
-   * Prüft für jeden Slot des Stundenplans, ob eine andere, im selben Zeitraum aktive Klasse
-   * denselben Raum belegt
-   */
-  private void requireNoRoomConflict(
-      Long classId, Long timetableId, LocalDate periodStart, LocalDate periodEnd) {
-    for (var slot : accounting.findSlots(timetableId)) {
-      if (accounting.hasConflictingRoomAssignment(
-          classId,
-          slot.roomId(),
-          slot.weekday(),
-          slot.startsAt(),
-          slot.endsAt(),
-          periodStart,
-          periodEnd)) {
-        throw new IllegalStateException("ROOM_ALREADY_ASSIGNED");
-      }
     }
   }
 

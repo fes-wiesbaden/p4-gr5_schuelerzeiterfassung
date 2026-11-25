@@ -93,6 +93,8 @@ const ERROR_MESSAGES: Record<string, string> = {
   CLASS_HAS_REMAINING_SLOTS: 'Heute finden für die Klasse noch Slots statt.',
   CLASS_NOT_FULLY_ACCOUNTED:
     'Es sind noch nicht alle Tage der Klasse abgerechnet.',
+  CONCURRENT_PLANNING_CHANGE:
+    'Die Planung wurde gleichzeitig geändert. Bitte die Seite neu laden und erneut versuchen.',
   ADMINISTRATOR_REQUIRED: 'Diese Aktion ist Administratoren vorbehalten.',
   CLASS_MANAGEMENT_DENIED: 'Nur die Klassenleitung darf den Plan wechseln.',
   NOT_FOUND: 'Der Datensatz wurde nicht gefunden.'
@@ -205,7 +207,6 @@ export function formatDate(iso: string): string {
   return `${day}.${month}.${year}`
 }
 
-// Kürzt Uhrzeiten wie 07:30:00 auf 07:30
 export function formatTime(time: string): string {
   return time.slice(0, 5)
 }

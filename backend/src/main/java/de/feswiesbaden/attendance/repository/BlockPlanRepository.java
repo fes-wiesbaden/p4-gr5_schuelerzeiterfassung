@@ -2,8 +2,10 @@ package de.feswiesbaden.attendance.repository;
 
 import de.feswiesbaden.attendance.entities.BlockAssignment;
 import de.feswiesbaden.attendance.entities.BlockPlan;
+import de.feswiesbaden.attendance.repository.AttendanceAccountingRepository.Period;
 import jakarta.persistence.EntityManager;
 import java.time.LocalDate;
+import java.util.Optional;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 
@@ -22,12 +24,6 @@ public class BlockPlanRepository {
   /** Fügt den Blockplan in den aktuellen Persistenzkontext ein */
   public void insert(BlockPlan plan) {
     entityManager.persist(plan);
-  }
-
-  /** Prüft, ob der Blockplan existiert */
-  public boolean exists(Long blockPlanId) {
-    return !jdbc.queryForList("SELECT id FROM block_plan WHERE id = ?", Long.class, blockPlanId)
-        .isEmpty();
   }
 
   /** Prüft, ob der Blockplan bereits einen zeitlich überlappenden Blockzeitraum enthält */
@@ -51,5 +47,20 @@ public class BlockPlanRepository {
     assignment.setEndsOn(endsOn);
     entityManager.persist(assignment);
     return assignment.getId();
+  }
+
+  /** Sperrt den Blockzeitraum und liefert seinen Blockplan sowie Beginn und Ende */
+  public Optional<Period> lockBlockAssignment(Long blockAssignmentId) {
+    return jdbc
+        .query(
+            "SELECT block_plan_id, starts_on, ends_on FROM block_assignment WHERE id = ? FOR UPDATE",
+            (row, index) ->
+                new Period(
+                    row.getLong("block_plan_id"),
+                    row.getDate("starts_on").toLocalDate(),
+                    row.getDate("ends_on").toLocalDate()),
+            blockAssignmentId)
+        .stream()
+        .findFirst();
   }
 }

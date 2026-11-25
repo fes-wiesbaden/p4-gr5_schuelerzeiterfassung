@@ -17,10 +17,10 @@ public class PlanningOverviewRepository {
   }
 
   /** Liefert alle Stundenpläne nach Namen sortiert */
-  public List<NamedRow> findTimetables() {
+  public List<TimetableRow> findTimetables() {
     return jdbc.query(
         "SELECT id, name FROM timetable ORDER BY name, id",
-        (row, index) -> new NamedRow(row.getLong("id"), row.getString("name")));
+        (row, index) -> new TimetableRow(row.getLong("id"), row.getString("name")));
   }
 
   /** Liefert alle Slots mit Raumnummer, sortiert nach Stundenplan, Wochentag und Beginn */
@@ -76,14 +76,17 @@ public class PlanningOverviewRepository {
   }
 
   /** Liefert alle Räume nach Raumnummer sortiert */
-  public List<NamedRow> findRooms() {
+  public List<RoomRow> findRooms() {
     return jdbc.query(
         "SELECT id, room_number FROM room ORDER BY room_number",
-        (row, index) -> new NamedRow(row.getLong("id"), row.getString("room_number")));
+        (row, index) -> new RoomRow(row.getLong("id"), row.getString("room_number")));
   }
 
-  /** Enthält ID und Anzeigenamen eines Stundenplans oder Raums */
-  public record NamedRow(Long id, String name) {}
+  /** Enthält ID und Namen eines Stundenplans */
+  public record TimetableRow(Long id, String name) {}
+
+  /** Enthält ID und Raumnummer eines Raums */
+  public record RoomRow(Long id, String roomNumber) {}
 
   /** Enthält einen Slot mit Wochentag, Uhrzeiten und Raum */
   public record SlotRow(

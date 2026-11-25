@@ -1,9 +1,11 @@
 package de.feswiesbaden.attendance.service;
 
 import de.feswiesbaden.attendance.enums.Weekday;
+import de.feswiesbaden.attendance.repository.SchoolClassRepository;
 import de.feswiesbaden.attendance.repository.TimetableRepository;
 import java.time.LocalTime;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 
 /** Verwaltet die Anlage von Stundenplänen und ihren Unterrichtszeiten (Slots) */
@@ -11,10 +13,16 @@ import org.springframework.transaction.annotation.Transactional;
 public class TimetableService {
   private final TimetableRepository timetables;
 
+  private final SchoolClassRepository classes;
+
   private final StaffAuthorization authorization;
 
-  public TimetableService(TimetableRepository timetables, StaffAuthorization authorization) {
+  public TimetableService(
+      TimetableRepository timetables,
+      SchoolClassRepository classes,
+      StaffAuthorization authorization) {
     this.timetables = timetables;
+    this.classes = classes;
     this.authorization = authorization;
   }
 
@@ -29,10 +37,12 @@ public class TimetableService {
   }
 
   /**
-   * Fügt einen Slot hinzu, sofern Stundenplan und Raum existieren, Beginn vor Ende liegt und sich
-   * der Slot nicht mit einem bereits vorhandenen Slot desselben Wochentags überlappt
+   * Fügt einen Slot hinzu, sofern Stundenplan und Raum existieren, Beginn vor Ende liegt, sich der
+   * Slot nicht mit einem vorhandenen Slot desselben Wochentags überlappt und keine Klasse mit
+   * diesem Stundenplan dadurch einen Raum belegt, den eine gleichzeitig aktive Klasse nutzt
    */
-  @Transactional
+  // SERIALIZABLE, damit parallele Planungsänderungen die Konfliktprüfung nicht umgehen
+  @Transactional(isolation = Isolation.SERIALIZABLE)
   public Long addSlot(
       Long timetableId, Weekday weekday, LocalTime startsAt, LocalTime endsAt, Long roomId) {
     authorization.requireAdministrator();
@@ -42,12 +52,24 @@ public class TimetableService {
         || endsAt == null
         || !startsAt.isBefore(endsAt)
         || roomId == null
-        || !timetables.timetableExists(timetableId)
+        || !classes.hasTimetable(timetableId)
         || !timetables.roomExists(roomId)) {
       throw new IllegalArgumentException("INVALID_TIMETABLE_SLOT");
     }
     if (timetables.hasOverlappingSlot(timetableId, weekday, startsAt, endsAt)) {
       throw new IllegalArgumentException("OVERLAPPING_TIMETABLE_SLOT");
+    }
+    for (var period : classes.findPeriodsByTimetable(timetableId)) {
+      if (timetables.isRoomOccupied(
+          period.classId(),
+          roomId,
+          weekday,
+          startsAt,
+          endsAt,
+          period.startsOn(),
+          period.endsOn())) {
+        throw new IllegalStateException("ROOM_ALREADY_ASSIGNED");
+      }
     }
     return timetables.insertSlot(timetableId, roomId, weekday, startsAt, endsAt);
   }

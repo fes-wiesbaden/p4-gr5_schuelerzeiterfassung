@@ -18,11 +18,11 @@ public class DeletionDateService {
   /** Ermittelt das Löschdatum sechs Kalendermonate nach Planende und legt es bei Bedarf an */
   @Transactional
   public DeletionDate getOrCreate(LocalDate endsOn) {
-    return deletionDates.getOrCreate(deleteAfter(endsOn));
+    return deletionDates.getOrCreate(deletionDateFor(endsOn));
   }
 
   /** Berechnet das Löschdatum sechs Kalendermonate nach Planende */
-  public static LocalDate deleteAfter(LocalDate endsOn) {
+  public static LocalDate deletionDateFor(LocalDate endsOn) {
     return endsOn.plusMonths(6);
   }
 }

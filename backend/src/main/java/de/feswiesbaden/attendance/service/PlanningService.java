@@ -1,11 +1,11 @@
 package de.feswiesbaden.attendance.service;
 
-import de.feswiesbaden.attendance.enums.Weekday;
 import de.feswiesbaden.attendance.repository.PlanningOverviewRepository;
 import de.feswiesbaden.attendance.repository.PlanningOverviewRepository.ClassBlockRow;
+import de.feswiesbaden.attendance.repository.PlanningOverviewRepository.RoomRow;
+import de.feswiesbaden.attendance.repository.PlanningOverviewRepository.SlotRow;
 import de.feswiesbaden.attendance.repository.SchoolClassRepository;
 import java.time.LocalDate;
-import java.time.LocalTime;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -38,20 +38,7 @@ public class PlanningService {
   public Overview read() {
     var actor = authorization.requireAdministrator();
     var slotsByTimetable =
-        overview.findSlots().stream()
-            .collect(
-                Collectors.groupingBy(
-                    slot -> slot.timetableId(),
-                    Collectors.mapping(
-                        slot ->
-                            new SlotView(
-                                slot.id(),
-                                slot.weekday(),
-                                slot.startsAt(),
-                                slot.endsAt(),
-                                slot.roomId(),
-                                slot.roomNumber()),
-                        Collectors.toList())));
+        overview.findSlots().stream().collect(Collectors.groupingBy(SlotRow::timetableId));
     var classesByBlock =
         overview.findClassBlocks().stream()
             .collect(
@@ -90,10 +77,10 @@ public class PlanningService {
                         plan.name(),
                         plan.startsOn(),
                         plan.endsOn(),
-                        DeletionDateService.deleteAfter(plan.endsOn()),
+                        DeletionDateService.deletionDateFor(plan.endsOn()),
                         blocksByPlan.getOrDefault(plan.id(), List.of())))
             .toList(),
-        overview.findRooms().stream().map(room -> new RoomView(room.id(), room.name())).toList(),
+        overview.findRooms(),
         classes.findAccessible(actor.id(), true).stream()
             .map(
                 schoolClass ->
@@ -109,20 +96,11 @@ public class PlanningService {
   public record Overview(
       List<TimetableView> timetables,
       List<BlockPlanView> blockPlans,
-      List<RoomView> rooms,
+      List<RoomRow> rooms,
       List<ClassPlanView> classes) {}
 
   /** Enthält einen Stundenplan mit seinen Slots */
-  public record TimetableView(Long id, String name, List<SlotView> slots) {}
-
-  /** Enthält Wochentag, Uhrzeiten und Raum eines Slots */
-  public record SlotView(
-      Long id,
-      Weekday weekday,
-      LocalTime startsAt,
-      LocalTime endsAt,
-      Long roomId,
-      String roomNumber) {}
+  public record TimetableView(Long id, String name, List<SlotRow> slots) {}
 
   /** Enthält Zeitraum, berechnetes Löschdatum und Blöcke eines Blockplans */
   public record BlockPlanView(
@@ -135,9 +113,6 @@ public class PlanningService {
 
   /** Enthält einen Blockzeitraum und die IDs der zugeordneten Klassen */
   public record BlockView(Long id, LocalDate startsOn, LocalDate endsOn, List<Long> classIds) {}
-
-  /** Enthält ID und Raumnummer */
-  public record RoomView(Long id, String roomNumber) {}
 
   /** Enthält eine Klasse mit ihrem aktuellen Block- und Stundenplan */
   public record ClassPlanView(Long id, String classCode, Long blockPlanId, Long timetableId) {}

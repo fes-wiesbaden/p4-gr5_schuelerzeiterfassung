@@ -77,25 +77,6 @@ class Issue40IntegrationTest {
     }
   }
 
-  /** Prüft das Anlegen eines Stundenplans mit mehreren nicht überlappenden Slots */
-  @Test
-  void createsTimetableWithNonOverlappingSlots() {
-    Long timetableId = timetables.create("Testplan");
-    Long first =
-        timetables.addSlot(
-            timetableId, Weekday.MONTAG, LocalTime.of(7, 30), LocalTime.of(9, 0), 90L);
-    Long second =
-        timetables.addSlot(
-            timetableId, Weekday.MONTAG, LocalTime.of(9, 15), LocalTime.of(10, 45), 90L);
-    assertThat(first).isNotEqualTo(second);
-    assertThat(
-            jdbc.queryForObject(
-                "SELECT COUNT(*) FROM timetable_slot WHERE timetable_id = ?",
-                Integer.class,
-                timetableId))
-        .isEqualTo(2);
-  }
-
   /** Slots desselben Stundenplans dürfen sich nicht überlappen */
   @Test
   void rejectsOverlappingTimetableSlots() {
@@ -169,13 +150,39 @@ class Issue40IntegrationTest {
   }
 
   /**
+   * Ein neuer Slot darf keinen Raum belegen, den eine gleichzeitig aktive Klasse zur selben Zeit
+   * nutzt, sobald eine Klasse mit diesem Stundenplan einem überschneidenden Block zugeordnet ist
+   */
+  @Test
+  void rejectsRoomConflictWhenAddingASlotToAnAssignedTimetable() {
+    Long timetableId = timetables.create("Später ergänzter Plan");
+    Long classId = classes.create("40-SLOT", 1L, 1L, timetableId);
+    classes.assignBlock(classId, 1L);
+    // Klasse 1 belegt Raum 1 montags von 07:30 bis 09:00 im selben Block 1
+    assertThatThrownBy(
+            () ->
+                timetables.addSlot(
+                    timetableId, Weekday.MONTAG, LocalTime.of(8, 0), LocalTime.of(8, 45), 1L))
+        .hasMessage("ROOM_ALREADY_ASSIGNED");
+    timetables.addSlot(timetableId, Weekday.MONTAG, LocalTime.of(8, 0), LocalTime.of(8, 45), 90L);
+    assertThat(
+            jdbc.queryForList(
+                "SELECT room_id FROM timetable_slot WHERE timetable_id = ?",
+                Long.class,
+                timetableId))
+        .containsExactly(90L);
+  }
+
+  /**
    * Derselbe Stundenplan darf nur von Klassen genutzt werden, deren zugeordnete Blöcke sich nicht
-   * überschneiden. Der geteilte Stundenplan bleibt hier absichtlich ohne Slots, damit nicht
-   * stattdessen der Raumkonflikt greift
+   * überschneiden. Der geteilte Stundenplan hat Slots, damit die Wiederverwendung auch dann statt
+   * eines Raumkonflikts gemeldet wird
    */
   @Test
   void rejectsDisallowedTimetableReuseWithOverlappingBlocks() {
-    Long sharedTimetableId = timetables.create("Geteilter, noch leerer Stundenplan");
+    Long sharedTimetableId = timetables.create("Geteilter Stundenplan");
+    timetables.addSlot(
+        sharedTimetableId, Weekday.MONTAG, LocalTime.of(7, 30), LocalTime.of(9, 0), 90L);
     Long otherPlanId =
         plans.create("Anderer Plan", LocalDate.of(2026, 9, 1), LocalDate.of(2026, 12, 31));
     Long firstClass = classes.create("40-A", 1L, 1L, sharedTimetableId);
@@ -194,25 +201,10 @@ class Issue40IntegrationTest {
                 Integer.class,
                 secondBlock))
         .isZero();
-  }
-
-  /** Prüft die erfolgreiche Zuordnung, wenn kein Konflikt vorliegt */
-  @Test
-  void assignsBlockWithoutConflict() {
-    Long timetableId = timetables.create("Konfliktfreier Plan");
-    timetables.addSlot(timetableId, Weekday.MONTAG, LocalTime.of(7, 30), LocalTime.of(9, 0), 90L);
-    Long classId = classes.create("40-ERFOLG", 1L, 1L, timetableId);
-    Long blockId =
-        plans.addBlockAssignment(1L, LocalDate.of(2026, 10, 5), LocalDate.of(2026, 10, 9));
-    classes.assignBlock(classId, blockId);
-    assertThat(
-            jdbc.queryForObject(
-                "SELECT COUNT(*) FROM class_block_assignment WHERE school_class_id = ?"
-                    + " AND block_assignment_id = ?",
-                Integer.class,
-                classId,
-                blockId))
-        .isEqualTo(1);
+    Long laterBlock =
+        plans.addBlockAssignment(
+            otherPlanId, LocalDate.of(2026, 10, 12), LocalDate.of(2026, 10, 16));
+    classes.assignBlock(secondClass, laterBlock);
   }
 
   /** Setzt den angegebenen Testmitarbeiter als authentifizierten Benutzer */

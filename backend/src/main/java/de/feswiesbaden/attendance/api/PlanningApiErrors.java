@@ -1,6 +1,7 @@
 package de.feswiesbaden.attendance.api;
 
 import java.util.Map;
+import org.springframework.dao.PessimisticLockingFailureException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
@@ -10,7 +11,10 @@ import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 
-/** Übersetzt Fehler der Planungs-API in HTTP-Status und feste Fehlercodes */
+/**
+ * Übersetzt Fehler der Planungs-API in HTTP-Status und feste Fehlercodes. Getrennt von
+ * StaffApiErrors, bis die dortige Umstellung aus #82 gemergt ist
+ */
 @RestControllerAdvice(assignableTypes = PlanningController.class)
 class PlanningApiErrors {
   /** Meldet ungültige Anfragen ohne Eingabewerte in der Antwort */
@@ -21,6 +25,12 @@ class PlanningApiErrors {
   })
   ResponseEntity<Map<String, String>> invalidRequest() {
     return error(HttpStatus.BAD_REQUEST, "INVALID_REQUEST");
+  }
+
+  /** Meldet eine wegen gleichzeitiger Planungsänderung abgebrochene Transaktion */
+  @ExceptionHandler(PessimisticLockingFailureException.class)
+  ResponseEntity<Map<String, String>> concurrentChange() {
+    return error(HttpStatus.CONFLICT, "CONCURRENT_PLANNING_CHANGE");
   }
 
   /** Ordnet die Fehlercodes der Planungsservices einem HTTP-Status zu */

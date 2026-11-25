@@ -73,7 +73,7 @@ public class PlanningController {
   /** Legt einen Blockplan an. Das Löschdatum wird dabei berechnet und separat gespeichert */
   @PostMapping("/block-plans")
   @ResponseStatus(HttpStatus.CREATED)
-  public Created createBlockPlan(@RequestBody PeriodRequest request) {
+  public Created createBlockPlan(@RequestBody BlockPlanRequest request) {
     return new Created(blockPlans.create(request.name(), request.startsOn(), request.endsOn()));
   }
 
@@ -106,8 +106,11 @@ public class PlanningController {
   /** Enthält Wochentag, Beginn, Ende und Raum eines Slots */
   public record SlotRequest(Weekday weekday, LocalTime startsAt, LocalTime endsAt, Long roomId) {}
 
-  /** Enthält optional einen Namen sowie Beginn und Ende eines Blockplans oder Blocks */
-  public record PeriodRequest(String name, LocalDate startsOn, LocalDate endsOn) {}
+  /** Enthält Namen, Beginn und Ende eines Blockplans */
+  public record BlockPlanRequest(String name, LocalDate startsOn, LocalDate endsOn) {}
+
+  /** Enthält Beginn und Ende eines Blocks */
+  public record PeriodRequest(LocalDate startsOn, LocalDate endsOn) {}
 
   /** Enthält den zuzuordnenden Block */
   public record BlockRequest(@NotNull @Positive Long blockId) {}

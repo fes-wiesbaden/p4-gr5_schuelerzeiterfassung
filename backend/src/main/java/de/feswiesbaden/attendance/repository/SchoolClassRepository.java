@@ -167,43 +167,21 @@ public class SchoolClassRepository {
     jdbc.update("UPDATE school_class SET block_plan_id = ? WHERE id = ?", planId, classId);
   }
 
-  /** Sperrt den Blockzeitraum und liefert seinen Blockplan sowie Beginn und Ende */
-  public Optional<BlockAssignmentData> lockBlockAssignment(Long blockAssignmentId) {
-    return jdbc
-        .query(
-            "SELECT id, block_plan_id, starts_on, ends_on FROM block_assignment WHERE id = ?"
-                + " FOR UPDATE",
-            (row, index) ->
-                new BlockAssignmentData(
-                    row.getLong("id"),
-                    row.getLong("block_plan_id"),
-                    row.getDate("starts_on").toLocalDate(),
-                    row.getDate("ends_on").toLocalDate()),
-            blockAssignmentId)
-        .stream()
-        .findFirst();
-  }
-
-  /**
-   * Prüft, ob eine andere Klasse denselben Stundenplan verwendet und einen zeitlich überlappenden
-   * Block zugeordnet hat. Derselbe Stundenplan darf nur von Klassen genutzt werden, deren
-   * zugeordnete Blöcke sich nicht überschneiden
-   */
-  public boolean timetableSharedWithOverlappingBlock(
-      Long excludeClassId, Long timetableId, LocalDate periodStart, LocalDate periodEnd) {
-    return !jdbc.queryForList(
-            """
-            SELECT DISTINCT c.id FROM school_class c
-            JOIN class_block_assignment cba ON cba.school_class_id = c.id
-            JOIN block_assignment b ON b.id = cba.block_assignment_id
-            WHERE c.id <> ? AND c.timetable_id = ? AND b.starts_on <= ? AND b.ends_on >= ?
-            """,
-            Long.class,
-            excludeClassId,
-            timetableId,
-            periodEnd,
-            periodStart)
-        .isEmpty();
+  /** Liefert die zugeordneten Blockzeiträume aller Klassen, die den Stundenplan verwenden */
+  public List<ClassPeriod> findPeriodsByTimetable(Long timetableId) {
+    return jdbc.query(
+        """
+        SELECT c.id, b.starts_on, b.ends_on FROM school_class c
+        JOIN class_block_assignment cba ON cba.school_class_id = c.id
+        JOIN block_assignment b ON b.id = cba.block_assignment_id
+        WHERE c.timetable_id = ?
+        """,
+        (row, index) ->
+            new ClassPeriod(
+                row.getLong("id"),
+                row.getDate("starts_on").toLocalDate(),
+                row.getDate("ends_on").toLocalDate()),
+        timetableId);
   }
 
   /** Ordnet der Klasse den Blockzeitraum zu */
@@ -221,9 +199,14 @@ public class SchoolClassRepository {
   /** Enthält Beginn und Ende eines Blockplans */
   public record PlanDates(LocalDate startsOn, LocalDate endsOn) {}
 
-  /** Enthält den zugehörigen Blockplan sowie Beginn und Ende eines Blockzeitraums */
-  public record BlockAssignmentData(
-      Long id, Long blockPlanId, LocalDate startsOn, LocalDate endsOn) {}
+  /** Enthält eine Klasse und einen ihr zugeordneten Blockzeitraum */
+  public record ClassPeriod(Long classId, LocalDate startsOn, LocalDate endsOn) {
+
+    /** Prüft, ob sich der Blockzeitraum mit dem angegebenen Zeitraum überschneidet */
+    public boolean overlaps(LocalDate start, LocalDate end) {
+      return !startsOn.isAfter(end) && !endsOn.isBefore(start);
+    }
+  }
 
   /** Enthält Klassenkennung, Klassenlehrkraft und aktuelle Planverweise */
   public record ClassData(
