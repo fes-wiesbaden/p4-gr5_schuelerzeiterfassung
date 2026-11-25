@@ -1,12 +1,12 @@
 /* Gestaltung der JavaFX-Terminalanzeige und ihrer Scan-Zustände */
 
 .root {
-  -fx-font-family: "Inter", "Cantarell", sans-serif;
-  -fx-background-color: #f8fafc;
+  -fx-font-family: "Noto Sans";
+  -fx-background-color: #f1f3f6;
 }
 
 .header {
-  -fx-background-color: #34558b;
+  -fx-background-color: #171b21;
   -fx-padding: 14 24 14 24;
 }
 
@@ -29,9 +29,9 @@
   -fx-max-width: 150;
   -fx-max-height: 150;
   -fx-alignment: center;
-  -fx-background-radius: 75;
-  -fx-border-radius: 75;
-  -fx-border-width: 3;
+  -fx-background-radius: 28;
+  -fx-border-radius: 28;
+  -fx-border-width: 1;
 }
 
 .headline {
@@ -41,21 +41,21 @@
 
 .hint {
   -fx-font-size: 15px;
-  -fx-text-fill: #475569;
+  -fx-text-fill: #45505e;
 }
 
 .badge {
   -fx-padding: 8 18 8 18;
-  -fx-background-radius: 8;
-  -fx-border-radius: 8;
+  -fx-background-radius: 10;
+  -fx-border-radius: 10;
   -fx-border-width: 1;
   -fx-font-size: 13px;
 }
 
 /* Bereit */
-.state-ready .symbol   { -fx-background-color: #e4ebf6; -fx-border-color: #34558b; -fx-text-fill: #34558b; }
-.state-ready .headline { -fx-text-fill: #0f172a; }
-.state-ready .badge    { -fx-background-color: #e4ebf6; -fx-border-color: #34558b; -fx-text-fill: #34558b; }
+.state-ready .symbol   { -fx-background-color: #e7eef9; -fx-border-color: #235eac; -fx-text-fill: #235eac; }
+.state-ready .headline { -fx-text-fill: #232931; }
+.state-ready .badge    { -fx-background-color: #e7eef9; -fx-border-color: #235eac; -fx-text-fill: #235eac; }
 
 /* Erfolgsrückmeldung */
 .state-success .symbol   { -fx-background-color: #dcfce7; -fx-border-color: #15803d; -fx-text-fill: #15803d; }
@@ -74,26 +74,26 @@
 
 /* Wird gerade verarbeitet */
 .state-processing .symbol,
-.state-already-received .symbol { -fx-background-color: #e2e8f0; -fx-border-color: #475569; -fx-text-fill: #475569; }
+.state-already-received .symbol { -fx-background-color: #e2e8f0; -fx-border-color: #45505e; -fx-text-fill: #45505e; }
 .state-processing .headline,
-.state-already-received .headline { -fx-text-fill: #475569; }
+.state-already-received .headline { -fx-text-fill: #45505e; }
 .state-processing .badge,
-.state-already-received .badge { -fx-background-color: #e2e8f0; -fx-border-color: #475569; -fx-text-fill: #475569; }
+.state-already-received .badge { -fx-background-color: #e2e8f0; -fx-border-color: #45505e; -fx-text-fill: #45505e; }
 
 .footer {
   -fx-background-color: white;
-  -fx-border-color: #cbd5e1 transparent transparent transparent;
+  -fx-border-color: #cbd1d9 transparent transparent transparent;
   -fx-border-width: 1 0 0 0;
   -fx-padding: 10 24 10 24;
 }
 
 .footer-text {
   -fx-font-size: 12px;
-  -fx-text-fill: #475569;
+  -fx-text-fill: #45505e;
 }
 
 .footer-strong {
   -fx-font-size: 12px;
   -fx-font-weight: bold;
-  -fx-text-fill: #475569;
+  -fx-text-fill: #45505e;
 }

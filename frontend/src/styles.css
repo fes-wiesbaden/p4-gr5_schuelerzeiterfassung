@@ -13,3 +13,56 @@
 body {
   margin: 0;
 }
+
+:root {
+  --paper: #f1f3f6;
+  --ink: #232931;
+  --accent: #235eac;
+  --line: #cbd1d9;
+  color: var(--ink);
+  background: var(--paper);
+}
+h1 {
+  font-size: 2rem;
+  letter-spacing: -0.03em;
+  line-height: 1.16;
+}
+.class-filter {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.75rem;
+  font-weight: 600;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+select {
+  min-height: 44px;
+  max-width: 100%;
+  font: inherit;
+  color: var(--ink);
+  padding: 0.5rem 0.65rem;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: white;
+}
+:focus-visible {
+  outline: 2px solid #256bc6;
+  outline-offset: 2px;
+}
+::selection {
+  color: var(--ink);
+  background: #d8e8fc;
+}
+
+@media (max-width: 600px) {
+  h1 {
+    font-size: 1.65rem;
+  }
+  .class-filter {
+    width: 100%;
+  }
+  .class-filter select {
+    flex: 1;
+    min-width: 0;
+  }
+}

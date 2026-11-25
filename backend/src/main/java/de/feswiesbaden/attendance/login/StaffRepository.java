@@ -6,6 +6,10 @@ import org.springframework.data.repository.Repository;
 
 /** Lädt Mitarbeiterkonten für die Anmeldung anhand des Nutzernamens */
 public interface StaffRepository extends Repository<Staff, Long> {
+  boolean existsById(Long id);
+
+  Optional<Staff> findById(Long id);
+
   /** Sucht das Mitarbeiterkonto anhand des Nutzernamens */
   Optional<Staff> findByUsername(String username);
 }
