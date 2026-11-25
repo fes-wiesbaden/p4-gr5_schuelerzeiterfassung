@@ -12,7 +12,10 @@ import java.util.Optional;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 
-/** Liest und ändert Schülerdaten, Klassenzuordnungen und Kartenkennungen */
+/**
+ * Liest und ändert Schülerdaten. Bindet Kartenkennungen direkt, damit Spring sie nicht im
+ * JDBC-Trace ausgibt
+ */
 @Repository
 public class StudentRepository {
   private static final String STUDENT_COLUMNS =
@@ -38,8 +41,8 @@ public class StudentRepository {
   public Optional<Long> findIdByRfidUid(String rfidUid) {
     return jdbc.query(
         "SELECT id FROM student WHERE rfid_uid = ?",
-        rs -> rs.next() ? Optional.of(rs.getLong("id")) : Optional.empty(),
-        rfidUid);
+        statement -> statement.setString(1, rfidUid),
+        rs -> rs.next() ? Optional.of(rs.getLong("id")) : Optional.empty());
   }
 
   /** Liefert die Zuordnungen vorhandener Karten mit Schülername und Klassenkürzel */
@@ -111,7 +114,12 @@ public class StudentRepository {
 
   /** Setzt oder entfernt die Kartenkennung und liefert die Zahl betroffener Zeilen */
   public int updateUid(Long studentId, String uid) {
-    return jdbc.update("UPDATE student SET rfid_uid = ? WHERE id = ?", uid, studentId);
+    return jdbc.update(
+        "UPDATE student SET rfid_uid = ? WHERE id = ?",
+        statement -> {
+          statement.setString(1, uid);
+          statement.setObject(2, studentId);
+        });
   }
 
   /** Liest Stammdaten, Klassen-ID und beide Fehlminutenkonten aus dem SQL-Abfrageergebnis */
@@ -141,5 +149,11 @@ public class StudentRepository {
       Long id, String firstName, String lastName, LocalDateTime createdAt) {}
 
   /** Enthält die sichtbaren Felder der Kartenzuordnung für Lehrkräfte */
-  public record RfidAssignment(String studentName, String classCode, String rfidUid) {}
+  public record RfidAssignment(String studentName, String classCode, String rfidUid) {
+    /** Hält Schülerdaten und UID aus der Textdarstellung für technische Logs heraus */
+    @Override
+    public String toString() {
+      return "RfidAssignment";
+    }
+  }
 }

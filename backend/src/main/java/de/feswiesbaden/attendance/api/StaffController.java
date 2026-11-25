@@ -166,7 +166,13 @@ public class StaffController {
   public record StudentRequest(String firstName, String lastName, LocalDate birthDate) {}
 
   /** Enthält ausschließlich die neu zuzuweisende Kartenkennung */
-  public record RfidUidRequest(String uid) {}
+  public record RfidUidRequest(String uid) {
+    /** Hält die UID aus der Textdarstellung für technische Logs heraus */
+    @Override
+    public String toString() {
+      return "RfidUidRequest";
+    }
+  }
 
   /** Enthält den gewünschten Status und den Zeitpunkt, ab dem er gelten soll */
   public record CorrectionRequest(@NotBlank String status, @NotNull Instant occurredAt) {}

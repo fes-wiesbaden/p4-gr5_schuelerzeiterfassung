@@ -169,8 +169,6 @@ async function updateCard(remove: boolean) {
           autocomplete="off"
           spellcheck="false"
           aria-describedby="card-format"
-          pattern="(?:[0-9A-F]{8}|[0-9A-F]{14}|[0-9A-F]{20})"
-          maxlength="20"
           required
           :disabled="saving"
         />

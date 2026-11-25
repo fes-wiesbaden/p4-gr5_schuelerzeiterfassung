@@ -24,7 +24,7 @@ public class RfidUidService {
     this.authorization = authorization;
   }
 
-  /** Liefert Lehrkräften die Kartenzuordnungen aller Klassen */
+  /** Liefert Lehrkräften die RFID-Kartenzuordnungen der Schüler aus allen Klassen */
   @Transactional(readOnly = true)
   public List<RfidAssignment> listForTeacher() {
     if (authorization.currentStaff().administrator()) {

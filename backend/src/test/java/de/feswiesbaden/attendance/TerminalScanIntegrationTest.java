@@ -30,12 +30,15 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestInstance;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.context.TestComponent;
+import org.springframework.boot.test.system.CapturedOutput;
+import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.springframework.boot.test.web.server.LocalServerPort;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
 import org.springframework.context.annotation.Import;
@@ -66,6 +69,7 @@ import org.testcontainers.utility.MountableFile;
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 @Sql("/fixtures/attendance.sql")
 @Import(TerminalScanIntegrationTest.ScanBodyClock.class)
+@ExtendWith(OutputCaptureExtension.class)
 class TerminalScanIntegrationTest {
   private static final int TERMINAL_NUMBER = 23102003;
 
@@ -74,6 +78,9 @@ class TerminalScanIntegrationTest {
   private static final String RECEIPT_TIME = "2026-09-14T08:45:00Z";
 
   private static final String REJECTED = "{\"code\":\"SCAN_REJECTED\"}";
+
+  private static final String INVALID_UID =
+      "ABCDEF1234567890ABCDEF1234567890ABCDEF1234567890ABCDEF1234567890ABCDEF";
 
   @Container @ServiceConnection static MySQLContainer<?> mysql = new MySQLContainer<>("mysql:8.0");
 
@@ -268,7 +275,8 @@ class TerminalScanIntegrationTest {
 
   /** Prüft, dass die aktuelle Raumzuordnung für die Buchung gilt */
   @Test
-  void usesCurrentRoomFromDatabase() throws Exception {
+  @ExtendWith(RfidLoggingExtension.class)
+  void usesCurrentRoomFromDatabase(CapturedOutput output) throws Exception {
     jdbc.update("DELETE FROM terminal WHERE terminal_id = 9002");
     jdbc.update("UPDATE terminal SET room_id = 2 WHERE terminal_id = ?", TERMINAL_NUMBER);
     var wrongRoom = send(terminal, scanRequest(UUID.randomUUID()));
@@ -279,6 +287,9 @@ class TerminalScanIntegrationTest {
     jdbc.update("UPDATE terminal SET room_id = 1 WHERE terminal_id = ?", TERMINAL_NUMBER);
     assertThat(send(terminal, scanRequest(UUID.randomUUID())).statusCode()).isEqualTo(204);
     assertThat(rawCount()).isEqualTo(2);
+    assertThat(output.getAll())
+        .contains("to [RawScanDTO[scanId=", "Setting SQL statement parameter value")
+        .doesNotContain("TEST-UID-001");
   }
 
   /** Prüft die von nginx gesetzte Identität am echten Scan-Endpunkt */
@@ -434,12 +445,15 @@ class TerminalScanIntegrationTest {
 
   /** Prüft neutrale Ablehnungen für unlesbare und unvollständige Aufträge */
   @ParameterizedTest
-  @ValueSource(strings = {"{", "{}"})
-  void rejectsMalformedRequestsWithoutWritingRawScans(String body) throws Exception {
+  @ValueSource(strings = {"{", "{}", "{\"rfidUid\":\"" + INVALID_UID + "\"}"})
+  @ExtendWith(RfidLoggingExtension.class)
+  void rejectsMalformedRequestsWithoutWritingRawScans(String body, CapturedOutput output)
+      throws Exception {
     var response = send(terminal, proxyRequest(body));
     assertThat(response.statusCode()).isEqualTo(400);
     assertThat(response.body()).isEqualTo(REJECTED);
     assertThat(rawCount()).isZero();
+    assertThat(output.getAll()).doesNotContain(INVALID_UID.substring(0, 20));
   }
 
   private void assertNoBooking() {
