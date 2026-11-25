@@ -4,16 +4,22 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.contains;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.when;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import de.feswiesbaden.attendance.dtos.RawScanDTO;
+import de.feswiesbaden.attendance.enums.ScanResult;
 import de.feswiesbaden.attendance.login.StaffPrincipal;
+import de.feswiesbaden.attendance.service.AttendanceAccountingService;
 import jakarta.servlet.http.Cookie;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.List;
+import java.util.UUID;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -31,6 +37,7 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.context.jdbc.Sql;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.ResultActions;
+import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
 import org.testcontainers.containers.MySQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
@@ -48,6 +55,8 @@ class PlanningApiIntegrationTest {
   @Autowired JdbcTemplate jdbc;
 
   @Autowired MockMvc mvc;
+
+  @Autowired AttendanceAccountingService accounting;
 
   @MockitoBean Clock clock;
 
@@ -164,6 +173,121 @@ class PlanningApiIntegrationTest {
                 Integer.class,
                 timetableId))
         .isEqualTo(1);
+  }
+
+  @Test
+  void changesAndRemovesSlotsFromTheNextWeekWithoutRewritingAttendance() throws Exception {
+    Long blockId =
+        createdId(
+            write(
+                "/api/planning/block-plans/1/blocks",
+                admin,
+                """
+        {"startsOn":"2026-10-05","endsOn":"2026-10-16"}
+        """));
+    write("/api/planning/classes/1/blocks", admin, "{\"blockId\":" + blockId + "}")
+        .andExpect(status().isNoContent());
+
+    setTime("2026-10-05T05:45:00Z");
+    write(
+            put("/api/planning/timetables/1/slots/1"),
+            admin,
+            """
+        {"weekday":"DIENSTAG","startsAt":"08:00","endsAt":"09:00","roomId":2}
+        """)
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.effectiveOn").value("2026-10-13"));
+
+    setTime("2026-10-05T08:00:00Z");
+    write(delete("/api/planning/timetables/1/slots/2"), admin, "")
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.effectiveOn").value("2026-10-12"));
+    mvc.perform(get("/api/planning").session(admin))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.timetables[0].slots[*].weekday", contains("DIENSTAG")))
+        .andExpect(jsonPath("$.timetables[0].slots[0].validFrom").value("2026-10-13"));
+
+    setTime("2026-10-13T09:00:00Z");
+    assertThat(scan(9001, "2026-10-05T05:45:00Z")).isEqualTo(ScanResult.SUCCESS);
+    assertThat(scan(9001, "2026-10-12T05:45:00Z")).isEqualTo(ScanResult.REJECTED);
+    assertThat(scan(9001, "2026-10-13T06:15:00Z")).isEqualTo(ScanResult.REJECTED);
+    assertThat(scan(9002, "2026-10-13T06:15:00Z")).isEqualTo(ScanResult.SUCCESS);
+    accounting.closeDueDays();
+    assertThat(
+            jdbc.queryForList(
+                """
+        SELECT unexcused_minutes_delta FROM attendance_audit h
+        JOIN attendance a ON a.id = h.attendance_id
+        WHERE h.student_id = 1 AND event_type = 'DAILY_CLOSE' ORDER BY a.attendance_date
+        """,
+                Integer.class))
+        .containsExactly(180, 180, 60);
+  }
+
+  @Test
+  void permitsAnUnstartedSlotChangeThisWeekAndRejectsUnauthorizedOrConflictingChanges()
+      throws Exception {
+    String slot = "/api/planning/timetables/1/slots/1";
+    String change =
+        """
+        {"weekday":"MONTAG","startsAt":"08:00","endsAt":"09:00","roomId":1}
+        """;
+    setTime("2026-09-14T05:00:00Z");
+    write(put(slot), teacher, change).andExpect(status().isForbidden());
+    write(delete(slot), teacher, "").andExpect(status().isForbidden());
+    write(delete("/api/planning/timetables/2/slots/1"), admin, "").andExpect(status().isNotFound());
+    write(put(slot), admin, change.replace("09:00", "09:30"))
+        .andExpect(status().isConflict())
+        .andExpect(jsonPath("$.code").value("OVERLAPPING_TIMETABLE_SLOT"));
+    write(put(slot), admin, change.replace("\"roomId\":1", "\"roomId\":2"))
+        .andExpect(status().isConflict())
+        .andExpect(jsonPath("$.code").value("ROOM_ALREADY_ASSIGNED"));
+    write(put(slot), admin, change)
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.effectiveOn").value("2026-09-14"));
+  }
+
+  @Test
+  void cancelsTheUpcomingPredecessorWhenDeletingARescheduledSlot() throws Exception {
+    jdbc.update("UPDATE block_assignment SET starts_on = '2026-09-07' WHERE id = 1");
+    jdbc.update("UPDATE timetable_slot SET weekday = 'FREITAG' WHERE id = 1");
+    setTime("2026-09-17T08:00:00Z");
+    String slots = "/api/planning/timetables/1/slots/";
+    long slotId = 1;
+    for (String end : List.of("09:00", "08:45")) {
+      write(
+              put(slots + slotId),
+              admin,
+              """
+              {"weekday":"MONTAG","startsAt":"08:00","endsAt":"%s","roomId":1}
+              """
+                  .formatted(end))
+          .andExpect(status().isOk())
+          .andExpect(jsonPath("$.effectiveOn").value("2026-09-21"));
+      slotId =
+          jdbc.queryForObject(
+              "SELECT id FROM timetable_slot WHERE timetable_id = 1"
+                  + " AND valid_from = '2026-09-21' AND valid_until IS NULL",
+              Long.class);
+    }
+    write(delete(slots + slotId), admin, "")
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.effectiveOn").value("2026-09-18"));
+    mvc.perform(get("/api/planning").session(admin))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.timetables[0].slots[*].id", contains(2)));
+
+    setTime("2026-09-18T06:15:00Z");
+    assertThat(scan(9001, "2026-09-11T06:00:00Z")).isEqualTo(ScanResult.SUCCESS);
+    assertThat(scan(9001, "2026-09-18T06:00:00Z")).isEqualTo(ScanResult.REJECTED);
+  }
+
+  /** Sendet einen Testscan für einen Schüler ohne Buchung in den betroffenen Wochen */
+  private ScanResult scan(int terminal, String at) {
+    return accounting.recordScan(
+        "CN=terminal-" + terminal,
+        new RawScanDTO(UUID.randomUUID(), "TEST-UID-006", terminal, Instant.parse(at)),
+        clock.instant());
   }
 
   /**
@@ -306,9 +430,16 @@ class PlanningApiIntegrationTest {
 
   /** Führt einen POST mit Sitzung und passendem CSRF-Token aus */
   private ResultActions write(String url, MockHttpSession session, String body) throws Exception {
+    return write(post(url), session, body);
+  }
+
+  /** Führt eine schreibende Anfrage mit Sitzung und CSRF-Token aus */
+  private ResultActions write(
+      MockHttpServletRequestBuilder request, MockHttpSession session, String body)
+      throws Exception {
     String token = "test-csrf-token";
     return mvc.perform(
-        post(url)
+        request
             .session(session)
             .cookie(new Cookie("XSRF-TOKEN", token))
             .header("X-XSRF-TOKEN", token)

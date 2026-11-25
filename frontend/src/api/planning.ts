@@ -1,4 +1,4 @@
-import { getJson, postJson } from '@/api/client'
+import { deleteResource, getJson, postJson, putJson } from '@/api/client'
 
 export type Weekday =
   'MONTAG' | 'DIENSTAG' | 'MITTWOCH' | 'DONNERSTAG' | 'FREITAG'
@@ -11,13 +11,17 @@ export const WEEKDAYS: { value: Weekday; label: string }[] = [
   { value: 'FREITAG', label: 'Freitag' }
 ]
 
-export interface Slot {
-  id: number
+interface SlotInput {
   weekday: Weekday
   startsAt: string
   endsAt: string
   roomId: number
+}
+
+export interface Slot extends SlotInput {
+  id: number
   roomNumber: string
+  validFrom: string | null
 }
 
 export interface Timetable {
@@ -138,11 +142,37 @@ export async function createTimetable(name: string): Promise<number> {
 
 export async function addSlot(
   timetableId: number,
-  slot: { weekday: Weekday; startsAt: string; endsAt: string; roomId: number }
+  slot: SlotInput
 ): Promise<void> {
   await expectOk(
     await postJson(`/api/planning/timetables/${timetableId}/slots`, slot)
   )
+}
+
+export async function updateSlot(
+  timetableId: number,
+  slotId: number,
+  slot: SlotInput
+): Promise<string> {
+  const response = await expectOk(
+    await putJson(
+      `/api/planning/timetables/${timetableId}/slots/${slotId}`,
+      slot
+    )
+  )
+  return ((await response.json()) as { effectiveOn: string }).effectiveOn
+}
+
+export async function deleteSlot(
+  timetableId: number,
+  slotId: number
+): Promise<string> {
+  const response = await expectOk(
+    await deleteResource(
+      `/api/planning/timetables/${timetableId}/slots/${slotId}`
+    )
+  )
+  return ((await response.json()) as { effectiveOn: string }).effectiveOn
 }
 
 export async function createBlockPlan(plan: {

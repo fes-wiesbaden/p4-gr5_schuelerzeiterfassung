@@ -4,7 +4,6 @@ import de.feswiesbaden.attendance.repository.AttendanceAccountingRepository;
 import de.feswiesbaden.attendance.repository.BlockPlanRepository;
 import de.feswiesbaden.attendance.repository.SchoolClassRepository;
 import de.feswiesbaden.attendance.repository.SchoolClassRepository.ClassPlan;
-import de.feswiesbaden.attendance.repository.TimetableRepository;
 import java.time.Clock;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
@@ -35,7 +34,7 @@ public class SchoolClassService {
 
   private final BlockPlanRepository blockPlans;
 
-  private final TimetableRepository timetables;
+  private final TimetableService timetables;
 
   public SchoolClassService(
       SchoolClassRepository classes,
@@ -46,7 +45,7 @@ public class SchoolClassService {
       RetentionService retention,
       Clock clock,
       BlockPlanRepository blockPlans,
-      TimetableRepository timetables) {
+      TimetableService timetables) {
     this.classes = classes;
     this.authorization = authorization;
     this.accounting = accounting;
@@ -195,9 +194,8 @@ public class SchoolClassService {
                     && other.overlaps(block.startsOn(), block.endsOn()))) {
       throw new IllegalStateException("TIMETABLE_REUSE_NOT_ALLOWED");
     }
-    if (timetables.hasRoomConflict(classId, plan.timetableId(), block.startsOn(), block.endsOn())) {
-      throw new IllegalStateException("ROOM_ALREADY_ASSIGNED");
-    }
+    timetables.requireRoomAvailable(
+        classId, plan.timetableId(), block.startsOn(), block.endsOn(), null);
     try {
       classes.insertClassBlockAssignment(classId, blockAssignmentId);
     } catch (DuplicateKeyException duplicate) {

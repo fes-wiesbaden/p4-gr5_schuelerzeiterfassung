@@ -151,15 +151,15 @@ Stundenplan nur nacheinander nutzen.
 | `created_at` | `DATETIME` | not null, UTC | `2026-09-01 06:00:00` |
 | `changed_at` | `DATETIME` | not null, UTC | `2026-09-01 06:00:00` |
 
-Ab Beginn des ersten Blocks einer Klasse, die den Stundenplan verwendet, sind
-der Stundenplan und seine Slots unveränderlich. Eine spätere Planänderung
-verwendet einen neuen Stundenplan; bestehende Attendances bleiben unverändert.
-
 ### `timetable_slot`
 
-Ein wiederkehrendes Unterrichtsintervall. Eine Doppelstunde benötigt nur
-`start_time` und `end_time`, beispielsweise `07:30–09:00`; zusätzliche
-Start-/Endfelder wären redundant.
+Eine Fassung eines wiederkehrenden Unterrichtsintervalls. Bei einer Änderung
+endet die alte Fassung vor dem ersten betroffenen Termin. Eine neue Fassung
+beschreibt die künftigen Termine. Scanprüfung und Abrechnung lesen die Fassung,
+die am betroffenen Berliner Kalendertag galt.
+Neue Slots beginnen beim nächsten künftigen Termin. Änderungen und Löschungen
+greifen in der nächsten Woche, wenn ein betroffener Termin dieser Woche bereits
+begonnen hat.
 
 | Column | MySQL type | Rules | Example |
 | --- | --- | --- | --- |
@@ -169,14 +169,16 @@ Start-/Endfelder wären redundant.
 | `weekday` | `ENUM('MONTAG', 'DIENSTAG', 'MITTWOCH', 'DONNERSTAG', 'FREITAG')` | not null | `MONTAG` |
 | `start_time` | `TIME` | not null | `07:30:00` |
 | `end_time` | `TIME` | not null; DB CHECK `start_time <= end_time` (V5) | `09:00:00` |
+| `valid_from` | `DATE` | first valid date, null for legacy slots (V6) | `2026-09-21` |
+| `valid_until` | `DATE` | exclusive end, null if open; when both dates are set, `valid_from < valid_until` (V6) | `2026-10-05` |
+| `series_id` | `BIGINT` | ID of the first slot version, null on the first version (V6) | `12` |
 | `created_at` | `DATETIME` | not null, UTC | `2026-09-01 06:00:00` |
 | `changed_at` | `DATETIME` | not null, UTC | `2026-09-01 06:00:00` |
 
-Slots desselben Stundenplans dürfen sich am selben Wochentag nicht
-überschneiden. Das Backend verhindert außerdem Raumüberschneidungen zwischen
-Slots verschiedener Stundenpläne, wenn die Blöcke ihrer Klassen gleichzeitig
-aktiv sind. Sonst könnte ein Raumscan nicht eindeutig einer Klasse zugeordnet
-werden.
+Slots desselben Stundenplans dürfen sich am selben Termin zeitlich nicht
+überschneiden. Das Backend prüft Raumüberschneidungen an Terminen, die in
+den gleichzeitig aktiven Blöcken ihrer Klassen liegen. Slots ohne Dauer
+belegen keine Unterrichtszeit.
 
 ### `block_plan`
 

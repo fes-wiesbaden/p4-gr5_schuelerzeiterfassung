@@ -27,8 +27,10 @@ public class PlanningOverviewRepository {
   public List<SlotRow> findSlots() {
     return jdbc.query(
         """
-        SELECT s.id, s.timetable_id, s.weekday, s.start_time, s.end_time, s.room_id, r.room_number
+        SELECT s.id, s.timetable_id, s.weekday, s.start_time, s.end_time, s.room_id, r.room_number,
+               s.valid_from
         FROM timetable_slot s JOIN room r ON r.id = s.room_id
+        WHERE s.valid_until IS NULL
         ORDER BY s.timetable_id, s.weekday, s.start_time
         """,
         (row, index) ->
@@ -39,7 +41,8 @@ public class PlanningOverviewRepository {
                 row.getObject("start_time", LocalTime.class),
                 row.getObject("end_time", LocalTime.class),
                 row.getLong("room_id"),
-                row.getString("room_number")));
+                row.getString("room_number"),
+                row.getObject("valid_from", LocalDate.class)));
   }
 
   /** Liefert alle Blockpläne, die neuesten zuerst */
@@ -96,7 +99,8 @@ public class PlanningOverviewRepository {
       LocalTime startsAt,
       LocalTime endsAt,
       Long roomId,
-      String roomNumber) {}
+      String roomNumber,
+      LocalDate validFrom) {}
 
   /** Enthält Name und Zeitraum eines Blockplans */
   public record BlockPlanRow(Long id, String name, LocalDate startsOn, LocalDate endsOn) {}

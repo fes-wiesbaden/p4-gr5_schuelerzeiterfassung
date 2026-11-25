@@ -197,6 +197,7 @@ public class SecurityConfig {
                     .authenticated()
                     .requestMatchers(
                         HttpMethod.PUT,
+                        "/api/planning/timetables/{timetableId}/slots/{slotId}",
                         "/api/classes/{id}",
                         "/api/rooms/{id}",
                         "/api/teachers/{id}",
@@ -205,6 +206,7 @@ public class SecurityConfig {
                     .authenticated()
                     .requestMatchers(
                         HttpMethod.DELETE,
+                        "/api/planning/timetables/{timetableId}/slots/{slotId}",
                         "/api/classes/{id}",
                         "/api/rooms/{id}",
                         "/api/teachers/{id}",

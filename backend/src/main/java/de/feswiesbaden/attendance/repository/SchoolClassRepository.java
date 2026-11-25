@@ -175,7 +175,7 @@ public class SchoolClassRepository {
         SELECT c.id, b.starts_on, b.ends_on FROM school_class c
         JOIN class_block_assignment cba ON cba.school_class_id = c.id
         JOIN block_assignment b ON b.id = cba.block_assignment_id
-        WHERE c.timetable_id = ?
+        WHERE c.timetable_id = ? AND b.block_plan_id = c.block_plan_id
         """,
         (row, index) ->
             new ClassPeriod(

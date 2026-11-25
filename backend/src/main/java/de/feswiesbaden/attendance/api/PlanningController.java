@@ -13,9 +13,11 @@ import jakarta.validation.constraints.Positive;
 import java.time.LocalDate;
 import java.time.LocalTime;
 import org.springframework.http.HttpStatus;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.ResponseStatus;
@@ -74,6 +76,26 @@ public class PlanningController {
             request.roomId()));
   }
 
+  /** Ändert einen Slot ab einem zukünftigen Termin */
+  @PutMapping("/timetables/{timetableId}/slots/{slotId}")
+  public SlotChange updateSlot(
+      @PathVariable Long timetableId, @PathVariable Long slotId, @RequestBody SlotRequest request) {
+    return new SlotChange(
+        timetables.updateSlot(
+            timetableId,
+            slotId,
+            request.weekday(),
+            request.startsAt(),
+            request.endsAt(),
+            request.roomId()));
+  }
+
+  /** Löscht die zukünftigen Termine des Slots */
+  @DeleteMapping("/timetables/{timetableId}/slots/{slotId}")
+  public SlotChange deleteSlot(@PathVariable Long timetableId, @PathVariable Long slotId) {
+    return new SlotChange(timetables.deleteSlot(timetableId, slotId));
+  }
+
   /** Legt einen Blockplan an. Das Löschdatum wird dabei berechnet und separat gespeichert */
   @PostMapping("/block-plans")
   @ResponseStatus(HttpStatus.CREATED)
@@ -109,6 +131,9 @@ public class PlanningController {
 
   /** Enthält Wochentag, Beginn, Ende und Raum eines Slots */
   public record SlotRequest(Weekday weekday, LocalTime startsAt, LocalTime endsAt, Long roomId) {}
+
+  /** Enthält das Datum des ersten geänderten oder gelöschten Termins */
+  public record SlotChange(LocalDate effectiveOn) {}
 
   /** Enthält Namen, Beginn und Ende eines Blockplans */
   public record BlockPlanRequest(String name, LocalDate startsOn, LocalDate endsOn) {}

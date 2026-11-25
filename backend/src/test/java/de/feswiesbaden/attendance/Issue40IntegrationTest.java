@@ -2,12 +2,15 @@ package de.feswiesbaden.attendance;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.Mockito.when;
 
 import de.feswiesbaden.attendance.enums.Weekday;
 import de.feswiesbaden.attendance.login.StaffPrincipal;
 import de.feswiesbaden.attendance.service.BlockPlanService;
 import de.feswiesbaden.attendance.service.SchoolClassService;
 import de.feswiesbaden.attendance.service.TimetableService;
+import java.time.Clock;
+import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalTime;
 import java.util.List;
@@ -20,6 +23,7 @@ import org.springframework.boot.testcontainers.service.connection.ServiceConnect
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.context.jdbc.Sql;
 import org.testcontainers.containers.MySQLContainer;
 import org.testcontainers.junit.jupiter.Container;
@@ -46,8 +50,11 @@ class Issue40IntegrationTest {
 
   @Autowired SchoolClassService classes;
 
+  @MockitoBean Clock clock;
+
   @BeforeEach
   void prepare() {
+    when(clock.instant()).thenReturn(Instant.parse("2026-09-13T18:00:00Z"));
     signIn("test.admin");
     jdbc.update("INSERT INTO room (id, room_number) VALUES (90, 'KONFLIKT-R90')");
   }
@@ -150,6 +157,72 @@ class Issue40IntegrationTest {
         plans.addBlockAssignment(
             otherPlanId, LocalDate.of(2026, 10, 12), LocalDate.of(2026, 10, 16));
     classes.assignBlock(secondClass, laterBlock);
+  }
+
+  @Test
+  void acceptsOverlappingBlocksWithoutTheConflictingWeekday() {
+    Long planId = plans.create("Teilwoche", LocalDate.of(2026, 9, 1), LocalDate.of(2026, 9, 30));
+    Long blockId =
+        plans.addBlockAssignment(planId, LocalDate.of(2026, 9, 15), LocalDate.of(2026, 9, 18));
+    jdbc.update("UPDATE timetable_slot SET room_id = 1 WHERE id = 3");
+    Long classId = classes.create("40-TEILWOCHE", 1L, planId, 2L);
+    jdbc.update("DELETE FROM class_block_assignment WHERE school_class_id = 2");
+
+    classes.assignBlock(classId, blockId);
+
+    assertThat(
+            jdbc.queryForObject(
+                "SELECT block_assignment_id FROM class_block_assignment WHERE school_class_id = ?",
+                Long.class,
+                classId))
+        .isEqualTo(blockId);
+  }
+
+  @Test
+  void ignoresZeroDurationWhenAddingAnOverlappingSlot() {
+    jdbc.update("UPDATE timetable_slot SET start_time = '08:15', end_time = '08:15' WHERE id = 1");
+
+    Long slotId =
+        timetables.addSlot(1L, Weekday.MONTAG, LocalTime.of(8, 0), LocalTime.of(8, 45), 1L);
+
+    assertThat(
+            jdbc.queryForObject(
+                "SELECT timetable_id FROM timetable_slot WHERE id = ?", Long.class, slotId))
+        .isEqualTo(1L);
+  }
+
+  @Test
+  void ignoresZeroDurationOnEitherSideOfARoomConflict() {
+    jdbc.update(
+        "UPDATE timetable_slot SET room_id = 1, start_time = '08:15', end_time = '08:15' WHERE id = 3");
+    jdbc.update("DELETE FROM class_block_assignment WHERE school_class_id = 2");
+    // Derselbe Raum und dieselbe Uhrzeit wie bei Klasse 1, aber ohne Raumbelegung
+    classes.assignBlock(2L, 1L);
+
+    jdbc.update("DELETE FROM class_block_assignment WHERE school_class_id = 1");
+    classes.assignBlock(1L, 1L);
+
+    assertThat(
+            jdbc.queryForList(
+                "SELECT school_class_id FROM class_block_assignment WHERE block_assignment_id = 1",
+                Long.class))
+        .containsExactlyInAnyOrder(1L, 2L);
+  }
+
+  @Test
+  void ignoresOldAssignmentsWhenReusingATimetable() {
+    Long nextPlan =
+        plans.create("Nachfolgeplan", LocalDate.of(2027, 1, 1), LocalDate.of(2027, 6, 30));
+    jdbc.update("UPDATE school_class SET block_plan_id = ? WHERE id = 1", nextPlan);
+    Long classId = classes.create("40-NACHFOLGE", 1L, 1L, 1L);
+
+    classes.assignBlock(classId, 1L);
+
+    assertThat(
+            jdbc.queryForList(
+                "SELECT school_class_id FROM class_block_assignment WHERE block_assignment_id = 1",
+                Long.class))
+        .contains(1L, classId);
   }
 
   /** Setzt den angegebenen Testmitarbeiter als authentifizierten Benutzer */

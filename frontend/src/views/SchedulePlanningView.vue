@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
 import Button from 'primevue/button'
 import InputText from 'primevue/inputtext'
 
@@ -12,11 +12,14 @@ import {
   changeBlockPlan,
   createBlockPlan,
   createTimetable,
+  deleteSlot,
   formatDate,
   formatTime,
   loadOverview,
   resetAccounts,
+  updateSlot,
   type PlanningOverview,
+  type Slot,
   type Weekday
 } from '@/api/planning'
 
@@ -30,6 +33,8 @@ const feedback = reactive({ text: '', error: false })
 const selectedTimetableId = ref<number | null>(null)
 const selectedBlockPlanId = ref<number | null>(null)
 const selectedClassId = ref<number | null>(null)
+const editingSlotId = ref<number | null>(null)
+const slotWeekday = ref<HTMLSelectElement | null>(null)
 
 const timetableForm = reactive({ name: '' })
 const slotForm = reactive({
@@ -142,17 +147,62 @@ async function submitSlot() {
   }
   if (
     await run(async () => {
-      await addSlot(timetableId, {
+      const slot = {
         weekday: slotForm.weekday,
         startsAt: slotForm.startsAt,
         endsAt: slotForm.endsAt,
         roomId
-      })
+      }
+      if (editingSlotId.value !== null) {
+        const effectiveOn = await updateSlot(
+          timetableId,
+          editingSlotId.value,
+          slot
+        )
+        return `Slot geändert ab ${formatDate(effectiveOn)}.`
+      }
+      await addSlot(timetableId, slot)
       return 'Slot hinzugefügt.'
     })
   ) {
-    slotForm.startsAt = ''
-    slotForm.endsAt = ''
+    resetSlotForm()
+  }
+}
+
+async function editSlot(slot: Slot) {
+  editingSlotId.value = slot.id
+  Object.assign(slotForm, {
+    weekday: slot.weekday,
+    startsAt: slot.startsAt,
+    endsAt: slot.endsAt,
+    roomId: slot.roomId
+  })
+  await nextTick()
+  slotWeekday.value?.focus()
+}
+
+function resetSlotForm() {
+  editingSlotId.value = null
+  slotForm.startsAt = ''
+  slotForm.endsAt = ''
+}
+
+async function removeSlot(slot: Slot) {
+  const timetableId = selectedTimetableId.value
+  if (
+    timetableId === null ||
+    !window.confirm(
+      `Alle zukünftigen Termine dieses Slots löschen (geplant für ${weekdayLabel(slot.weekday)} um ${formatTime(slot.startsAt)} Uhr)?`
+    )
+  ) {
+    return
+  }
+  const removed = await run(async () => {
+    const effectiveOn = await deleteSlot(timetableId, slot.id)
+    return `Slot entfällt ab ${formatDate(effectiveOn)}.`
+  })
+  if (removed && editingSlotId.value === slot.id) {
+    resetSlotForm()
   }
 }
 
@@ -240,6 +290,8 @@ async function submitPlanChange() {
   }
 }
 
+watch(selectedTimetableId, resetSlotForm)
+
 watch(selectedClassId, () => {
   assignmentForm.blockId = null
   planChangeForm.nextBlockPlanId = null
@@ -286,7 +338,7 @@ onMounted(() => {
             <span>Stundenplan</span>
             <select
               v-model="selectedTimetableId"
-              :disabled="!overview.timetables.length"
+              :disabled="busy || !overview.timetables.length"
             >
               <option
                 v-for="timetable in overview.timetables"
@@ -310,6 +362,8 @@ onMounted(() => {
                 <th scope="col">Beginn</th>
                 <th scope="col">Ende</th>
                 <th scope="col">Raum</th>
+                <th scope="col">Gültig ab</th>
+                <th scope="col">Aktionen</th>
               </tr>
             </thead>
             <tbody>
@@ -318,9 +372,30 @@ onMounted(() => {
                 <td>{{ formatTime(slot.startsAt) }}</td>
                 <td>{{ formatTime(slot.endsAt) }}</td>
                 <td>{{ slot.roomNumber }}</td>
+                <td>{{ slot.validFrom ? formatDate(slot.validFrom) : '—' }}</td>
+                <td>
+                  <Button
+                    type="button"
+                    label="Bearbeiten"
+                    severity="secondary"
+                    size="small"
+                    :aria-label="`Slot ${weekdayLabel(slot.weekday)} ${formatTime(slot.startsAt)} bearbeiten`"
+                    :disabled="busy"
+                    @click="editSlot(slot)"
+                  />
+                  <Button
+                    type="button"
+                    label="Löschen"
+                    severity="danger"
+                    size="small"
+                    :aria-label="`Slot ${weekdayLabel(slot.weekday)} ${formatTime(slot.startsAt)} löschen`"
+                    :disabled="busy"
+                    @click="removeSlot(slot)"
+                  />
+                </td>
               </tr>
               <tr v-if="!selectedTimetable?.slots.length">
-                <td colspan="4" class="planning__empty">
+                <td colspan="6" class="planning__empty">
                   Noch keine Slots vorhanden.
                 </td>
               </tr>
@@ -330,10 +405,17 @@ onMounted(() => {
 
         <div class="planning__forms">
           <form class="planning__form" @submit.prevent="submitSlot">
-            <h3>Slot hinzufügen</h3>
+            <h3>
+              {{
+                editingSlotId === null ? 'Slot hinzufügen' : 'Slot bearbeiten'
+              }}
+            </h3>
+            <p v-if="editingSlotId !== null" class="planning__hint">
+              Änderungen gelten ab einem Termin, der noch nicht begonnen hat.
+            </p>
             <label>
               <span>Wochentag</span>
-              <select v-model="slotForm.weekday" required>
+              <select ref="slotWeekday" v-model="slotForm.weekday" required>
                 <option
                   v-for="day in WEEKDAYS"
                   :key="day.value"
@@ -346,11 +428,21 @@ onMounted(() => {
             <div class="planning__pair">
               <label>
                 <span>Beginn</span>
-                <InputText v-model="slotForm.startsAt" type="time" required />
+                <InputText
+                  v-model="slotForm.startsAt"
+                  type="time"
+                  step="1"
+                  required
+                />
               </label>
               <label>
                 <span>Ende</span>
-                <InputText v-model="slotForm.endsAt" type="time" required />
+                <InputText
+                  v-model="slotForm.endsAt"
+                  type="time"
+                  step="1"
+                  required
+                />
               </label>
             </div>
             <label>
@@ -369,6 +461,14 @@ onMounted(() => {
               type="submit"
               label="Slot speichern"
               :disabled="busy || selectedTimetableId === null"
+            />
+            <Button
+              v-if="editingSlotId !== null"
+              type="button"
+              label="Abbrechen"
+              severity="secondary"
+              :disabled="busy"
+              @click="resetSlotForm"
             />
           </form>
 
