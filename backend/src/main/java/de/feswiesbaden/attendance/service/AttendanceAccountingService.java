@@ -26,7 +26,6 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import java.util.stream.Collectors;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -45,10 +44,6 @@ public class AttendanceAccountingService {
   static final ZoneId BERLIN = ZoneId.of("Europe/Berlin");
 
   private static final Logger LOG = LoggerFactory.getLogger(AttendanceAccountingService.class);
-
-  /** Datenfehler, bei denen ein Scan neutral abgelehnt statt wiederholt wird */
-  private static final Set<String> DATA_PROBLEMS =
-      Set.of("INVALID_CLASS_BLOCK_ASSIGNMENT", "OVERLAPPING_SLOTS");
 
   private final AttendanceAccountingRepository accounting;
 
@@ -117,13 +112,10 @@ public class AttendanceAccountingService {
     Day day;
     try {
       day = lockDay(studentId, berlinDate(at));
-    } catch (IllegalStateException failure) {
-      // Fremde Blockzuordnungen und überlappende Slots sind Datenprobleme, die der Scan nicht lösen
-      // kann. Das Terminal soll ihn deshalb nicht endlos wiederholen. Alle anderen Fehler bleiben
-      // technische Fehler, damit der Scan in der Warteschlange erhalten bleibt
-      if (!DATA_PROBLEMS.contains(failure.getMessage())) {
-        throw failure;
-      }
+    } catch (InvalidClassBlockAssignmentException dataProblem) {
+      // Ein Datenproblem, das der Scan nicht lösen kann. Der Rohscan bleibt gespeichert und das
+      // Terminal wiederholt ihn nicht. Technische Fehler rollen dagegen zurück, damit das Terminal
+      // den Scan erneut senden kann
       return ScanResult.REJECTED;
     }
     if (day == null) {
@@ -139,6 +131,7 @@ public class AttendanceAccountingService {
             .findFirst()
             .orElse(null);
     if (slot == null
+        || hasOverlappingSlots(day.slots())
         || accounting.roomDoubleBooked(
             day.plan().classId(), roomId, slot.startsAt(), slot.endsAt(), day.date())) {
       return ScanResult.REJECTED;
@@ -467,27 +460,30 @@ public class AttendanceAccountingService {
   /** Verlangt, dass alle zugeordneten Blöcke zum aktuellen Klassenplan gehören */
   private static void requirePlanPeriods(ClassPlan plan, List<Period> periods) {
     if (periods.stream().anyMatch(period -> !period.planId().equals(plan.planId()))) {
-      throw new IllegalStateException("INVALID_CLASS_BLOCK_ASSIGNMENT");
+      throw new InvalidClassBlockAssignmentException();
     }
   }
 
-  /**
-   * Liefert die Slots des Wochentags innerhalb des Plans und eines zugeordneten Blocks. Erwartet
-   * nach Beginn sortierte Slots. Überlappende Slots würden Fehlminuten doppelt buchen und gelten
-   * deshalb für Scan, Korrektur und Abrechnung als Datenfehler
-   */
+  /** Liefert die Slots des Wochentags innerhalb des Plans und eines zugeordneten Blocks */
   private static List<Slot> slotsFor(
       ClassPlan plan, List<Period> periods, List<Slot> slots, LocalDate date) {
     if (date.isBefore(plan.startsOn()) || date.isAfter(plan.endsOn()) || !active(periods, date)) {
       return List.of();
     }
-    var daySlots = slots.stream().filter(slot -> slot.weekday() == date.getDayOfWeek()).toList();
+    return slots.stream().filter(slot -> slot.weekday() == date.getDayOfWeek()).toList();
+  }
+
+  /**
+   * Prüft, ob sich Slots des Tages überschneiden. Erwartet nach Beginn sortierte Slots, daher
+   * genügt der Vergleich mit dem Vorgänger. Direkt anschließende Slots überschneiden sich nicht
+   */
+  private static boolean hasOverlappingSlots(List<Slot> daySlots) {
     for (int i = 1; i < daySlots.size(); i++) {
       if (daySlots.get(i).startsAt().isBefore(daySlots.get(i - 1).endsAt())) {
-        throw new IllegalStateException("OVERLAPPING_SLOTS");
+        return true;
       }
     }
-    return daySlots;
+    return false;
   }
 
   /**

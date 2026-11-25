@@ -299,6 +299,7 @@ class TerminalScanIntegrationTest {
     var response = send(terminal, scanRequest(UUID.randomUUID()));
     assertThat(response.statusCode()).isEqualTo(400);
     assertThat(response.body()).isEqualTo(REJECTED);
+    assertThat(rawCount()).isOne();
     assertNoBooking();
   }
 

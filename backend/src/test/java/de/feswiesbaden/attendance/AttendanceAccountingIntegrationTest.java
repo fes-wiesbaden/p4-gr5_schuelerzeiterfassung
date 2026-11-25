@@ -550,18 +550,19 @@ class AttendanceAccountingIntegrationTest {
   }
 
   /**
-   * Überschneiden sich zwei Slots des Tages, auch abseits des gescannten Slots, lehnen Scan und
-   * Tagesabschluss den Tag ab, statt die überlappenden Minuten doppelt zu buchen
+   * Überschneiden sich frühere Slots des Tages, wird auch ein Scan im späteren, selbst nicht
+   * überlappenden Slot neutral abgelehnt. Der Rohscan bleibt gespeichert
    */
   @Test
-  void rejectsScanAndDailyCloseWhenSlotsOfTheDayOverlap() {
+  void rejectsScansWhenEarlierSlotsOfTheDayOverlap() {
     jdbc.update(
         "INSERT INTO timetable_slot (id, timetable_id, room_id, weekday, start_time, end_time)"
             + " VALUES (99, 1, 2, 'MONTAG', '08:00:00', '08:45:00')");
     setTime("2026-09-14T07:20:00Z");
+    var rawScans = jdbc.queryForObject("SELECT COUNT(*) FROM raw_scan", Integer.class);
     assertThat(scan(1, "2026-09-14T07:15:00Z")).isFalse();
-    setTime("2026-09-14T22:00:00Z");
-    accounting.closeDueDays();
+    assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM raw_scan", Integer.class))
+        .isEqualTo(rawScans + 1);
     assertThat(
             jdbc.queryForObject(
                 "SELECT COUNT(*) FROM attendance_audit WHERE student_id = 1", Integer.class))
