@@ -641,9 +641,9 @@ onMounted(() => {
   flex-direction: column;
   gap: 16px;
   padding: 20px;
-  background: #ffffff;
-  border: 1px solid #e2e5ea;
-  border-radius: 10px;
+  background: white;
+  border: 1px solid var(--line);
+  border-radius: 14px;
 }
 
 .planning__card-header {
@@ -657,13 +657,13 @@ onMounted(() => {
 .planning__card h2 {
   margin: 0;
   font-size: 1.05rem;
-  color: #1e3a5c;
+  color: var(--ink);
 }
 
 .planning__form h3 {
   margin: 0;
   font-size: 0.95rem;
-  color: #2b3648;
+  color: var(--ink);
 }
 
 .planning__forms {
@@ -688,7 +688,7 @@ onMounted(() => {
   gap: 6px;
   font-size: 0.85rem;
   font-weight: 600;
-  color: #2b3648;
+  color: var(--ink);
 }
 
 .planning__inline {
@@ -704,14 +704,7 @@ onMounted(() => {
 }
 
 .planning select {
-  min-height: 38px;
-  padding: 6px 10px;
-  border: 1px solid #cbd2dc;
-  border-radius: 6px;
-  background: #ffffff;
-  font: inherit;
   font-weight: 400;
-  color: inherit;
 }
 
 .planning__form :deep(input) {
@@ -754,7 +747,7 @@ onMounted(() => {
 .planning__table th,
 .planning__table td {
   padding: 10px 12px;
-  border-bottom: 1px solid #e2e5ea;
+  border-bottom: 1px solid var(--line);
   text-align: left;
   white-space: nowrap;
 }
