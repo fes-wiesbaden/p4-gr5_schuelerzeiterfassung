@@ -34,6 +34,7 @@ logging:
   level:
     # MVC-Validierungsfehler können abgelehnte Kartenkennungen enthalten.
     org.springframework.web.servlet.mvc.method.annotation.ExceptionHandlerExceptionResolver: INFO
+    org.springframework.web.method.HandlerMethod: INFO
 
 management:
   endpoints:
