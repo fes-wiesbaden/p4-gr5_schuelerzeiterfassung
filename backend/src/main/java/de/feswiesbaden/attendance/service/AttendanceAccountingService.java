@@ -470,7 +470,7 @@ public class AttendanceAccountingService {
     if (date.isBefore(plan.startsOn()) || date.isAfter(plan.endsOn()) || !active(periods, date)) {
       return List.of();
     }
-    return slots.stream().filter(slot -> slot.weekday() == date.getDayOfWeek()).toList();
+    return slots.stream().filter(slot -> slot.occursOn(date)).toList();
   }
 
   /**

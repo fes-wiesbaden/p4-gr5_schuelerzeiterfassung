@@ -2,8 +2,10 @@ package de.feswiesbaden.attendance.service;
 
 import de.feswiesbaden.attendance.entities.BlockPlan;
 import de.feswiesbaden.attendance.repository.BlockPlanRepository;
+import de.feswiesbaden.attendance.repository.SchoolClassRepository;
 import java.time.LocalDate;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 
 /** Legt Blockpläne mit dem zugehörigen Löschdatum an */
@@ -15,13 +17,17 @@ public class BlockPlanService {
 
   private final DeletionDateService deletionDates;
 
+  private final SchoolClassRepository classes;
+
   public BlockPlanService(
       BlockPlanRepository plans,
       StaffAuthorization authorization,
-      DeletionDateService deletionDates) {
+      DeletionDateService deletionDates,
+      SchoolClassRepository classes) {
     this.plans = plans;
     this.authorization = authorization;
     this.deletionDates = deletionDates;
+    this.classes = classes;
   }
 
   /**
@@ -47,5 +53,30 @@ public class BlockPlanService {
     plans.insert(plan);
     deletionDates.getOrCreate(endsOn);
     return plan.getId();
+  }
+
+  /**
+   * Fügt dem Blockplan einen Blockzeitraum hinzu, sofern der Plan existiert, der Zeitraum innerhalb
+   * des Plans liegt, Beginn vor oder am Ende liegt und sich der Zeitraum nicht mit einem bereits
+   * vorhandenen Block desselben Plans überlappt. Blöcke eines Blockplans dürfen sich nicht
+   * überlappen
+   */
+  // SERIALIZABLE, damit parallele Planungsänderungen die Konfliktprüfung nicht umgehen
+  @Transactional(isolation = Isolation.SERIALIZABLE)
+  public Long addBlockAssignment(Long blockPlanId, LocalDate startsOn, LocalDate endsOn) {
+    authorization.requireAdministrator();
+    var plan = blockPlanId == null ? null : classes.lockPlanDates(blockPlanId).orElse(null);
+    if (plan == null
+        || startsOn == null
+        || endsOn == null
+        || startsOn.isAfter(endsOn)
+        || startsOn.isBefore(plan.startsOn())
+        || endsOn.isAfter(plan.endsOn())) {
+      throw new IllegalArgumentException("INVALID_BLOCK_ASSIGNMENT");
+    }
+    if (plans.hasOverlappingBlockAssignment(blockPlanId, startsOn, endsOn)) {
+      throw new IllegalArgumentException("OVERLAPPING_BLOCK_ASSIGNMENT");
+    }
+    return plans.insertBlockAssignment(blockPlanId, startsOn, endsOn);
   }
 }

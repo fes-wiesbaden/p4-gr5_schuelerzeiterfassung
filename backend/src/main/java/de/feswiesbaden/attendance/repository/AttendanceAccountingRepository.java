@@ -100,15 +100,17 @@ public class AttendanceAccountingRepository {
   /** Lädt die Unterrichtszeiten nach Beginn sortiert und verwendet bei Bedarf eine Lesesperre */
   public List<Slot> findSlots(Long timetableId, boolean lock) {
     return jdbc.query(
-        "SELECT weekday, start_time, end_time, room_id FROM timetable_slot"
+        "SELECT weekday, start_time, end_time, room_id, valid_from, valid_until FROM timetable_slot"
             + " WHERE timetable_id = ? AND start_time < end_time ORDER BY start_time, id"
             + (lock ? " FOR SHARE" : ""),
         (row, index) ->
             new Slot(
-                DayOfWeek.of(Weekday.valueOf(row.getString("weekday")).ordinal() + 1),
+                Weekday.valueOf(row.getString("weekday")).dayOfWeek(),
                 row.getTime("start_time").toLocalTime(),
                 row.getTime("end_time").toLocalTime(),
-                row.getLong("room_id")),
+                row.getLong("room_id"),
+                row.getObject("valid_from", LocalDate.class),
+                row.getObject("valid_until", LocalDate.class)),
         timetableId);
   }
 
@@ -128,6 +130,8 @@ public class AttendanceAccountingRepository {
         JOIN block_plan p ON p.id = c.block_plan_id
         WHERE c.id <> ? AND s.room_id = ? AND s.weekday = ?
           AND s.start_time < s.end_time AND s.start_time < ? AND s.end_time > ?
+          AND (s.valid_from IS NULL OR s.valid_from <= ?)
+          AND (s.valid_until IS NULL OR s.valid_until > ?)
           AND b.block_plan_id = c.block_plan_id AND b.starts_on <= ? AND b.ends_on >= ?
           AND p.starts_on <= ? AND p.ends_on >= ?)
         """,
@@ -137,6 +141,8 @@ public class AttendanceAccountingRepository {
         Weekday.values()[date.getDayOfWeek().ordinal()].name(),
         endsAt,
         startsAt,
+        date,
+        date,
         date,
         date,
         date,
@@ -308,7 +314,20 @@ public class AttendanceAccountingRepository {
   public record Period(Long planId, LocalDate startsOn, LocalDate endsOn) {}
 
   /** Enthält Wochentag, Beginn, Ende und Raum einer geplanten Unterrichtszeit */
-  public record Slot(DayOfWeek weekday, LocalTime startsAt, LocalTime endsAt, long roomId) {}
+  public record Slot(
+      DayOfWeek weekday,
+      LocalTime startsAt,
+      LocalTime endsAt,
+      long roomId,
+      LocalDate validFrom,
+      LocalDate validUntil) {
+    /** Prüft Wochentag und Gültigkeit dieser Fassung für einen Kalendertag */
+    public boolean occursOn(LocalDate date) {
+      return weekday == date.getDayOfWeek()
+          && (validFrom == null || !date.isBefore(validFrom))
+          && (validUntil == null || date.isBefore(validUntil));
+    }
+  }
 
   /** Enthält ID, Datum und aktuellen Status einer Tagesanwesenheit */
   public record DayAttendance(Long id, LocalDate date, AttendanceStatus status) {}

@@ -56,6 +56,12 @@ class TimeIntervalMigrationTest {
     Flyway.configure().dataSource(dataSource).load().migrate();
 
     assertThat(TABLES.stream().map(this::rowsOf).toList()).isEqualTo(before);
+    assertThat(
+            jdbc.queryForObject(
+                "SELECT COUNT(*) FROM timetable_slot"
+                    + " WHERE valid_from IS NOT NULL OR valid_until IS NOT NULL OR series_id IS NOT NULL",
+                Integer.class))
+        .isZero();
   }
 
   /** Prüft den Abbruch bei vertauschten Zeitgrenzen und die Fortsetzung nach deren Korrektur */
@@ -89,8 +95,12 @@ class TimeIntervalMigrationTest {
     assertThat(TABLES.stream().map(this::rowsOf).toList()).isEqualTo(corrected);
   }
 
-  /** Liest die Tabellenzeilen nach ID sortiert für den Vergleich vor und nach der Migration */
+  /** Liest die Spalten des Ausgangsschemas vor und nach der Migration */
   private List<Map<String, Object>> rowsOf(String table) {
-    return jdbc.queryForList("SELECT * FROM " + table + " ORDER BY id");
+    String columns =
+        table.equals("timetable_slot")
+            ? "id, timetable_id, room_id, weekday, start_time, end_time, created_at, changed_at"
+            : "*";
+    return jdbc.queryForList("SELECT " + columns + " FROM " + table + " ORDER BY id");
   }
 }

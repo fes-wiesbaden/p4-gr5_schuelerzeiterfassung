@@ -1,6 +1,7 @@
 package de.feswiesbaden.attendance.service;
 
 import de.feswiesbaden.attendance.repository.AttendanceAccountingRepository;
+import de.feswiesbaden.attendance.repository.BlockPlanRepository;
 import de.feswiesbaden.attendance.repository.SchoolClassRepository;
 import de.feswiesbaden.attendance.repository.SchoolClassRepository.ClassPlan;
 import java.time.Clock;
@@ -11,6 +12,7 @@ import java.util.List;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 
 /** Verwaltet berechtigte Klassenzugriffe, Klassenanlage, Kontenresets und Planwechsel */
@@ -30,6 +32,10 @@ public class SchoolClassService {
 
   private final Clock clock;
 
+  private final BlockPlanRepository blockPlans;
+
+  private final TimetableService timetables;
+
   public SchoolClassService(
       SchoolClassRepository classes,
       StaffAuthorization authorization,
@@ -37,7 +43,9 @@ public class SchoolClassService {
       AttendanceAccountingService verification,
       DeletionDateService deletionDates,
       RetentionService retention,
-      Clock clock) {
+      Clock clock,
+      BlockPlanRepository blockPlans,
+      TimetableService timetables) {
     this.classes = classes;
     this.authorization = authorization;
     this.accounting = accounting;
@@ -45,6 +53,8 @@ public class SchoolClassService {
     this.deletionDates = deletionDates;
     this.retention = retention;
     this.clock = clock;
+    this.blockPlans = blockPlans;
+    this.timetables = timetables;
   }
 
   /** Liefert die für den angemeldeten Mitarbeiter zugänglichen Klassen */
@@ -154,6 +164,43 @@ public class SchoolClassService {
     }
     resetAccounts(plan, actor.id(), true);
     classes.replacePlan(classId, nextPlanId);
+  }
+
+  /**
+   * Ordnet der Klasse einen Blockzeitraum zu. Der Block muss zum aktuellen Blockplan der Klasse
+   * gehören, darf sich nicht mit dem Block einer anderen Klasse mit demselben Stundenplan
+   * überschneiden und keinen Raum verwenden, den eine gleichzeitig aktive Klasse belegt
+   */
+  // SERIALIZABLE, damit parallele Planungsänderungen die Konfliktprüfung nicht umgehen
+  @Transactional(isolation = Isolation.SERIALIZABLE)
+  public void assignBlock(Long classId, Long blockAssignmentId) {
+    authorization.requireAdministrator();
+    var plan =
+        classes
+            .lockPlan(classId)
+            .orElseThrow(() -> new IllegalArgumentException("CLASS_NOT_FOUND"));
+    var block =
+        blockPlans
+            .lockBlockAssignment(blockAssignmentId)
+            .orElseThrow(() -> new IllegalArgumentException("BLOCK_ASSIGNMENT_NOT_FOUND"));
+    if (!block.blockPlanId().equals(plan.planId())) {
+      throw new IllegalArgumentException("BLOCK_ASSIGNMENT_BELONGS_TO_ANOTHER_PLAN");
+    }
+    // Vor der Raumprüfung, da eine geteilte Stundenplannutzung sonst als Raumkonflikt erscheint
+    if (classes.findPeriodsByTimetable(plan.timetableId()).stream()
+        .anyMatch(
+            other ->
+                !other.classId().equals(classId)
+                    && other.overlaps(block.startsOn(), block.endsOn()))) {
+      throw new IllegalStateException("TIMETABLE_REUSE_NOT_ALLOWED");
+    }
+    timetables.requireRoomAvailable(
+        classId, plan.timetableId(), block.startsOn(), block.endsOn(), null);
+    try {
+      classes.insertClassBlockAssignment(classId, blockAssignmentId);
+    } catch (DuplicateKeyException duplicate) {
+      throw new IllegalStateException("BLOCK_ALREADY_ASSIGNED");
+    }
   }
 
   /**

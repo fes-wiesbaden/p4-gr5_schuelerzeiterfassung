@@ -168,12 +168,46 @@ public class SchoolClassRepository {
     jdbc.update("UPDATE school_class SET block_plan_id = ? WHERE id = ?", planId, classId);
   }
 
+  /** Liefert die zugeordneten Blockzeiträume aller Klassen, die den Stundenplan verwenden */
+  public List<ClassPeriod> findPeriodsByTimetable(Long timetableId) {
+    return jdbc.query(
+        """
+        SELECT c.id, b.starts_on, b.ends_on FROM school_class c
+        JOIN class_block_assignment cba ON cba.school_class_id = c.id
+        JOIN block_assignment b ON b.id = cba.block_assignment_id
+        WHERE c.timetable_id = ? AND b.block_plan_id = c.block_plan_id
+        """,
+        (row, index) ->
+            new ClassPeriod(
+                row.getLong("id"),
+                row.getDate("starts_on").toLocalDate(),
+                row.getDate("ends_on").toLocalDate()),
+        timetableId);
+  }
+
+  /** Ordnet der Klasse den Blockzeitraum zu */
+  public void insertClassBlockAssignment(Long classId, Long blockAssignmentId) {
+    jdbc.update(
+        "INSERT INTO class_block_assignment (school_class_id, block_assignment_id) VALUES (?, ?)",
+        classId,
+        blockAssignmentId);
+  }
+
   /** Enthält Klassen-, Blockplan- und Stundenplan-ID sowie Beginn und Ende des Blockplans */
   public record ClassPlan(
       Long classId, Long planId, Long timetableId, LocalDate startsOn, LocalDate endsOn) {}
 
   /** Enthält Beginn und Ende eines Blockplans */
   public record PlanDates(LocalDate startsOn, LocalDate endsOn) {}
+
+  /** Enthält eine Klasse und einen ihr zugeordneten Blockzeitraum */
+  public record ClassPeriod(Long classId, LocalDate startsOn, LocalDate endsOn) {
+
+    /** Prüft, ob sich der Blockzeitraum mit dem angegebenen Zeitraum überschneidet */
+    public boolean overlaps(LocalDate start, LocalDate end) {
+      return !startsOn.isAfter(end) && !endsOn.isBefore(start);
+    }
+  }
 
   /** Enthält Klassenkennung, Klassenlehrkraft und aktuelle Planverweise */
   public record ClassData(
