@@ -293,6 +293,19 @@ describe('LiveAttendanceView', () => {
     )
   })
 
+  it('bleibt nach Mitternacht bei gescheitertem Abruf beim Vortag mit Änderungsformular', async () => {
+    const wrapper = await mountView()
+    fetchMock.mockImplementationOnce(async () => respond(500, {}))
+
+    vi.setSystemTime(new Date('2026-09-14T22:00:30Z'))
+    await vi.advanceTimersByTimeAsync(30_000)
+
+    expect(wrapper.find('form.correction').exists()).toBe(true)
+    expect(wrapper.get('[role="alert"]').text()).toContain(
+      'konnte nicht geladen werden'
+    )
+  })
+
   it('zeigt während des Ladens keinen Hinweis auf fehlenden Tagesstatus', async () => {
     fetchMock.mockImplementation(async (url: string) =>
       url === '/api/classes'

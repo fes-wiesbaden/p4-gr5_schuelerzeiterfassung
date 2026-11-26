@@ -241,6 +241,7 @@ public class AttendanceAccountingService {
     var now = now();
     var today = berlinDate(now);
     var time = now.atOffset(ZoneOffset.UTC).atZoneSameInstant(BERLIN).toLocalTime();
+    var serverTime = now.toInstant(ZoneOffset.UTC);
     Long nextClassId = null;
     LocalTime nextStart = null;
     for (var schoolClass : classes.findAccessible(actor.id(), actor.administrator())) {
@@ -257,7 +258,7 @@ public class AttendanceAccountingService {
       }
       for (var slot : slots) {
         if (!time.isBefore(slot.startsAt()) && time.isBefore(slot.endsAt())) {
-          return new CurrentClass(schoolClass.id(), now.toInstant(ZoneOffset.UTC));
+          return new CurrentClass(schoolClass.id(), serverTime);
         }
         if (slot.startsAt().isAfter(time)
             && (nextStart == null || slot.startsAt().isBefore(nextStart))) {
@@ -266,7 +267,7 @@ public class AttendanceAccountingService {
         }
       }
     }
-    return new CurrentClass(nextClassId, now.toInstant(ZoneOffset.UTC));
+    return new CurrentClass(nextClassId, serverTime);
   }
 
   /**

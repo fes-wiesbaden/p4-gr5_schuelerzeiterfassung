@@ -66,18 +66,19 @@ function serverNow() {
 // angezeigt, damit ein langsamer Polling-Abruf keinen neueren Stand überschreibt
 async function load() {
   if (classId.value === undefined) return
-  // Bleibt die Seite über Mitternacht offen, wechselt die Ansicht auf den neuen Tag
-  const today = berlinDate(serverNow())
-  if (today > date.value) {
-    date.value = today
-    clearDrafts()
-  }
+  // Bleibt die Seite über Mitternacht offen, wechselt die Ansicht auf den neuen
+  // Tag. Anzeige und Eingaben wechseln erst mit der erfolgreichen Antwort
+  const day = berlinDate(serverNow())
   const request = ++latestRequest
   try {
     const students = await loadData<DailyStudent[]>(
-      `/api/classes/${classId.value}/attendance?date=${date.value}`
+      `/api/classes/${classId.value}/attendance?date=${day}`
     )
     if (request !== latestRequest) return
+    if (day !== date.value) {
+      date.value = day
+      clearDrafts()
+    }
     rows.value = students.map((student) => ({
       studentId: student.studentId,
       name: `${student.lastName}, ${student.firstName}`,
