@@ -30,6 +30,26 @@ statt vom ESP32. Einfach eine Zeile eintippen und Enter:
 Die Oberfläche hat bewusst **keinen Knopf** dafür laut Issue #37 darf sie gar
 keine Bedienelemente enthalten.
 
+## Release-Paket starten
+
+Das Terminal-ZIP für Linux x64, Windows x64 oder macOS ARM64 entpacken.
+Java 21 für dieselbe Architektur installieren. Im entpackten Ordner
+`terminal.properties.example` nach `terminal.properties` kopieren und
+Serveradresse, seriellen Port und die Pfade zu den eigenen mTLS-Dateien
+eintragen. Das Paket enthält die JavaFX-Bibliotheken.
+
+Linux und macOS:
+
+```bash
+java -cp 'attendance-terminal.jar:lib/*' de.feswiesbaden.terminal.Launcher
+```
+
+Windows:
+
+```powershell
+java -cp "attendance-terminal.jar;lib/*" de.feswiesbaden.terminal.Launcher
+```
+
 ## Mit echtem ESP32
 
 1. Einmalig die Werkzeuge zum Flashen einrichten (Arch/CachyOS):

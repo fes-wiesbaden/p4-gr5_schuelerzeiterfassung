@@ -4,6 +4,21 @@ on:
   push:
     branches:
       - '**'
+  pull_request:
+    branches:
+      - main
+    paths:
+      - package.json
+      - package-lock.json
+      - CHANGELOG.md
+  workflow_call:
+    inputs:
+      release_tag:
+        type: string
+        default: ''
+      checkout_ref:
+        type: string
+        default: ''
 
 permissions:
   contents: read
@@ -15,10 +30,12 @@ jobs:
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.checkout_ref }}
 
       - name: Set up Java
-        uses: actions/setup-java@v5
+        uses: actions/setup-java@d1374f8ac74474200d16ef8ecee22c7ae7a51880 # v6.3.0
         with:
           distribution: temurin
           java-version: "21"
@@ -33,16 +50,39 @@ jobs:
       - name: Run tests and build
         run: mvn -pl backend verify
 
+      - name: Prepare backend release asset
+        if: inputs.release_tag != ''
+        env:
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: cp backend/target/attendance-backend-*.jar "attendance-backend-${RELEASE_TAG#v}.jar"
+
+      - name: Upload backend release asset
+        if: inputs.release_tag != ''
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-backend
+          path: attendance-backend-*.jar
+          if-no-files-found: error
+          overwrite: true
+
   terminal:
     name: Terminal quality
-    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        os: ${{ fromJSON(inputs.release_tag != '' && '["ubuntu-latest","windows-2025","macos-15"]' || '["ubuntu-latest"]') }}
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.checkout_ref }}
 
       - name: Set up Java
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@d1374f8ac74474200d16ef8ecee22c7ae7a51880 # v6.3.0
         with:
           distribution: temurin
           java-version: "21"
@@ -50,16 +90,45 @@ jobs:
 
       # JavaFX braucht eine Anzeige. Der Runner hat keine, deshalb Xvfb
       - name: Install Xvfb
+        if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y xvfb
 
       - name: Check formatting
         run: mvn -pl terminal spotless:check
 
       - name: Run Checkstyle
-        run: mvn -pl terminal org.apache.maven.plugins:maven-checkstyle-plugin:3.6.0:check -Dcheckstyle.config.location=$PWD/backend/config/checkstyle/checkstyle.xml
+        run: mvn -pl terminal org.apache.maven.plugins:maven-checkstyle-plugin:3.6.0:check "-Dcheckstyle.config.location=${GITHUB_WORKSPACE}/backend/config/checkstyle/checkstyle.xml"
 
-      - name: Run tests and build
+      - name: Run tests and build under Xvfb
+        if: runner.os == 'Linux'
         run: xvfb-run -a mvn -pl terminal verify
+
+      - name: Run tests and build with native display
+        if: runner.os != 'Linux'
+        run: mvn -pl terminal verify
+
+      - name: Package terminal release
+        if: inputs.release_tag != ''
+        env:
+          RELEASE_TAG: ${{ inputs.release_tag }}
+          PLATFORM: ${{ runner.os }}-${{ runner.arch }}
+        run: |
+          package="attendance-terminal-${RELEASE_TAG#v}-$(printf '%s' "$PLATFORM" | tr '[:upper:]' '[:lower:]')"
+          mvn -pl terminal org.apache.maven.plugins:maven-dependency-plugin:3.8.1:copy-dependencies -DincludeScope=runtime
+          mkdir "$package"
+          cp terminal/target/attendance-terminal-*.jar "$package/attendance-terminal.jar"
+          cp -R terminal/target/dependency "$package/lib"
+          cp terminal/terminal.properties.example "$package/"
+          jar --create --no-manifest --file "$package.zip" -C "$package" .
+
+      - name: Upload terminal release asset
+        if: inputs.release_tag != ''
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-terminal-${{ runner.os }}-${{ runner.arch }}
+          path: attendance-terminal-*.zip
+          if-no-files-found: error
+          overwrite: true
 
   frontend:
     name: Frontend quality
@@ -67,10 +136,12 @@ jobs:
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.checkout_ref }}
 
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: "22.12.0"
           cache: npm
@@ -99,3 +170,19 @@ jobs:
       - name: Build frontend
         run: npm run build
         working-directory: frontend
+
+      - name: Package frontend release
+        if: inputs.release_tag != ''
+        env:
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: zip -qr "../../attendance-frontend-${RELEASE_TAG#v}.zip" .
+        working-directory: frontend/dist
+
+      - name: Upload frontend release asset
+        if: inputs.release_tag != ''
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-frontend
+          path: attendance-frontend-*.zip
+          if-no-files-found: error
+          overwrite: true

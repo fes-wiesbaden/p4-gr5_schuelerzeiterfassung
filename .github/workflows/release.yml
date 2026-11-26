@@ -1,0 +1,115 @@
+name: Release
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency: release-main
+
+jobs:
+  version:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    outputs:
+      release_tag: ${{ steps.release.outputs.tag }}
+      release_commit: ${{ steps.release.outputs.commit }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '22'
+          cache: npm
+
+      - run: npm ci --ignore-scripts
+
+      - name: Detect an unpublished project version
+        id: release
+        run: |
+          # Changesets creates the changelog in the first version PR.
+          if [[ ! -f CHANGELOG.md ]]; then
+            exit 0
+          fi
+
+          version="$(node -p "require('./package.json').version")"
+          if [[ ! "$version" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+            echo "Expected a project version in X.Y.Z format."
+            exit 1
+          fi
+
+          tag="v$version"
+          if git show-ref --verify --quiet "refs/tags/$tag"; then
+            exit 0
+          fi
+
+          # Build the commit that introduced the version, including on retries.
+          commit="$(git log --first-parent -m -1 --format=%H -G '^  "version":' -- package.json)"
+          test -n "$commit"
+          printf 'tag=%s\ncommit=%s\n' "$tag" "$commit" >> "$GITHUB_OUTPUT"
+
+      - name: Open or update project version PR
+        uses: changesets/action@a45c4d594aa4e2c509dc14a9f2b3b67ba3780d0d # v1
+        with:
+          version: npm run version
+          commit: 'chore: version Schülerzeiterfassung'
+          title: 'chore: version Schülerzeiterfassung'
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+
+  build:
+    needs: version
+    if: needs.version.outputs.release_tag != ''
+    uses: ./.github/workflows/quality.yml
+    with:
+      release_tag: ${{ needs.version.outputs.release_tag }}
+      checkout_ref: ${{ needs.version.outputs.release_commit }}
+
+  publish:
+    needs: [version, build]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.version.outputs.release_commit }}
+          persist-credentials: false
+
+      - name: Download release assets
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: release-*
+          path: release-assets
+          merge-multiple: true
+
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ needs.version.outputs.release_tag }}
+          RELEASE_COMMIT: ${{ needs.version.outputs.release_commit }}
+        run: |
+          version="${RELEASE_TAG#v}"
+          awk -v heading="## $version" '
+            { sub(/\r$/, "") }
+            $0 == heading { found = 1; next }
+            found && /^## / { exit }
+            found { print }
+          ' CHANGELOG.md > release-notes.md
+          grep -q '[^[:space:]]' release-notes.md
+
+          gh release create "$RELEASE_TAG" --target "$RELEASE_COMMIT" \
+            --title "$RELEASE_TAG" --notes-file release-notes.md \
+            "release-assets/attendance-backend-$version.jar" \
+            "release-assets/attendance-frontend-$version.zip" \
+            "release-assets/attendance-terminal-$version-linux-x64.zip" \
+            "release-assets/attendance-terminal-$version-windows-x64.zip" \
+            "release-assets/attendance-terminal-$version-macos-arm64.zip"

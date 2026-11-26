@@ -108,8 +108,6 @@ Der Workflow [Quality checks](.github/workflows/quality.yml) startet bei Pushes 
 
 Security-Scans sind derzeit nicht Bestandteil der Pipeline.
 
-Frontend und Backend werden ausschließlich lokal gestartet. Die Qualitätspipeline prüft weiterhin die Builds.
-
 Die lokale Compose-Umgebung startet MySQL und den mTLS-Proxy:
 
 ```sh
@@ -117,3 +115,30 @@ docker compose up --build -d
 ```
 
 Backend und Frontend laufen lokal. Einrichtung und Start stehen in der [README](README.md#lokal-debuggen).
+
+## Gemeinsamer Release
+
+Für veröffentlichungsrelevante Änderungen im Repository-Root einmal `npm ci`
+ausführen und mit `npm run changeset` eine Änderungsnotiz anlegen. Darin die
+Versionsstufe wählen (`patch`, `minor` oder `major`). Die Notiz kommt mit der
+Änderung in den PR.
+
+Sobald die Notiz auf `main` landet, öffnet oder aktualisiert der
+[Release-Workflow](.github/workflows/release.yml) den gemeinsamen Versions-PR.
+Nach dessen Merge prüft der Workflow die Builds, erstellt den Tag `vX.Y.Z`
+und veröffentlicht ein GitHub Release mit den Änderungsnotizen und fünf Dateien.
+
+Ein Repository-Admin muss unter **Settings → Actions → General → Workflow
+permissions** die Option **Allow GitHub Actions to create and approve pull
+requests** aktivieren. GitHub kann für den Bot-PR eine Freigabe der
+Qualitätsprüfungen verlangen.
+
+- Backend als ausführbare Spring-Boot-JAR für Java 21.
+- Frontend als ZIP mit statischen Dateien. Der HTTPS-Webserver leitet `/api/`
+  an das Backend weiter und liefert für Vue-Routen `index.html` aus.
+- Terminal als ZIP für Linux x64, Windows x64 und macOS auf Apple Silicon
+  (ARM64). [Start und Konfiguration](terminal/README.md#release-paket-starten)
+  stehen in der Terminal-Dokumentation.
+
+Der Workflow stellt die Pakete zum Download bereit. Datenbank, Webserver und
+TLS-Zertifikate werden bei der Installation eingerichtet.

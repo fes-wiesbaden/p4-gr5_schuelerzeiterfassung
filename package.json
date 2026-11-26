@@ -1,0 +1,12 @@
+{
+  "name": "schuelerzeiterfassung",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "changeset": "changeset",
+    "version": "changeset version && npm install --package-lock-only --ignore-scripts --no-audit --offline"
+  },
+  "devDependencies": {
+    "@changesets/cli": "2.31.1"
+  }
+}
