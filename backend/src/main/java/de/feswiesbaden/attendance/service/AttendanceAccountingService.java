@@ -239,8 +239,9 @@ public class AttendanceAccountingService {
   public CurrentClass findCurrentClass() {
     var actor = authorization.currentStaff();
     var now = now();
-    var today = berlinDate(now);
-    var time = now.atOffset(ZoneOffset.UTC).atZoneSameInstant(BERLIN).toLocalTime();
+    var berlin = now.atOffset(ZoneOffset.UTC).atZoneSameInstant(BERLIN);
+    var today = berlin.toLocalDate();
+    var time = berlin.toLocalTime();
     var serverTime = now.toInstant(ZoneOffset.UTC);
     Long nextClassId = null;
     LocalTime nextStart = null;

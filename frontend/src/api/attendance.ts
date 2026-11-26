@@ -14,7 +14,7 @@ export const ATTENDANCE_STATUSES = Object.keys(
   STATUS_LABELS
 ) as AttendanceStatus[]
 
-export interface DailyStudent {
+export type DailyStudent = {
   studentId: number
   firstName: string
   lastName: string
@@ -27,7 +27,7 @@ export interface CurrentClass {
   serverTime: string
 }
 
-const BERLIN = 'Europe/Berlin'
+export const BERLIN = 'Europe/Berlin'
 
 // Liefert den Berliner Kalendertag als YYYY-MM-DD
 export function berlinDate(at: Date): string {
@@ -55,5 +55,5 @@ export function berlinInstant(date: string, time: string): string {
     .formatToParts(new Date(`${local}Z`))
     .find((part) => part.type === 'timeZoneName')!
     .value.replace('GMT', '')
-  return new Date(`${local}${offset || 'Z'}`).toISOString()
+  return new Date(`${local}${offset}`).toISOString()
 }

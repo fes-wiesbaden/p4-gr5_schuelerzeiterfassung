@@ -122,16 +122,17 @@ describe('LiveAttendanceView', () => {
     ).toBe('08:30')
   })
 
-  it('behält bearbeitete Eingaben beim Polling', async () => {
+  it.each([
+    ['den Status', 'select', 'ENTSCHULDIGT'],
+    ['die Uhrzeit', 'input', '07:45']
+  ])('behält bearbeitet %s beim Polling', async (_, field, value) => {
     const wrapper = await mountView()
-    const form = wrapper.find('form.correction')
-    await form.find('select').setValue('ENTSCHULDIGT')
+    const input = wrapper.find(`form.correction ${field}`)
+    await input.setValue(value)
 
-    await vi.advanceTimersByTimeAsync(30_000)
+    await vi.advanceTimersByTimeAsync(30 * 60_000)
 
-    expect((form.find('select').element as HTMLSelectElement).value).toBe(
-      'ENTSCHULDIGT'
-    )
+    expect((input.element as HTMLInputElement).value).toBe(value)
   })
 
   it('richtet Tag und vorbelegte Uhrzeit an der Serverzeit statt an der Browseruhr aus', async () => {
@@ -209,16 +210,6 @@ describe('LiveAttendanceView', () => {
     await flushPromises()
 
     expect(wrapper.text()).toContain('Bitte Verbindung prüfen')
-  })
-
-  it('behält eine bearbeitete Uhrzeit beim Polling', async () => {
-    const wrapper = await mountView()
-    const time = wrapper.find('form.correction input')
-    await time.setValue('07:45')
-
-    await vi.advanceTimersByTimeAsync(30 * 60_000)
-
-    expect((time.element as HTMLInputElement).value).toBe('07:45')
   })
 
   it('lädt bei manuellem Aktualisieren sofort neu', async () => {

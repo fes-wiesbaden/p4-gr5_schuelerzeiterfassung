@@ -5,6 +5,7 @@ import { onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 
 import {
   ATTENDANCE_STATUSES,
+  BERLIN,
   STATUS_LABELS,
   berlinDate,
   berlinInstant,
@@ -22,12 +23,7 @@ import StatusBadge from '@/components/StatusBadge.vue'
 
 const POLL_INTERVAL_MS = 30_000
 
-type Row = {
-  studentId: number
-  name: string
-  status: AttendanceStatus
-  unexcusedMinutes: number
-}
+type Row = DailyStudent & { name: string }
 
 type SchoolClass = { id: number; classCode: string }
 
@@ -80,10 +76,8 @@ async function load() {
       clearDrafts()
     }
     rows.value = students.map((student) => ({
-      studentId: student.studentId,
-      name: `${student.lastName}, ${student.firstName}`,
-      status: student.status,
-      unexcusedMinutes: student.unexcusedMinutes
+      ...student,
+      name: `${student.lastName}, ${student.firstName}`
     }))
     // Unbearbeitete Eingaben folgen dem aktuellen Status und der aktuellen Uhrzeit,
     // damit ein Klick auf "Ändern" keinen zwischenzeitlichen Scan zurücksetzt
@@ -97,7 +91,7 @@ async function load() {
       }
     }
     updatedAt.value = serverNow().toLocaleTimeString('de-DE', {
-      timeZone: 'Europe/Berlin'
+      timeZone: BERLIN
     })
     loaded.value = true
     error.value = ''
@@ -156,7 +150,6 @@ async function initialize() {
       loadData<CurrentClass>('/api/attendance/current-class')
     ])
     clockOffset = Date.parse(current.serverTime) - Date.now()
-    date.value = berlinDate(serverNow())
     classes.value = visible
     classId.value = current.classId ?? visible[0]?.id
     initialized.value = true

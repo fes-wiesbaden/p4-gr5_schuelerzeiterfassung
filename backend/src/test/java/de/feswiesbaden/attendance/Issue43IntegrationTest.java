@@ -75,7 +75,8 @@ class Issue43IntegrationTest {
 
   /**
    * Laufender Slot, Pause vor dem nächsten Slot, Unterrichtsende, Block der anderen Klasse und der
-   * Berliner Tag kurz nach Mitternacht. Slots: montags 07:30-09:00 und 09:15-10:45 Berliner Zeit
+   * Berliner Tag kurz nach Mitternacht. Beim Administrator laufen Klasse 1 und 2 gleichzeitig.
+   * Slots: montags 07:30-09:00 und 09:15-10:45 Berliner Zeit
    */
   @ParameterizedTest
   @CsvSource({
@@ -85,7 +86,8 @@ class Issue43IntegrationTest {
     "test.teacher.a, 2026-09-14T09:00:00Z, ",
     "test.teacher.a, 2026-09-21T06:00:00Z, 3",
     "test.teacher.b, 2026-09-14T06:00:00Z, 2",
-    "test.teacher.a, 2026-09-13T22:30:00Z, 1"
+    "test.teacher.a, 2026-09-13T22:30:00Z, 1",
+    "test.admin, 2026-09-14T06:00:00Z, 1"
   })
   void preselectsTheAccessibleClassByTimetable(String username, String now, Long classId)
       throws Exception {
