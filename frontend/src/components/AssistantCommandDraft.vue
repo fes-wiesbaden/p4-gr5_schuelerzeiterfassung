@@ -39,6 +39,7 @@ const confirmLabel = computed(() => {
 const context = ref<CommandContext>()
 const values = ref<Values>({})
 const prepared = ref<Values>()
+const manualRequests = new Map<string, string>()
 const previewElement = ref<HTMLElement>()
 const error = ref('')
 const busy = ref(false)
@@ -207,8 +208,11 @@ async function prepare() {
     await perform(snapshot)
     return
   }
-  if (props.hint.key === 'add_absence_minutes')
-    snapshot.requestId = crypto.randomUUID()
+  if (props.hint.key === 'add_absence_minutes') {
+    const key = `${snapshot.studentName}/${snapshot.date}/${Number(snapshot.minutes)}`
+    snapshot.requestId = manualRequests.get(key) ?? crypto.randomUUID()
+    manualRequests.set(key, snapshot.requestId)
+  }
   prepared.value = snapshot
   error.value = ''
   await nextTick()
@@ -222,6 +226,7 @@ async function perform(snapshot: Values) {
   error.value = ''
   try {
     const result = await definition.run(snapshot, context.value)
+    manualRequests.clear()
     emit('saved', result, !definition.read)
   } catch (failure) {
     error.value =

@@ -6,6 +6,7 @@ import PrimeVue from 'primevue/config'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import AttendanceAssistant from './AttendanceAssistant.vue'
+import AssistantCommandDraft from './AssistantCommandDraft.vue'
 
 describe('Anwesenheitsassistent', () => {
   afterEach(() => vi.unstubAllGlobals())
@@ -179,6 +180,76 @@ describe('Anwesenheitsassistent', () => {
           .map(([url]) => url)
       ).toEqual(['/api/students/7'])
       expect(wrapper.text()).toContain('Schüler gelöscht.')
+    } finally {
+      wrapper.unmount()
+    }
+  })
+
+  it('behält die Anfrage-ID für dieselben Fehlminuten nach einem Verbindungsabbruch', async () => {
+    const bookings: RequestInit['body'][] = []
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url === '/api/classes')
+        return Response.json([{ id: 2, classCode: 'FI26A' }])
+      if (url === '/api/students')
+        return Response.json([
+          {
+            id: 7,
+            firstName: 'Robin',
+            lastName: 'Beispiel',
+            classId: 2,
+            birthDate: '2010-02-08'
+          }
+        ])
+      if (
+        url === '/api/students/7/attendance/2025-09-15/manual-absence-minutes'
+      ) {
+        bookings.push(init?.body)
+        if (bookings.length === 1) throw new TypeError('Verbindungsabbruch')
+        return Response.json({ changed: false })
+      }
+      return new Response(null, { status: 404 })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    const wrapper = mount(AssistantCommandDraft, {
+      props: {
+        hint: {
+          key: 'add_absence_minutes',
+          fields: {
+            classCode: 'FI26A',
+            studentName: 'Robin Beispiel',
+            date: '2025-09-15',
+            minutes: '45'
+          }
+        }
+      },
+      global: { plugins: [createPinia(), PrimeVue] }
+    })
+
+    try {
+      const click = (label: string) =>
+        wrapper
+          .findAll('button')
+          .find((button) => button.text() === label)!
+          .trigger('click')
+      await flushPromises()
+      await wrapper.get('form').trigger('submit')
+      await click('Änderung bestätigen')
+      await flushPromises()
+      expect(wrapper.get('[role="alert"]').text()).toContain(
+        'Das Ergebnis konnte nicht abgerufen werden.'
+      )
+
+      await wrapper.get('form').trigger('submit')
+      await click('Änderung bestätigen')
+      await flushPromises()
+
+      expect(bookings).toHaveLength(2)
+      expect(JSON.parse(String(bookings[0]))).toEqual({
+        minutes: 45,
+        requestId: expect.any(String)
+      })
+      expect(bookings[1]).toEqual(bookings[0])
+      expect(wrapper.emitted('saved')).toHaveLength(1)
     } finally {
       wrapper.unmount()
     }
