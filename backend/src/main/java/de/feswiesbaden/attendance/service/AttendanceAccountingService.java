@@ -9,23 +9,30 @@ import de.feswiesbaden.attendance.repository.AttendanceAccountingRepository.Acco
 import de.feswiesbaden.attendance.repository.AttendanceAccountingRepository.Audit;
 import de.feswiesbaden.attendance.repository.AttendanceAccountingRepository.DayAttendance;
 import de.feswiesbaden.attendance.repository.AttendanceAccountingRepository.Period;
+import de.feswiesbaden.attendance.repository.AttendanceAccountingRepository.PlannedStatus;
 import de.feswiesbaden.attendance.repository.AttendanceAccountingRepository.Slot;
 import de.feswiesbaden.attendance.repository.RawScanRepository;
 import de.feswiesbaden.attendance.repository.SchoolClassRepository;
 import de.feswiesbaden.attendance.repository.SchoolClassRepository.ClassPlan;
+import de.feswiesbaden.attendance.repository.StaffAccessRepository.StaffIdentity;
 import de.feswiesbaden.attendance.repository.StudentRepository;
 import java.time.Clock;
+import java.time.DayOfWeek;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.LocalTime;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.time.temporal.ChronoUnit;
+import java.time.temporal.TemporalAdjusters;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
+import java.util.TreeMap;
+import java.util.UUID;
 import java.util.stream.Collectors;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -137,7 +144,7 @@ public class AttendanceAccountingService {
       return ScanResult.REJECTED;
     }
 
-    var before = statusAt(day.audits(), at);
+    var before = statusAt(day.timeline(), at);
     if (before != AttendanceStatus.ABWESEND
         && before != AttendanceStatus.BETRIEBLICH_ENTSCHULDIGT) {
       return ScanResult.REJECTED;
@@ -164,11 +171,7 @@ public class AttendanceAccountingService {
   public boolean correctStatus(
       Long studentId, LocalDate date, AttendanceStatus status, Instant occurredAt) {
     var actor = authorization.currentStaff();
-    var classId =
-        students
-            .findClassId(studentId, false)
-            .orElseThrow(() -> new IllegalArgumentException("STUDENT_NOT_FOUND"));
-    authorization.requireClassAccess(classId, actor);
+    requireStudentClassAccess(studentId, actor);
     if (status == null
         || !validTime(occurredAt)
         || !occurredAt.atZone(BERLIN).toLocalDate().equals(date)) {
@@ -178,15 +181,250 @@ public class AttendanceAccountingService {
     if (day == null) {
       throw new IllegalArgumentException("ATTENDANCE_DAY_LOCKED_OR_UNPLANNED");
     }
+    return applyStatusChange(day, status, occurredAt, actor.id());
+  }
+
+  /** Entschuldigt die noch offenen Unterrichtsfehlzeiten des gewählten Berliner Tags */
+  @Transactional
+  public boolean excuseOpenAbsences(Long studentId, LocalDate date) {
+    var actor = authorization.currentStaff();
+    requireStudentClassAccess(studentId, actor);
+    var day = lockHistoryDay(studentId, date);
+    var changes =
+        AttendanceHistory.openAbsences(date, day.slots(), day.timeline()).stream()
+            .map(
+                absence ->
+                    new Change(
+                        AuditEventType.STATUS_CHANGE,
+                        AttendanceStatus.ABWESEND,
+                        AttendanceStatus.ENTSCHULDIGT,
+                        LocalDateTime.ofInstant(absence.startsAt(), ZoneOffset.UTC),
+                        actor.id(),
+                        null))
+            .toList();
+    return !changes.isEmpty() && reconcile(day, changes, null).changed();
+  }
+
+  /** Bucht zusätzliche unentschuldigte Minuten ohne Änderung des Statusverlaufs */
+  @Transactional
+  public boolean addManualAbsence(Long studentId, LocalDate date, int minutes, UUID requestId) {
+    var actor = authorization.currentStaff();
+    requireStudentClassAccess(studentId, actor);
+    if (minutes < 1 || requestId == null) {
+      throw new IllegalArgumentException("INVALID_MANUAL_ABSENCE_MINUTES");
+    }
+    var day = lockHistoryDay(studentId, date);
+    if (day.attendance() != null) {
+      var recorded = accounting.findManualBooking(day.attendance().id(), requestId);
+      if (recorded.isPresent()) {
+        if (recorded.get() != minutes) {
+          throw new IllegalArgumentException("ATTENDANCE_BOOKING_CHANGED");
+        }
+        return false;
+      }
+    }
+    if (minutes > Integer.MAX_VALUE - day.account().unexcused()) {
+      throw new IllegalArgumentException("INVALID_MANUAL_ABSENCE_MINUTES");
+    }
+    var datedAt = LocalDateTime.ofInstant(date.atStartOfDay(BERLIN).toInstant(), ZoneOffset.UTC);
+    var change =
+        new Change(AuditEventType.MANUAL_ABSENCE_MINUTES, null, null, datedAt, actor.id(), null);
+    return reconcile(day, List.of(change), new ManualBooking(minutes, requestId)).changed();
+  }
+
+  /** Ändert den Status im halboffenen Zeitraum und belässt die übrigen Statusereignisse */
+  @Transactional
+  public boolean correctStatusPeriod(
+      Long studentId, LocalDate date, AttendanceStatus status, LocalTime start, LocalTime end) {
+    var actor = authorization.currentStaff();
+    requireStudentClassAccess(studentId, actor);
+    var from = berlinTime(date, start);
+    var until = berlinTime(date, end);
+    if (status == null || !from.isBefore(until)) {
+      throw new IllegalArgumentException("INVALID_STATUS_TIME");
+    }
+    var now = now();
+    if (from.isAfter(now)) {
+      return planStatusPeriod(new PlannedStatus(studentId, date, from, until, status), actor.id());
+    }
+    if (until.isAfter(now)) {
+      throw new IllegalArgumentException("INVALID_STATUS_TIME");
+    }
+    var day = lockEditableDay(studentId, date);
+    var changes = periodChanges(day.timeline(), status, from, until, actor.id(), true);
+    return !changes.isEmpty() && reconcile(day, changes, null).changed();
+  }
+
+  /** Entschuldigt die Unterrichtszeit des gesamten Schultags gemäß Stundenplan */
+  @Transactional
+  public boolean excuseSchoolDay(Long studentId, LocalDate date) {
+    var actor = authorization.currentStaff();
+    requireStudentClassAccess(studentId, actor);
+    if (date.isAfter(lastPreviewDate(berlinDate(now())))) {
+      throw new IllegalArgumentException("INVALID_PLANNED_ATTENDANCE_DATE");
+    }
+
+    var day = lockEditableDay(studentId, date);
+    var from = teachingTime(date, day.slots().getFirst().startsAt());
+    var until = teachingTime(date, day.slots().getLast().endsAt());
+    var status = AttendanceStatus.ENTSCHULDIGT;
+    if (from.isAfter(day.now())) {
+      return savePlannedStatus(
+          day, new PlannedStatus(studentId, date, from, until, status), actor.id());
+    }
+    if (!until.isAfter(day.now())) {
+      var changes = periodChanges(day.timeline(), status, from, until, actor.id(), true);
+      return !changes.isEmpty() && reconcile(day, changes, null).changed();
+    }
+
+    // Die laufende Entschuldigung gilt weiter, ohne ein Audit in der Zukunft anzulegen.
+    if (day.plannedStatuses().stream()
+        .anyMatch(
+            planned ->
+                planned.status() != status
+                    && planned.start().isBefore(until)
+                    && planned.end().isAfter(day.now()))) {
+      throw new IllegalArgumentException("OVERLAPPING_PLANNED_ATTENDANCE_STATUS");
+    }
+    var changes = periodChanges(day.timeline(), status, from, day.now(), actor.id(), false);
+    var current = statusAt(projectChanges(day, changes), day.now());
+    addStatusChange(changes, current, status, day.now(), actor.id());
+    return !changes.isEmpty() && reconcile(day, changes, null).changed();
+  }
+
+  private boolean planStatusPeriod(PlannedStatus planned, Long staffId) {
+    if (planned.status() != AttendanceStatus.ENTSCHULDIGT
+        && planned.status() != AttendanceStatus.BETRIEBLICH_ENTSCHULDIGT) {
+      throw new IllegalArgumentException("INVALID_PLANNED_ATTENDANCE_STATUS");
+    }
+    var now = now();
+    if (!planned.start().isAfter(now) || planned.date().isAfter(lastPreviewDate(berlinDate(now)))) {
+      throw new IllegalArgumentException("INVALID_PLANNED_ATTENDANCE_DATE");
+    }
+    var day = lockDay(planned.studentId(), planned.date());
+    if (day == null || hasOverlappingSlots(day.slots())) {
+      throw new IllegalArgumentException("ATTENDANCE_DAY_LOCKED_OR_UNPLANNED");
+    }
+    return savePlannedStatus(day, planned, staffId);
+  }
+
+  private boolean savePlannedStatus(Day day, PlannedStatus planned, Long staffId) {
+    if (!planned.start().isAfter(day.now())) {
+      throw new IllegalArgumentException("INVALID_PLANNED_ATTENDANCE_DATE");
+    }
+    boolean scheduledLesson =
+        day.slots().stream()
+            .anyMatch(
+                slot ->
+                    teachingTime(day.date(), slot.startsAt()).isBefore(planned.end())
+                        && teachingTime(day.date(), slot.endsAt()).isAfter(planned.start()));
+    if (!scheduledLesson) {
+      throw new IllegalArgumentException("INVALID_PLANNED_ATTENDANCE_TIME");
+    }
+    if (day.plannedStatuses().contains(planned)) {
+      return false;
+    }
+    if (day.plannedStatuses().stream()
+        .anyMatch(
+            previous ->
+                previous.start().isBefore(planned.end())
+                    && previous.end().isAfter(planned.start()))) {
+      throw new IllegalArgumentException("OVERLAPPING_PLANNED_ATTENDANCE_STATUS");
+    }
+    accounting.insertPlannedStatus(planned, staffId, day.deletionDateId(), day.now());
+    return true;
+  }
+
+  private static LocalDate lastPreviewDate(LocalDate today) {
+    return today.with(TemporalAdjusters.nextOrSame(DayOfWeek.SUNDAY)).plusWeeks(2);
+  }
+
+  private static LocalDateTime teachingTime(LocalDate date, LocalTime time) {
+    return LocalDateTime.ofInstant(date.atTime(time).atZone(BERLIN).toInstant(), ZoneOffset.UTC);
+  }
+
+  private static List<Change> periodChanges(
+      List<Audit> audits,
+      AttendanceStatus status,
+      LocalDateTime from,
+      LocalDateTime until,
+      Long staffId,
+      boolean restoreAfterPeriod) {
+    var original = new TreeMap<LocalDateTime, AttendanceStatus>();
+    audits.stream()
+        .filter(audit -> audit.status() != null)
+        .sorted(Comparator.comparing(Audit::id))
+        .forEach(audit -> original.put(audit.occurredAt(), audit.status()));
+    var changes = new ArrayList<Change>();
+    addStatusChange(changes, statusAt(audits, from), status, from, staffId);
+    original
+        .subMap(from, false, until, !restoreAfterPeriod)
+        .forEach((time, before) -> addStatusChange(changes, before, status, time, staffId));
+    if (restoreAfterPeriod && !changes.isEmpty() && !original.containsKey(until)) {
+      addStatusChange(changes, status, statusAt(audits, until), until, staffId);
+    }
+    return changes;
+  }
+
+  private static void addStatusChange(
+      List<Change> changes,
+      AttendanceStatus oldStatus,
+      AttendanceStatus newStatus,
+      LocalDateTime at,
+      Long staffId) {
+    if (oldStatus != newStatus) {
+      changes.add(
+          new Change(AuditEventType.STATUS_CHANGE, oldStatus, newStatus, at, staffId, null));
+    }
+  }
+
+  private static LocalDateTime berlinTime(LocalDate date, LocalTime time) {
+    if (time == null || time.getNano() != 0) {
+      throw new IllegalArgumentException("INVALID_STATUS_TIME");
+    }
+    var local = date.atTime(time);
+    var offsets = BERLIN.getRules().getValidOffsets(local);
+    if (offsets.size() != 1) {
+      throw new IllegalArgumentException("INVALID_STATUS_TIME");
+    }
+    return LocalDateTime.ofInstant(local.toInstant(offsets.getFirst()), ZoneOffset.UTC);
+  }
+
+  private Day lockHistoryDay(Long studentId, LocalDate date) {
+    if (!date.isBefore(berlinDate(now()))) {
+      throw new IllegalArgumentException("INVALID_ATTENDANCE_DATE");
+    }
+    return lockEditableDay(studentId, date);
+  }
+
+  private Day lockEditableDay(Long studentId, LocalDate date) {
+    var day = lockDay(studentId, date);
+    if (day == null || hasOverlappingSlots(day.slots())) {
+      throw new IllegalArgumentException("ATTENDANCE_DAY_LOCKED_OR_UNPLANNED");
+    }
+    return day;
+  }
+
+  private Long requireStudentClassAccess(Long studentId, StaffIdentity actor) {
+    var classId =
+        students
+            .findClassId(studentId, false)
+            .orElseThrow(() -> new IllegalArgumentException("STUDENT_NOT_FOUND"));
+    authorization.requireClassAccess(classId, actor);
+    return classId;
+  }
+
+  private boolean applyStatusChange(
+      Day day, AttendanceStatus status, Instant occurredAt, Long staffId) {
     var at = LocalDateTime.ofInstant(occurredAt, ZoneOffset.UTC);
     return reconcile(
             day,
             new Change(
                 AuditEventType.STATUS_CHANGE,
-                statusAt(day.audits(), at),
+                statusAt(day.timeline(), at),
                 status,
                 at,
-                actor.id(),
+                staffId,
                 null))
         .changed();
   }
@@ -206,6 +444,9 @@ public class AttendanceAccountingService {
             .orElseThrow(() -> new IllegalArgumentException("CLASS_NOT_FOUND"));
     var slots = readDaySlots(plan, date, now);
     var audits = accounting.findDayAudits(classId, date, today);
+    var plannedStatuses =
+        accounting.findClassPlannedStatuses(classId, date, today).stream()
+            .collect(Collectors.groupingBy(PlannedStatus::studentId));
     List<DailyStudent> result = new ArrayList<>();
     for (var student : students.findAttendanceStudents(classId)) {
       var dayAudits = audits.getOrDefault(student.id(), List.of());
@@ -213,19 +454,132 @@ public class AttendanceAccountingService {
       if (!planned && dayAudits.isEmpty()) {
         continue;
       }
+      var timeline =
+          includePlannedStatuses(dayAudits, plannedStatuses.getOrDefault(student.id(), List.of()));
       long minutes =
           planned
-              ? calculate(date, slots, dayAudits, now).unexcused()
+              ? calculate(date, slots, timeline, now).unexcused() + manualAbsenceMinutes(dayAudits)
               : dayAudits.stream().mapToLong(Audit::unexcusedDelta).sum();
       result.add(
           new DailyStudent(
               student.id(),
               student.firstName(),
               student.lastName(),
-              statusAt(dayAudits, now),
+              statusAt(timeline, now),
               minutes));
     }
     return result;
+  }
+
+  /** Liefert vergangene Berliner Tagesdaten der Woche eines autorisierten Schülers */
+  @Transactional(readOnly = true)
+  public HistoryWeek readWeek(Long studentId, LocalDate date) {
+    var classId = requireStudentClassAccess(studentId, authorization.currentStaff());
+    var now = now();
+    var today = berlinDate(now);
+    if (date.isAfter(lastPreviewDate(today))) {
+      throw new IllegalArgumentException("INVALID_ATTENDANCE_DATE");
+    }
+    var joined =
+        students
+            .findCreatedAt(studentId, classId)
+            .map(AttendanceAccountingService::berlinDate)
+            .orElseThrow(() -> new IllegalArgumentException("STUDENT_NOT_FOUND"));
+    var plan =
+        classes
+            .findPlan(classId, false)
+            .orElseThrow(() -> new IllegalArgumentException("CLASS_NOT_FOUND"));
+    var weekStart = date.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY));
+    var weekEnd = weekStart.plusDays(6);
+    var audits = accounting.findStudentDayAudits(studentId, weekStart, weekEnd, today);
+    var plannedStatuses = plannedByDate(studentId, weekStart, weekEnd, today, false);
+    var resetDay =
+        accounting
+            .latestResetAt(studentId)
+            .map(AttendanceAccountingService::berlinDate)
+            .orElse(LocalDate.MIN);
+    var days = new ArrayList<HistoryDay>();
+    for (var day = weekStart; !day.isAfter(weekEnd); day = day.plusDays(1)) {
+      var dayPlans = plannedStatuses.getOrDefault(day, List.of());
+      var slots = day.isBefore(joined) ? List.<Slot>of() : readDaySlots(plan, day, now);
+      if (hasOverlappingSlots(slots)) {
+        slots = List.of();
+      }
+      var dayDate = day;
+      boolean past = day.isBefore(today);
+      boolean elapsedToday =
+          day.equals(today)
+              && slots.stream()
+                  .anyMatch(slot -> teachingTime(dayDate, slot.startsAt()).isBefore(now));
+      boolean lessonsRemaining =
+          slots.stream().anyMatch(slot -> teachingTime(dayDate, slot.endsAt()).isAfter(now));
+      boolean unlocked = day.isAfter(resetDay);
+      boolean canCorrectStatus = unlocked && !slots.isEmpty() && (past || elapsedToday);
+      boolean canPlanStatus = unlocked && !past && lessonsRemaining;
+      var preview =
+          past
+              ? List.<PlannedStatusView>of()
+              : dayPlans.stream().map(PlannedStatusView::from).toList();
+      if (past || (elapsedToday && !lessonsRemaining)) {
+        var dayAudits = audits.getOrDefault(day, List.of());
+        var timeline = slots.isEmpty() ? dayAudits : includePlannedStatuses(dayAudits, dayPlans);
+        days.add(
+            AttendanceHistory.describe(
+                day, slots, timeline, now, past && unlocked, canCorrectStatus, preview));
+      } else {
+        days.add(
+            new HistoryDay(
+                day,
+                null,
+                null,
+                null,
+                false,
+                null,
+                false,
+                false,
+                0,
+                canCorrectStatus,
+                canPlanStatus,
+                preview));
+      }
+    }
+    return new HistoryWeek(weekStart, weekEnd, days);
+  }
+
+  public record HistoryWeek(LocalDate startsOn, LocalDate endsOn, List<HistoryDay> days) {}
+
+  public record HistoryDay(
+      LocalDate date,
+      Long unexcusedMinutes,
+      Long excusedMinutes,
+      Long lateMinutes,
+      boolean didNotArrive,
+      AbsenceLevel absenceLevel,
+      boolean canExcuseOpenAbsences,
+      boolean editable,
+      long manualAbsenceMinutes,
+      boolean canCorrectStatus,
+      boolean canPlanStatus,
+      List<PlannedStatusView> plannedStatuses) {}
+
+  public record PlannedStatusView(LocalTime startsAt, LocalTime endsAt, AttendanceStatus status) {
+    private static PlannedStatusView from(PlannedStatus planned) {
+      return new PlannedStatusView(
+          planned.start().atZone(ZoneOffset.UTC).withZoneSameInstant(BERLIN).toLocalTime(),
+          planned.end().atZone(ZoneOffset.UTC).withZoneSameInstant(BERLIN).toLocalTime(),
+          planned.status());
+    }
+  }
+
+  private Map<LocalDate, List<PlannedStatus>> plannedByDate(
+      Long studentId, LocalDate from, LocalDate through, LocalDate today, boolean lock) {
+    return accounting.findPlannedStatuses(studentId, from, through, today, lock).stream()
+        .collect(Collectors.groupingBy(PlannedStatus::date));
+  }
+
+  public enum AbsenceLevel {
+    FULL,
+    PARTIAL
   }
 
   /** Liefert geplante Slots des Tages, solange die Aufbewahrungsfrist des Plans läuft */
@@ -292,6 +646,7 @@ public class AttendanceAccountingService {
       var start = firstAccountingDate(plan, account, history.resetDay());
       var today = berlinDate(now);
       var end = plan.endsOn().isBefore(today) ? plan.endsOn() : today;
+      var planned = plannedByDate(account.id(), start, end, today, true);
       for (var date = start; !date.isAfter(end); date = date.plusDays(1)) {
         var daySlots = slotsFor(plan, periods, slots, date);
         if (daySlots.isEmpty()) {
@@ -311,6 +666,7 @@ public class AttendanceAccountingService {
                 daySlots,
                 attendance,
                 history.dayAudits(attendance),
+                planned.getOrDefault(date, List.of()),
                 now);
         var booked =
             reconcile(
@@ -373,6 +729,7 @@ public class AttendanceAccountingService {
         slots,
         attendance,
         history.dayAudits(attendance),
+        accounting.findPlannedStatuses(studentId, date, date, berlinDate(now), true),
         now);
   }
 
@@ -382,29 +739,33 @@ public class AttendanceAccountingService {
    * Minutenänderung protokolliert. Ohne Status- oder Minutenänderung entsteht keine Buchung
    */
   private Booking reconcile(Day day, Change change) {
-    var events = new ArrayList<>(day.audits());
-    boolean statusChange = change.before() != change.after();
-    if (statusChange) {
-      events.add(
-          new Audit(
-              Long.MAX_VALUE,
-              null,
-              day.deletionDateId(),
-              change.type(),
-              change.at(),
-              change.after(),
-              0,
-              0,
-              change.before()));
+    return reconcile(day, List.of(change), null);
+  }
+
+  private Booking reconcile(Day day, List<Change> changes, ManualBooking manual) {
+    var events = projectChanges(day, changes);
+    int unexcusedDelta;
+    int excusedDelta;
+    if (manual == null) {
+      var target =
+          calculate(
+              day.date(),
+              day.slots(),
+              includePlannedStatuses(events, day.plannedStatuses()),
+              day.now());
+      unexcusedDelta =
+          Math.toIntExact(
+              target.unexcused()
+                  + manualAbsenceMinutes(day.audits())
+                  - day.audits().stream().mapToLong(Audit::unexcusedDelta).sum());
+      excusedDelta =
+          Math.toIntExact(
+              target.excused() - day.audits().stream().mapToLong(Audit::excusedDelta).sum());
+    } else {
+      unexcusedDelta = manual.minutes();
+      excusedDelta = 0;
     }
-    var target = calculate(day.date(), day.slots(), events, day.now());
-    int unexcusedDelta =
-        Math.toIntExact(
-            target.unexcused() - day.audits().stream().mapToLong(Audit::unexcusedDelta).sum());
-    int excusedDelta =
-        Math.toIntExact(
-            target.excused() - day.audits().stream().mapToLong(Audit::excusedDelta).sum());
-    if (!statusChange && unexcusedDelta == 0 && excusedDelta == 0) {
+    if (events.size() == day.audits().size() && unexcusedDelta == 0 && excusedDelta == 0) {
       return new Booking(day.account(), false);
     }
     var account =
@@ -421,21 +782,57 @@ public class AttendanceAccountingService {
         day.attendance() == null
             ? accounting.insertAttendance(account.id(), day.date(), status, day.now())
             : day.attendance().id();
-    var audit =
-        new Audit(
-            null,
-            attendanceId,
-            day.deletionDateId(),
-            change.type(),
-            change.at(),
-            statusChange ? change.after() : null,
-            unexcusedDelta,
-            excusedDelta,
-            statusChange ? change.before() : null);
-    accounting.book(
-        account, attendanceId, status, audit, change.staffId(), change.terminalId(), day.now());
+    for (var change : changes) {
+      boolean last = change == changes.getLast();
+      var entry =
+          audit(
+              day, change, null, attendanceId, last ? unexcusedDelta : 0, last ? excusedDelta : 0);
+      accounting.insertAudit(
+          account.id(),
+          attendanceId,
+          entry,
+          change.staffId(),
+          change.terminalId(),
+          day.now(),
+          manual == null ? null : manual.requestId());
+    }
+    accounting.updateTotals(account, attendanceId, status, day.now());
     return new Booking(account, true);
   }
+
+  private static List<Audit> projectChanges(Day day, List<Change> changes) {
+    var events = new ArrayList<>(day.audits());
+    for (var change : changes) {
+      if (change.before() != change.after()) {
+        events.add(audit(day, change, Long.MAX_VALUE, null, 0, 0));
+      }
+    }
+    return events;
+  }
+
+  static long manualAbsenceMinutes(List<Audit> audits) {
+    return audits.stream()
+        .filter(audit -> audit.type() == AuditEventType.MANUAL_ABSENCE_MINUTES)
+        .mapToLong(Audit::unexcusedDelta)
+        .sum();
+  }
+
+  private static Audit audit(
+      Day day, Change change, Long id, Long attendanceId, int unexcusedDelta, int excusedDelta) {
+    boolean statusChange = change.before() != change.after();
+    return new Audit(
+        id,
+        attendanceId,
+        day.deletionDateId(),
+        change.type(),
+        change.at(),
+        statusChange ? change.after() : null,
+        unexcusedDelta,
+        excusedDelta,
+        statusChange ? change.before() : null);
+  }
+
+  private record ManualBooking(int minutes, UUID requestId) {}
 
   /**
    * Prüft, ob ein Zeitpunkt angegeben ist, keine Sekundenbruchteile hat und nicht in der Zukunft
@@ -575,6 +972,38 @@ public class AttendanceAccountingService {
   }
 
   /**
+   * Blendet Vormerkungen in den Statusverlauf ein. Ein tatsächlich erfasstes Statusereignis ab
+   * Beginn des Zeitraums übernimmt den weiteren Verlauf. Ohne solches Ereignis gilt nach Ablauf der
+   * Vormerkung wieder der ursprüngliche Status.
+   */
+  private static List<Audit> includePlannedStatuses(
+      List<Audit> audits, List<PlannedStatus> plannedStatuses) {
+    if (plannedStatuses.isEmpty()) {
+      return audits;
+    }
+    var timeline = new ArrayList<>(audits);
+    for (var planned : plannedStatuses) {
+      timeline.add(plannedEvent(planned.start(), planned.status(), Long.MIN_VALUE + 1));
+      boolean superseded =
+          audits.stream()
+              .anyMatch(
+                  audit ->
+                      audit.status() != null
+                          && !audit.occurredAt().isBefore(planned.start())
+                          && audit.occurredAt().isBefore(planned.end()));
+      if (!superseded) {
+        timeline.add(plannedEvent(planned.end(), statusAt(audits, planned.end()), Long.MIN_VALUE));
+      }
+    }
+    return timeline;
+  }
+
+  private static Audit plannedEvent(LocalDateTime at, AttendanceStatus status, long order) {
+    // Nur für die Berechnung. Die Vormerkung selbst ist mit Akteur und Erstellungszeit gespeichert.
+    return new Audit(order, null, null, AuditEventType.STATUS_CHANGE, at, status, 0, 0, null);
+  }
+
+  /**
    * Liefert den letzten Status bis einschließlich des angegebenen UTC-Zeitpunkts. Bei gleicher
    * Ereigniszeit gewinnt die höhere Audit-ID. Ohne Statusereignis gilt ABWESEND
    */
@@ -606,22 +1035,25 @@ public class AttendanceAccountingService {
     for (Account account : accounts) {
       var history = history(plan, account, deletionDateId, now);
       var start = firstAccountingDate(plan, account, history.resetDay());
+      var planned = plannedByDate(account.id(), start, today, today, true);
       for (LocalDate date = start; !date.isAfter(today); date = date.plusDays(1)) {
         var daySlots = slotsFor(plan, periods, slots, date);
         var attendance = history.attendances().get(date);
+        var dayAudits = history.dayAudits(attendance);
+        var timeline = includePlannedStatuses(dayAudits, planned.getOrDefault(date, List.of()));
         if (attendance == null) {
-          var target = calculate(date, daySlots, List.of(), now);
+          var target = calculate(date, daySlots, timeline, now);
           if (target.unexcused() == 0 && target.excused() == 0) {
             continue;
           }
           throw new IllegalStateException("CLASS_NOT_FULLY_ACCOUNTED");
         }
-        var dayAudits = history.dayAudits(attendance);
-        var target = calculate(date, daySlots, dayAudits, now);
+        var target = calculate(date, daySlots, timeline, now);
         var lastStatus = statusAt(dayAudits, now);
         if (dayAudits.isEmpty()
             || attendance.status() != lastStatus
-            || target.unexcused() != dayAudits.stream().mapToLong(Audit::unexcusedDelta).sum()
+            || target.unexcused() + manualAbsenceMinutes(dayAudits)
+                != dayAudits.stream().mapToLong(Audit::unexcusedDelta).sum()
             || target.excused() != dayAudits.stream().mapToLong(Audit::excusedDelta).sum()) {
           throw new IllegalStateException("CLASS_NOT_FULLY_ACCOUNTED");
         }
@@ -744,7 +1176,12 @@ public class AttendanceAccountingService {
       List<Slot> slots,
       DayAttendance attendance,
       List<Audit> audits,
-      LocalDateTime now) {}
+      List<PlannedStatus> plannedStatuses,
+      LocalDateTime now) {
+    List<Audit> timeline() {
+      return includePlannedStatuses(audits, plannedStatuses);
+    }
+  }
 
   /**
    * Beschreibt das auslösende Ereignis mit vorherigem und neuem Status, UTC-Zeit und optionalem

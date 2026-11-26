@@ -37,6 +37,19 @@ public class StudentRepository {
         STUDENT_COLUMNS + " WHERE school_class_id = ? ORDER BY id", this::data, classId);
   }
 
+  /** Liefert sämtliche Schüler der für den Mitarbeiter sichtbaren Klassen */
+  public List<StudentData> findAccessible(Long staffId, boolean administrator) {
+    return jdbc.query(
+        STUDENT_COLUMNS
+            + " WHERE school_class_id IN (SELECT c.id FROM school_class c WHERE "
+            + SchoolClassRepository.CLASS_ACCESS
+            + ") ORDER BY last_name, first_name, id",
+        this::data,
+        administrator,
+        staffId,
+        staffId);
+  }
+
   /** Liefert die Schüler-ID zur RFID-Kennung */
   public Optional<Long> findIdByRfidUid(String rfidUid) {
     return jdbc.query(
@@ -72,6 +85,16 @@ public class StudentRepository {
                 row.getString("first_name"),
                 row.getString("last_name"),
                 row.getObject("created_at", LocalDateTime.class)),
+        classId);
+  }
+
+  /** Liefert den Anlagezeitpunkt für die Abgrenzung der Anwesenheitshistorie */
+  public Optional<LocalDateTime> findCreatedAt(Long studentId, Long classId) {
+    return jdbc.query(
+        "SELECT created_at FROM student WHERE id = ? AND school_class_id = ?",
+        rows ->
+            rows.next() ? Optional.of(rows.getObject(1, LocalDateTime.class)) : Optional.empty(),
+        studentId,
         classId);
   }
 

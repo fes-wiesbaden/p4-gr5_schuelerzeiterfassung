@@ -50,6 +50,16 @@ public class RetentionRepository {
         today);
   }
 
+  /** Löscht Statusvormerkungen nach Ablauf ihrer planabhängigen Löschfrist */
+  public void deleteDuePlannedStatuses(LocalDate today) {
+    jdbc.update(
+        """
+        DELETE FROM planned_attendance_status WHERE deletion_date_id IN
+          (SELECT id FROM deletion_date WHERE delete_after <= ?)
+        """,
+        today);
+  }
+
   /** Löscht fällige Resetprotokolle der Klasse für die bereits gesperrte Löschfrist */
   public void deleteDueAccountResets(Long classId, Long deletionDateId, LocalDate today) {
     jdbc.update(

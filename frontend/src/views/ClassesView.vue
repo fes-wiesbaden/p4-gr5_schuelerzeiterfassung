@@ -39,6 +39,13 @@ function label(r: Row) {
     title="Klassen"
     :label="label"
   >
+    <template #name="{ row }">
+      <RouterLink
+        :to="{ name: 'klasse-schueler', params: { classId: row.id } }"
+      >
+        {{ row.classCode }}
+      </RouterLink>
+    </template>
     <template #form="{ row }">
       <label>
         Klassenkürzel
@@ -82,3 +89,9 @@ function label(r: Row) {
     </template>
   </MasterDataList>
 </template>
+
+<style scoped>
+a {
+  color: var(--accent);
+}
+</style>

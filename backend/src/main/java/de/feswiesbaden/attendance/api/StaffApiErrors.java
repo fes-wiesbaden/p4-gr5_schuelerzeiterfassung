@@ -75,7 +75,9 @@ class StaffApiErrors {
               "NEXT_PLAN_OVERLAPS_CURRENT_PLAN",
               "NEXT_PLAN_FINISHED",
               "CLASS_HAS_NO_STUDENTS",
-              "ATTENDANCE_DAY_LOCKED_OR_UNPLANNED" ->
+              "ATTENDANCE_DAY_LOCKED_OR_UNPLANNED",
+              "ATTENDANCE_BOOKING_CHANGED",
+              "OVERLAPPING_PLANNED_ATTENDANCE_STATUS" ->
           error(HttpStatus.CONFLICT, code);
       case "INVALID_TEACHER_PASSWORD",
               "INVALID_CLASS",
@@ -87,6 +89,10 @@ class StaffApiErrors {
               "INVALID_BLOCK_ASSIGNMENT",
               "INVALID_STATUS_TIME",
               "INVALID_ATTENDANCE_DATE",
+              "INVALID_MANUAL_ABSENCE_MINUTES",
+              "INVALID_PLANNED_ATTENDANCE_DATE",
+              "INVALID_PLANNED_ATTENDANCE_STATUS",
+              "INVALID_PLANNED_ATTENDANCE_TIME",
               "INVALID_ATTENDANCE_STATUS" ->
           error(HttpStatus.BAD_REQUEST, code);
       case "RFID_UID_UPDATE_FAILED" -> error(HttpStatus.INTERNAL_SERVER_ERROR, code);

@@ -120,6 +120,451 @@ class AttendanceAccountingIntegrationTest {
 
   @MockitoBean Clock clock;
 
+  /** Prüft Klassenrechte und Entschuldigung ohne Verlust des späteren Check-ins */
+  @Test
+  void readsAndExcusesAnAbsenceInTheStudentWeek() throws Exception {
+    var teacher = staffSession("test.teacher.a");
+    var otherTeacher = staffSession("test.teacher.b");
+    var week = "/api/students/1/attendance/week?date=2026-09-15";
+    var excuse = "/api/students/1/attendance/2026-09-14/open-absence-excuses";
+    assertThat(scan(1, "2026-09-14T07:35:00Z")).isTrue();
+    setTime("2026-09-15T07:00:00Z");
+
+    mvc.perform(get(week)).andExpect(status().isUnauthorized());
+    mvc.perform(get(week).session(otherTeacher)).andExpect(status().isNotFound());
+    write(post(excuse), otherTeacher, "{}").andExpect(status().isNotFound());
+    mvc.perform(post(excuse).session(teacher).contentType(MediaType.APPLICATION_JSON).content("{}"))
+        .andExpect(status().isForbidden());
+    mvc.perform(get(week).session(teacher))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.startsOn").value("2026-09-14"))
+        .andExpect(jsonPath("$.endsOn").value("2026-09-20"))
+        .andExpect(jsonPath("$.days[0].date").value("2026-09-14"))
+        .andExpect(jsonPath("$.days[0].lateMinutes").value(110))
+        .andExpect(jsonPath("$.days[0].unexcusedMinutes").value(110))
+        .andExpect(jsonPath("$.days[0].excusedMinutes").value(0))
+        .andExpect(jsonPath("$.days[0].absenceLevel").value("PARTIAL"))
+        .andExpect(jsonPath("$.days[0].canExcuseOpenAbsences").value(true));
+    write(post(excuse), teacher, "{}")
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.changed").value(true));
+    write(post(excuse), teacher, "{}")
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.changed").value(false));
+
+    mvc.perform(get(week).session(teacher))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.days[0].lateMinutes").value(110))
+        .andExpect(jsonPath("$.days[0].unexcusedMinutes").value(0))
+        .andExpect(jsonPath("$.days[0].excusedMinutes").value(110))
+        .andExpect(jsonPath("$.days[0].absenceLevel").isEmpty())
+        .andExpect(jsonPath("$.days[0].canExcuseOpenAbsences").value(false));
+    assertAccount(1, 0, 110);
+    assertThat(
+            jdbc.queryForMap(
+                "SELECT event_type, changed_by_staff_id, deletion_date_id FROM attendance_audit"
+                    + " WHERE student_id = 1 AND event_type = 'STATUS_CHANGE'"))
+        .containsEntry("changed_by_staff_id", 1L)
+        .containsEntry("deletion_date_id", 1L);
+  }
+
+  /** Prüft Wochenhistorie ohne Ankunft und die Korrektursperre nach einem Kontenreset */
+  @Test
+  void keepsAnAllDayAbsenceVisibleAfterResetAndPlanChange() throws Exception {
+    var teacher = staffSession("test.teacher.a");
+    var admin = staffSession("test.admin");
+    var week = "/api/students/1/attendance/week?date=2026-09-14";
+    var excuse = "/api/students/1/attendance/2026-09-14/open-absence-excuses";
+    setTime("2026-09-14T09:00:00Z");
+    mvc.perform(get(week).session(teacher))
+        .andExpect(jsonPath("$.days[0].unexcusedMinutes").value(180))
+        .andExpect(jsonPath("$.days[0].canCorrectStatus").value(true))
+        .andExpect(jsonPath("$.days[0].canPlanStatus").value(false));
+    setTime("2026-09-15T07:00:00Z");
+    mvc.perform(get(week).session(teacher))
+        .andExpect(jsonPath("$.days[0].didNotArrive").value(true))
+        .andExpect(jsonPath("$.days[0].lateMinutes").isEmpty())
+        .andExpect(jsonPath("$.days[0].unexcusedMinutes").value(180))
+        .andExpect(jsonPath("$.days[0].absenceLevel").value("FULL"));
+    write(post("/api/students/2/attendance/2026-09-14/open-absence-excuses"), teacher, "{}")
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.changed").value(true));
+    assertAccount(2, 0, 180);
+    assertThat(
+            jdbc.queryForObject("SELECT status FROM attendance WHERE student_id = 2", String.class))
+        .isEqualTo("ENTSCHULDIGT");
+    var third = "/api/students/3/attendance/2026-09-14/";
+    write(
+            post(third + "status-periods"),
+            teacher,
+            """
+        {"status":"BETRIEBLICH_ENTSCHULDIGT","startsAt":"09:30","endsAt":"10:00"}
+        """)
+        .andExpect(status().isOk());
+    write(post(third + "open-absence-excuses"), teacher, "{}").andExpect(status().isOk());
+    assertAccount(3, 0, 180);
+    assertThat(
+            jdbc.queryForList(
+                """
+        SELECT new_status FROM attendance_audit WHERE student_id = 3
+        AND new_status IS NOT NULL ORDER BY occurred_at, id
+        """,
+                String.class))
+        .containsExactly("ENTSCHULDIGT", "BETRIEBLICH_ENTSCHULDIGT", "ABWESEND", "ENTSCHULDIGT");
+    write(post(RESET), admin, "{\"expectedBlockPlanId\":1}").andExpect(status().isOk());
+    write(post(excuse), teacher, "{}").andExpect(status().isConflict());
+    mvc.perform(get(week).session(teacher))
+        .andExpect(jsonPath("$.days[0].canExcuseOpenAbsences").value(false));
+    jdbc.update(
+        "INSERT INTO block_plan (id, name, starts_on, ends_on)"
+            + " VALUES (999, 'Folgeplan', '2027-01-01', '2027-06-30')");
+    jdbc.update("DELETE FROM class_block_assignment WHERE school_class_id = 1");
+    jdbc.update("UPDATE school_class SET block_plan_id = 999 WHERE id = 1");
+    setTime("2027-01-01T00:00:00Z");
+    mvc.perform(get(week).session(teacher))
+        .andExpect(jsonPath("$.days[0].date").value("2026-09-14"))
+        .andExpect(jsonPath("$.days[0].unexcusedMinutes").value(180))
+        .andExpect(jsonPath("$.days[0].absenceLevel").isEmpty())
+        .andExpect(jsonPath("$.days[0].lateMinutes").isEmpty());
+    setTime("2027-06-29T22:00:00Z");
+    mvc.perform(get(week).session(teacher))
+        .andExpect(jsonPath("$.days[0].unexcusedMinutes").isEmpty());
+  }
+
+  /** Prüft Tagesbuchung, Klassenrechte, erneute Zustellung und anschließende Slotkorrektur */
+  @Test
+  void manuallyAddsUnexcusedMinutesWithoutChangingTheTimeline() throws Exception {
+    var assignedTeacher = staffSession("test.teacher.b");
+    var admin = staffSession("test.admin");
+    var week = "/api/students/1/attendance/week?date=2026-09-15";
+    var base = "/api/students/1/attendance/2026-09-14/";
+    var request =
+        """
+        {"minutes":15,"requestId":"9e2c9c26-87da-46dc-96f2-18897ef16c30"}
+        """;
+    var period =
+        """
+        {"status":"BETRIEBLICH_ENTSCHULDIGT","startsAt":"09:30","endsAt":"11:00"}
+        """;
+    setTime("2026-09-15T07:00:00Z");
+    mvc.perform(get("/api/students").session(assignedTeacher))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$[?(@.id == 1)]").isEmpty());
+    write(post(base + "manual-absence-minutes"), assignedTeacher, request)
+        .andExpect(status().isNotFound());
+    write(post(base + "status-periods"), assignedTeacher, period).andExpect(status().isNotFound());
+
+    jdbc.update("INSERT INTO teacher_class (staff_id, school_class_id) VALUES (2, 1)");
+    mvc.perform(get("/api/students").session(assignedTeacher))
+        .andExpect(jsonPath("$[?(@.id == 1)]").isNotEmpty())
+        .andExpect(jsonPath("$[?(@.classId == 2)]").isNotEmpty());
+
+    write(post(base + "manual-absence-minutes"), assignedTeacher, request.replace("15,", "15.5,"))
+        .andExpect(status().isBadRequest());
+    write(post(base + "manual-absence-minutes"), assignedTeacher, request)
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.changed").value(true));
+    write(post(base + "manual-absence-minutes"), assignedTeacher, request)
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.changed").value(false));
+    write(post(base + "manual-absence-minutes"), assignedTeacher, request.replace("15,", "16,"))
+        .andExpect(status().isConflict());
+    assertAccount(1, 15, 0);
+    mvc.perform(get(week).session(assignedTeacher))
+        .andExpect(jsonPath("$.days[0].unexcusedMinutes").value(195))
+        .andExpect(jsonPath("$.days[0].didNotArrive").value(true))
+        .andExpect(jsonPath("$.days[0].manualAbsenceMinutes").value(15))
+        .andExpect(jsonPath("$.days[0].editable").value(true));
+    assertThat(
+            jdbc.queryForMap(
+                """
+        SELECT changed_by_staff_id, deletion_date_id, old_status, new_status,
+               unexcused_minutes_delta FROM attendance_audit
+        WHERE student_id = 1 AND event_type = 'MANUAL_ABSENCE_MINUTES'
+        """))
+        .containsEntry("changed_by_staff_id", 2L)
+        .containsEntry("deletion_date_id", 1L)
+        .containsEntry("old_status", null)
+        .containsEntry("new_status", null)
+        .containsEntry("unexcused_minutes_delta", 15);
+
+    write(post(base + "status-periods"), assignedTeacher, period).andExpect(status().isOk());
+    mvc.perform(get(week).session(assignedTeacher))
+        .andExpect(jsonPath("$.days[0].unexcusedMinutes").value(120))
+        .andExpect(jsonPath("$.days[0].excusedMinutes").value(75))
+        .andExpect(jsonPath("$.days[0].didNotArrive").value(true))
+        .andExpect(jsonPath("$.days[0].absenceLevel").value("PARTIAL"));
+    assertAccount(1, 120, 75);
+    assertThat(
+            jdbc.queryForObject("SELECT status FROM attendance WHERE student_id = 1", String.class))
+        .isEqualTo("ABWESEND");
+
+    accounting.closeDueDays();
+    assertAccount(1, 120, 75);
+    write(post(base + "open-absence-excuses"), assignedTeacher, "{}").andExpect(status().isOk());
+    assertAccount(1, 15, 180);
+    mvc.perform(get(week).session(assignedTeacher))
+        .andExpect(jsonPath("$.days[0].manualAbsenceMinutes").value(15))
+        .andExpect(jsonPath("$.days[0].canExcuseOpenAbsences").value(false));
+    assertThat(
+            jdbc.queryForObject(
+                "SELECT COUNT(*) FROM attendance_audit WHERE student_id = 1"
+                    + " AND new_status = 'BETRIEBLICH_ENTSCHULDIGT'",
+                Long.class))
+        .isEqualTo(1L);
+    write(post(RESET), admin, "{\"expectedBlockPlanId\":1}").andExpect(status().isOk());
+    write(post(base + "manual-absence-minutes"), assignedTeacher, request)
+        .andExpect(status().isConflict());
+    write(post(base + "status-periods"), assignedTeacher, period).andExpect(status().isConflict());
+  }
+
+  /**
+   * Überschreibt einen Scan nur innerhalb des Zeitraums und stellt seinen Status danach wieder her
+   */
+  @Test
+  void appliesAStatusPeriodAcrossAnExistingScanAndKeepsTheRestOfTheDay() throws Exception {
+    var admin = staffSession("test.admin");
+    assertThat(scan(1, "2026-09-14T07:20:00Z")).isTrue();
+    setTime("2026-09-15T07:00:00Z");
+    var endpoint = "/api/students/1/attendance/2026-09-14/status-periods";
+    var request =
+        """
+        {"status":"BETRIEBLICH_ENTSCHULDIGT","startsAt":"08:45","endsAt":"09:45"}
+        """;
+    write(post(endpoint), admin, request.replace("09:45", "08:15"))
+        .andExpect(status().isBadRequest());
+    write(post(endpoint), admin, request)
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.changed").value(true));
+    write(post(endpoint), admin, request)
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.changed").value(false));
+    assertAccount(1, 75, 45);
+    assertThat(
+            jdbc.queryForList(
+                """
+        SELECT new_status FROM attendance_audit
+        WHERE student_id = 1 AND event_type = 'STATUS_CHANGE'
+        ORDER BY occurred_at, id
+        """,
+                String.class))
+        .containsExactly("BETRIEBLICH_ENTSCHULDIGT", "BETRIEBLICH_ENTSCHULDIGT", "ANWESEND");
+    assertThat(
+            jdbc.queryForObject("SELECT status FROM attendance WHERE student_id = 1", String.class))
+        .isEqualTo("ANWESEND");
+  }
+
+  /** Prüft die zwei Kalenderwochen, Klassenrechte und die Buchung erst nach der Vormerkung */
+  @Test
+  void plansAnExcusedPeriodForAnUpcomingWeekWithoutBookingFutureMinutes() throws Exception {
+    var teacher = staffSession("test.teacher.a");
+    var other = staffSession("test.teacher.b");
+    var path = "/api/students/8/attendance/2026-09-21/status-periods";
+    var week = "/api/students/8/attendance/week?date=";
+    var period =
+        """
+        {"status":"ENTSCHULDIGT","startsAt":"07:30","endsAt":"08:00"}
+        """;
+    setTime("2026-09-13T22:30:00Z");
+    mvc.perform(get(week + "2026-10-04").session(teacher))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.endsOn").value("2026-10-04"));
+    mvc.perform(get(week + "2026-10-05").session(teacher)).andExpect(status().isBadRequest());
+    mvc.perform(get(week + "2026-09-21").session(other)).andExpect(status().isNotFound());
+    write(post(path), other, period).andExpect(status().isNotFound());
+    write(post(path), teacher, period.replace("ENTSCHULDIGT", "ANWESEND"))
+        .andExpect(status().isBadRequest());
+    write(post(path.replace("09-21", "10-05")), teacher, period).andExpect(status().isBadRequest());
+
+    write(post(path), teacher, period)
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.changed").value(true));
+    write(post(path), teacher, period)
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.changed").value(false));
+    write(post(path), teacher, period.replace("07:30", "07:45")).andExpect(status().isConflict());
+    mvc.perform(get(week + "2026-09-21").session(teacher))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.days[0].canPlanStatus").value(true))
+        .andExpect(jsonPath("$.days[0].plannedStatuses[0].status").value("ENTSCHULDIGT"))
+        .andExpect(jsonPath("$.days[0].unexcusedMinutes").isEmpty())
+        .andExpect(jsonPath("$.days[0].editable").value(false));
+    assertAccount(8, 0, 0);
+    assertThat(
+            jdbc.queryForObject(
+                "SELECT COUNT(*) FROM attendance_audit WHERE student_id = 8", Long.class))
+        .isZero();
+    assertThat(
+            jdbc.queryForMap(
+                "SELECT changed_by_staff_id, deletion_date_id FROM planned_attendance_status"))
+        .containsEntry("changed_by_staff_id", 1L)
+        .containsEntry("deletion_date_id", 1L);
+
+    setTime("2026-09-21T05:50:00Z");
+    assertThat(scan(8, "2026-09-21T05:50:00Z")).isFalse();
+    mvc.perform(get("/api/classes/3/attendance?date=2026-09-21").session(teacher))
+        .andExpect(jsonPath("$[0].status").value("ENTSCHULDIGT"))
+        .andExpect(jsonPath("$[0].unexcusedMinutes").value(0));
+    setTime("2026-09-22T07:00:00Z");
+    accounting.closeDueDays();
+    accounting.closeDueDays();
+    assertAccount(8, 150, 30);
+    mvc.perform(get(week + "2026-09-21").session(teacher))
+        .andExpect(jsonPath("$.days[0].excusedMinutes").value(30))
+        .andExpect(jsonPath("$.days[0].unexcusedMinutes").value(150));
+    setTime("2027-06-29T22:30:00Z");
+    retention.deleteHistory();
+    assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM planned_attendance_status", Long.class))
+        .isZero();
+  }
+
+  /** Ein Check-in im betrieblich entschuldigten Zeitraum bleibt nach dessen Ende wirksam */
+  @Test
+  void acceptsACheckInDuringABusinessExcuseAndKeepsTheArrival() throws Exception {
+    setTime("2026-09-14T08:00:00Z");
+    var teacher = staffSession("test.teacher.a");
+    write(
+            post("/api/students/8/attendance/2026-09-21/status-periods"),
+            teacher,
+            """
+        {"status":"BETRIEBLICH_ENTSCHULDIGT","startsAt":"07:30","endsAt":"09:00"}
+        """)
+        .andExpect(status().isOk());
+    setTime("2026-09-21T05:50:00Z");
+    assertThat(scan(8, "2026-09-21T05:50:00Z")).isTrue();
+    setTime("2026-09-22T07:00:00Z");
+    accounting.closeDueDays();
+    assertAccount(8, 0, 20);
+    mvc.perform(get("/api/students/8/attendance/week?date=2026-09-21").session(teacher))
+        .andExpect(jsonPath("$.days[0].didNotArrive").value(false))
+        .andExpect(jsonPath("$.days[0].lateMinutes").value(20))
+        .andExpect(jsonPath("$.days[0].excusedMinutes").value(20));
+  }
+
+  /** Unterscheidet vergangene und geplante Zeiträume des aktuellen Berliner Tags */
+  @Test
+  void correctsAnElapsedPeriodTodayAndAllowsALaterExcuse() throws Exception {
+    var teacher = staffSession("test.teacher.a");
+    var endpoint = "/api/students/1/attendance/2026-09-14/status-periods";
+    var week = "/api/students/1/attendance/week?date=2026-09-14";
+    setTime("2026-09-14T06:15:00Z");
+    mvc.perform(get(week).session(teacher))
+        .andExpect(jsonPath("$.days[0].canCorrectStatus").value(true))
+        .andExpect(jsonPath("$.days[0].canPlanStatus").value(true))
+        .andExpect(jsonPath("$.days[0].editable").value(false));
+    write(
+            post(endpoint),
+            teacher,
+            """
+        {"status":"ENTSCHULDIGT","startsAt":"08:00","endsAt":"08:30"}
+        """)
+        .andExpect(status().isBadRequest());
+    write(
+            post(endpoint),
+            teacher,
+            """
+        {"status":"ENTSCHULDIGT","startsAt":"07:30","endsAt":"08:00"}
+        """)
+        .andExpect(status().isOk());
+    assertAccount(1, 15, 30);
+    write(
+            post(endpoint),
+            teacher,
+            """
+        {"status":"BETRIEBLICH_ENTSCHULDIGT","startsAt":"09:30","endsAt":"10:00"}
+        """)
+        .andExpect(status().isOk());
+    assertAccount(1, 15, 30);
+
+    setTime("2026-09-14T09:00:00Z");
+    mvc.perform(get(week).session(teacher))
+        .andExpect(jsonPath("$.days[0].unexcusedMinutes").value(120))
+        .andExpect(jsonPath("$.days[0].excusedMinutes").value(60))
+        .andExpect(jsonPath("$.days[0].canCorrectStatus").value(true))
+        .andExpect(jsonPath("$.days[0].canPlanStatus").value(false));
+    write(
+            post(endpoint),
+            teacher,
+            """
+        {"status":"ENTSCHULDIGT","startsAt":"10:00","endsAt":"10:15"}
+        """)
+        .andExpect(status().isOk());
+    assertAccount(1, 105, 75);
+    write(post(RESET), staffSession("test.admin"), "{\"expectedBlockPlanId\":1}")
+        .andExpect(status().isOk());
+    mvc.perform(get(week).session(teacher))
+        .andExpect(jsonPath("$.days[0].canCorrectStatus").value(false));
+  }
+
+  /** Die Ganztagskorrektur zählt beide Unterrichtsslots und erhält manuelle Buchungen */
+  @Test
+  void excusesAWholeCompletedSchoolDayWithoutCountingTheBreak() throws Exception {
+    var teacher = staffSession("test.teacher.a");
+    var other = staffSession("test.teacher.b");
+    var path = "/api/students/1/attendance/2026-09-14/school-day-excuses";
+    var week = "/api/students/1/attendance/week?date=2026-09-14";
+    assertThat(scan(1, "2026-09-14T05:30:00Z")).isTrue();
+    setTime("2026-09-15T07:00:00Z");
+    write(post(path), other, "{}").andExpect(status().isNotFound());
+    write(post(path.replace("09-14", "09-19")), teacher, "{}").andExpect(status().isConflict());
+    var manual =
+        """
+        {"minutes":15,"requestId":"9e2c9c26-87da-46dc-96f2-18897ef16c30"}
+        """;
+    write(post(path.replace("school-day-excuses", "manual-absence-minutes")), teacher, manual)
+        .andExpect(status().isOk());
+    write(post(path), teacher, "{}")
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.changed").value(true));
+    write(post(path), teacher, "{}")
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.changed").value(false));
+    assertAccount(1, 15, 180);
+    mvc.perform(get(week).session(teacher))
+        .andExpect(jsonPath("$.days[0].didNotArrive").value(false))
+        .andExpect(jsonPath("$.days[0].excusedMinutes").value(180))
+        .andExpect(jsonPath("$.days[0].manualAbsenceMinutes").value(15));
+    write(post(RESET), staffSession("test.admin"), "{\"expectedBlockPlanId\":1}")
+        .andExpect(status().isOk());
+    write(post(path), teacher, "{}").andExpect(status().isConflict());
+  }
+
+  /** Rechnet bei laufendem Unterricht erst die verstrichenen Minuten ab */
+  @Test
+  void excusesAnOngoingSchoolDayWithoutBookingRemainingMinutesEarly() throws Exception {
+    setTime("2026-09-14T06:15:00Z");
+    var teacher = staffSession("test.teacher.a");
+    var path = "/api/students/1/attendance/2026-09-14/school-day-excuses";
+    assertThat(scan(1, "2026-09-14T05:30:00Z")).isTrue();
+    write(post(path), teacher, "{}")
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.changed").value(true));
+    assertAccount(1, 0, 45);
+    setTime("2026-09-15T07:00:00Z");
+    accounting.closeDueDays();
+    assertAccount(1, 0, 180);
+  }
+
+  /** Ermittelt die Zeiten einer Ganztagsvormerkung aus dem Stundenplan */
+  @Test
+  void plansAWholeUpcomingSchoolDayUsingTheFirstAndLastSlot() throws Exception {
+    setTime("2026-09-14T08:00:00Z");
+    var teacher = staffSession("test.teacher.a");
+    var path = "/api/students/8/attendance/2026-09-21/school-day-excuses";
+    var week = "/api/students/8/attendance/week?date=2026-09-21";
+    write(post(path), teacher, "{}")
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.changed").value(true));
+    mvc.perform(get(week).session(teacher))
+        .andExpect(jsonPath("$.days[0].plannedStatuses[0].startsAt").value("07:30:00"))
+        .andExpect(jsonPath("$.days[0].plannedStatuses[0].endsAt").value("10:45:00"))
+        .andExpect(jsonPath("$.days[0].plannedStatuses[0].status").value("ENTSCHULDIGT"));
+    assertAccount(8, 0, 0);
+    setTime("2026-09-22T07:00:00Z");
+    accounting.closeDueDays();
+    assertAccount(8, 0, 180);
+  }
+
   /** Leert die Tagesabrechnung und setzt Mitarbeiter und Testuhr auf feste Ausgangswerte */
   @BeforeEach
   void prepare() {
@@ -139,6 +584,7 @@ class AttendanceAccountingIntegrationTest {
     for (String table :
         List.of(
             "attendance_audit",
+            "planned_attendance_status",
             "attendance",
             "raw_scan",
             "class_block_assignment",

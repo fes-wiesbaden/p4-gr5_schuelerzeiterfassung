@@ -1,11 +1,11 @@
 <script setup lang="ts" generic="T extends { id: number }">
 import InputText from 'primevue/inputtext'
-import { computed, nextTick, onMounted, ref, shallowRef } from 'vue'
+import { computed, nextTick, ref, shallowRef, watch } from 'vue'
 import { changeData, loadData } from '@/api/client'
 const props = defineProps<{
   url: string
   columnTitle?: string
-  columns?: { field: keyof T; title: string }[]
+  columns?: { field: keyof T; title: string; format?: (row: T) => string }[]
   itemUrl?: string
   editable: boolean
   canCreate?: boolean
@@ -26,6 +26,9 @@ const editing = ref(false)
 const busy = ref(false)
 const error = ref('')
 const loaded = ref(false)
+const loadingList = ref(true)
+let loadedUrl: string | undefined
+let loadVersion = 0
 const list = ref<HTMLElement>()
 const heading = ref<HTMLHeadingElement>()
 const editor = ref<HTMLFieldSetElement>()
@@ -48,26 +51,50 @@ async function cancelEdit() {
   else focusListAction()
 }
 
-async function reload() {
-  rows.value = await loadData<T[]>(props.url)
-  loaded.value = true
+function isCurrentLoad(url: string, version: number) {
+  return props.url === url && loadVersion === version
 }
+
 async function retryLoad(restoreFocus = false) {
+  const url = props.url
+  const version = ++loadVersion
+  const changed = url !== loadedUrl
   error.value = ''
-  busy.value = true
+  loadingList.value = true
   try {
-    await reload()
+    const result = await loadData<T[]>(url)
+    if (!isCurrentLoad(url, version)) return
+    if (changed) query.value = ''
+    rows.value = result
+    loadedUrl = url
+    loaded.value = true
   } catch {
+    if (!isCurrentLoad(url, version)) return
+    if (changed) {
+      rows.value = []
+      loaded.value = false
+    }
     error.value = 'Liste konnte nicht geladen werden.'
   } finally {
-    busy.value = false
-    if (restoreFocus) {
-      await nextTick()
-      focusListAction()
+    if (isCurrentLoad(url, version)) {
+      loadingList.value = false
+      if (restoreFocus) {
+        await nextTick()
+        if (isCurrentLoad(url, version)) focusListAction()
+      }
     }
   }
 }
-onMounted(() => retryLoad())
+
+watch(
+  () => props.url,
+  () => {
+    selected.value = undefined
+    editing.value = false
+    void retryLoad()
+  },
+  { immediate: true }
+)
 async function edit(row?: T) {
   selected.value = row
   editing.value = true
@@ -94,34 +121,41 @@ async function remove(row: T) {
   }
 }
 async function submit(method: 'POST' | 'PUT' | 'DELETE', body?: unknown) {
-  if (busy.value) return false
+  if (busy.value || loadingList.value) return false
+  const source = props.url
+  const version = loadVersion
+  const rowId = selected.value?.id
   busy.value = true
   error.value = ''
   let saved = false
   try {
     const url =
-      method === 'POST'
-        ? props.url
-        : (props.itemUrl ?? props.url) + '/' + selected.value!.id
+      method === 'POST' ? source : (props.itemUrl ?? source) + '/' + rowId
     await changeData(url, method, body)
     saved = true
+    if (!isCurrentLoad(source, version)) return true
     emit('saved')
     editing.value = false
     if (method === 'DELETE')
-      rows.value = rows.value.filter((row) => row.id !== selected.value?.id)
+      rows.value = rows.value.filter((row) => row.id !== rowId)
     try {
-      await reload()
+      const result = await loadData<T[]>(source)
+      if (isCurrentLoad(source, version)) rows.value = result
     } catch {
-      error.value =
-        'Änderung gespeichert. Die Liste konnte nicht aktualisiert werden. Bitte erneut laden.'
+      if (isCurrentLoad(source, version)) {
+        error.value =
+          'Änderung gespeichert. Die Liste konnte nicht aktualisiert werden. Bitte erneut laden.'
+      }
     }
   } catch (e) {
-    error.value = e instanceof Error ? e.message : 'Server nicht erreichbar.'
+    if (isCurrentLoad(source, version)) {
+      error.value = e instanceof Error ? e.message : 'Server nicht erreichbar.'
+    }
   } finally {
     busy.value = false
   }
   await nextTick()
-  if (saved) focusListAction()
+  if (saved && isCurrentLoad(source, version)) focusListAction()
   return saved
 }
 </script>
@@ -133,7 +167,7 @@ async function submit(method: 'POST' | 'PUT' | 'DELETE', body?: unknown) {
         v-if="!editing && loaded && (canCreate || editable)"
         ref="createButton"
         class="primary"
-        :disabled="busy"
+        :disabled="busy || loadingList"
         @click="edit()"
       >
         Neu anlegen
@@ -145,7 +179,7 @@ async function submit(method: 'POST' | 'PUT' | 'DELETE', body?: unknown) {
       <button
         v-if="!editing"
         ref="retryButton"
-        :disabled="busy"
+        :disabled="busy || loadingList"
         @click="retryLoad(true)"
       >
         Erneut laden
@@ -167,7 +201,7 @@ async function submit(method: 'POST' | 'PUT' | 'DELETE', body?: unknown) {
     </fieldset>
     <template v-else>
       <div class="toolbar">
-        <slot name="filter" />
+        <slot name="filter" :saving="busy" />
         <label class="search">
           <i class="pi pi-search" aria-hidden="true" />
           <InputText
@@ -178,68 +212,79 @@ async function submit(method: 'POST' | 'PUT' | 'DELETE', body?: unknown) {
           />
         </label>
       </div>
-      <p v-if="!loaded && !error" role="status">Einträge werden geladen …</p>
-      <p v-if="loaded" class="count" role="status">
-        {{ visibleRows.length }}
-        {{ visibleRows.length === 1 ? 'Eintrag' : 'Einträge' }}
+      <p v-if="!loaded && loadingList" role="status">
+        Einträge werden geladen …
       </p>
-      <p v-if="loaded && !visibleRows.length">
-        {{
-          rows.length
-            ? 'Keine passenden Einträge gefunden.'
-            : 'Keine Einträge vorhanden.'
-        }}
-      </p>
-      <div v-if="visibleRows.length" class="register">
-        <table :aria-label="title">
-          <thead>
-            <tr>
-              <th scope="col">{{ columnTitle ?? 'Bezeichnung' }}</th>
-              <th
-                v-for="column in columns"
-                :key="String(column.field)"
-                scope="col"
-                class="number"
-              >
-                {{ column.title }}
-              </th>
-              <th v-if="editable" scope="col" class="actions">Aktionen</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="row in visibleRows" :key="row.id">
-              <th scope="row">{{ label(row) }}</th>
-              <td
-                v-for="column in columns"
-                :key="String(column.field)"
-                class="number"
-                :data-label="column.title"
-              >
-                {{ row[column.field] }}
-              </td>
-              <td v-if="editable" class="actions">
-                <button
-                  :disabled="busy"
-                  :data-edit-id="row.id"
-                  :aria-label="'Bearbeiten: ' + label(row)"
-                  @click="edit(row)"
-                >
-                  <i class="pi pi-pencil" aria-hidden="true" />
-                  <span>Bearbeiten</span>
-                </button>
-                <button
-                  :disabled="busy"
-                  :data-delete-id="row.id"
-                  :aria-label="'Löschen: ' + label(row)"
-                  @click="remove(row)"
-                >
-                  <i class="pi pi-trash" aria-hidden="true" />
-                  <span>Löschen</span>
-                </button>
-              </td>
-            </tr>
-          </tbody>
-        </table>
+      <div v-if="loaded" class="list-results">
+        <div class="list-results-content" :inert="loadingList || undefined">
+          <p v-if="loaded" class="count" role="status">
+            {{ visibleRows.length }}
+            {{ visibleRows.length === 1 ? 'Eintrag' : 'Einträge' }}
+          </p>
+          <p v-if="loaded && !visibleRows.length">
+            {{
+              rows.length
+                ? 'Keine passenden Einträge gefunden.'
+                : 'Keine Einträge vorhanden.'
+            }}
+          </p>
+          <div v-if="visibleRows.length" class="register">
+            <table :aria-label="title">
+              <thead>
+                <tr>
+                  <th scope="col">{{ columnTitle ?? 'Bezeichnung' }}</th>
+                  <th
+                    v-for="column in columns"
+                    :key="String(column.field)"
+                    scope="col"
+                    class="number"
+                  >
+                    {{ column.title }}
+                  </th>
+                  <th v-if="editable" scope="col" class="actions">Aktionen</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="row in visibleRows" :key="row.id">
+                  <th scope="row">
+                    <slot name="name" :row="row">{{ label(row) }}</slot>
+                  </th>
+                  <td
+                    v-for="column in columns"
+                    :key="String(column.field)"
+                    class="number"
+                    :data-label="column.title"
+                  >
+                    {{ column.format ? column.format(row) : row[column.field] }}
+                  </td>
+                  <td v-if="editable" class="actions">
+                    <button
+                      :disabled="busy"
+                      :data-edit-id="row.id"
+                      :aria-label="'Bearbeiten: ' + label(row)"
+                      @click="edit(row)"
+                    >
+                      <i class="pi pi-pencil" aria-hidden="true" />
+                      <span>Bearbeiten</span>
+                    </button>
+                    <button
+                      :disabled="busy"
+                      :data-delete-id="row.id"
+                      :aria-label="'Löschen: ' + label(row)"
+                      @click="remove(row)"
+                    >
+                      <i class="pi pi-trash" aria-hidden="true" />
+                      <span>Löschen</span>
+                    </button>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+        <p v-if="loadingList" class="list-loading" role="status">
+          Einträge werden geladen …
+        </p>
       </div>
     </template>
   </section>
@@ -250,6 +295,7 @@ section {
   max-width: 68rem;
 }
 .list-heading {
+  min-height: 44px;
   flex-wrap: wrap;
   display: flex;
   align-items: center;
@@ -341,6 +387,24 @@ tbody tr:nth-child(even) {
   }
   .search :deep(input) {
     width: 100%;
+  }
+}
+.list-results {
+  position: relative;
+}
+.list-loading {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  margin: 0;
+  background: var(--paper);
+  visibility: hidden;
+  animation: show-list-loading 0s 160ms forwards;
+}
+@keyframes show-list-loading {
+  to {
+    visibility: visible;
   }
 }
 .register {

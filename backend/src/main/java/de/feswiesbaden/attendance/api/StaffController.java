@@ -4,18 +4,24 @@ import de.feswiesbaden.attendance.enums.AttendanceStatus;
 import de.feswiesbaden.attendance.repository.StudentRepository.RfidAssignment;
 import de.feswiesbaden.attendance.service.AttendanceAccountingService;
 import de.feswiesbaden.attendance.service.AttendanceAccountingService.DailyStudent;
+import de.feswiesbaden.attendance.service.AttendanceAccountingService.HistoryWeek;
 import de.feswiesbaden.attendance.service.RfidUidService;
 import de.feswiesbaden.attendance.service.SchoolClassService;
 import de.feswiesbaden.attendance.service.SchoolClassService.ClassView;
 import de.feswiesbaden.attendance.service.StudentService;
 import de.feswiesbaden.attendance.service.StudentService.StudentView;
 import jakarta.validation.Valid;
+import jakarta.validation.constraints.Digits;
+import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Positive;
+import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.time.LocalTime;
 import java.util.List;
+import java.util.UUID;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.CacheControl;
 import org.springframework.http.HttpStatus;
@@ -87,6 +93,12 @@ public class StaffController {
         students.create(classId, request.firstName(), request.lastName(), request.birthDate()));
   }
 
+  /** Liefert alle zugänglichen Schüler für die klassenübergreifende Liste */
+  @GetMapping("/students")
+  public List<StudentView> listAccessibleStudents() {
+    return students.listAccessible();
+  }
+
   /** Liefert Schülerstammdaten und die beiden aktuellen Fehlminutenkonten */
   @GetMapping("/students/{studentId}")
   public StudentView getStudent(@PathVariable Long studentId) {
@@ -135,20 +147,68 @@ public class StaffController {
     return attendance.readDay(classId, date);
   }
 
+  /** Liefert die Anwesenheitshistorie eines Schülers für die Woche um das gewählte Datum */
+  @GetMapping("/students/{studentId}/attendance/week")
+  public HistoryWeek readWeek(
+      @PathVariable Long studentId,
+      @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date) {
+    return attendance.readWeek(studentId, date);
+  }
+
+  /** Entschuldigt alle noch offenen Unterrichtsfehlzeiten des ausgewählten Tags */
+  @PostMapping("/students/{studentId}/attendance/{date}/open-absence-excuses")
+  public CorrectionResult excuseOpenAbsences(
+      @PathVariable Long studentId,
+      @PathVariable @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date) {
+    return new CorrectionResult(attendance.excuseOpenAbsences(studentId, date));
+  }
+
+  /** Bucht zusätzliche unentschuldigte Minuten auf dem Berliner Tag */
+  @PostMapping("/students/{studentId}/attendance/{date}/manual-absence-minutes")
+  public CorrectionResult addManualAbsence(
+      @PathVariable Long studentId,
+      @PathVariable @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date,
+      @Valid @RequestBody ManualAbsenceRequest request) {
+    return new CorrectionResult(
+        attendance.addManualAbsence(
+            studentId, date, request.minutes().intValueExact(), request.requestId()));
+  }
+
+  /** Entschuldigt den gesamten geplanten Unterrichtstag */
+  @PostMapping("/students/{studentId}/attendance/{date}/school-day-excuses")
+  public CorrectionResult excuseSchoolDay(
+      @PathVariable Long studentId,
+      @PathVariable @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date) {
+    return new CorrectionResult(attendance.excuseSchoolDay(studentId, date));
+  }
+
+  /** Überschreibt den Status nur im angegebenen Berliner Zeitabschnitt */
+  @PostMapping("/students/{studentId}/attendance/{date}/status-periods")
+  public CorrectionResult correctStatusPeriod(
+      @PathVariable Long studentId,
+      @PathVariable @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date,
+      @Valid @RequestBody StatusPeriodRequest request) {
+    return new CorrectionResult(
+        attendance.correctStatusPeriod(
+            studentId, date, status(request.status()), request.startsAt(), request.endsAt()));
+  }
+
   /** Korrigiert den Status ab dem angegebenen Zeitpunkt im Berliner Kalendertag */
   @PostMapping("/students/{studentId}/attendance/{date}/status-corrections")
   public CorrectionResult correctStatus(
       @PathVariable Long studentId,
       @PathVariable @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date,
       @Valid @RequestBody CorrectionRequest request) {
-    AttendanceStatus status;
+    return new CorrectionResult(
+        attendance.correctStatus(studentId, date, status(request.status()), request.occurredAt()));
+  }
+
+  private static AttendanceStatus status(String value) {
     try {
-      status = AttendanceStatus.valueOf(request.status());
+      return AttendanceStatus.valueOf(value);
     } catch (IllegalArgumentException invalid) {
       throw new IllegalArgumentException("INVALID_ATTENDANCE_STATUS");
     }
-    return new CorrectionResult(
-        attendance.correctStatus(studentId, date, status, request.occurredAt()));
   }
 
   /** Setzt die Fehlminutenkonten der Klasse für den erwarteten Blockplan zurück */
@@ -176,6 +236,16 @@ public class StaffController {
 
   /** Enthält den gewünschten Status und den Zeitpunkt, ab dem er gelten soll */
   public record CorrectionRequest(@NotBlank String status, @NotNull Instant occurredAt) {}
+
+  /** Enthält den Tagesbetrag und die ID zur Wiederholung desselben Buchungsauftrags */
+  public record ManualAbsenceRequest(
+      @NotNull @Positive @Max(Integer.MAX_VALUE) @Digits(integer = 10, fraction = 0)
+          BigDecimal minutes,
+      @NotNull UUID requestId) {}
+
+  /** Enthält den neuen Status und die lokalen Berliner Grenzen des Zeitabschnitts */
+  public record StatusPeriodRequest(
+      @NotBlank String status, @NotNull LocalTime startsAt, @NotNull LocalTime endsAt) {}
 
   /** Enthält den Blockplan, den der Administrator beim Auslösen des Resets ausgewählt hat */
   public record ResetRequest(@NotNull @Positive Long expectedBlockPlanId) {}

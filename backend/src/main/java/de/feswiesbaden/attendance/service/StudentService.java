@@ -28,6 +28,15 @@ public class StudentService {
     return students.findByClassId(classId).stream().map(this::view).toList();
   }
 
+  /** Liefert die Schüler aller für den Mitarbeiter zugänglichen Klassen */
+  @Transactional(readOnly = true)
+  public List<StudentView> listAccessible() {
+    var actor = authorization.currentStaff();
+    return students.findAccessible(actor.id(), actor.administrator()).stream()
+        .map(this::view)
+        .toList();
+  }
+
   /** Liefert die Daten eines zugänglichen Schülers ohne Kartenkennung */
   @Transactional(readOnly = true)
   public StudentView get(Long studentId) {

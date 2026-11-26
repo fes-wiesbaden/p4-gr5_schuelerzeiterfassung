@@ -63,6 +63,8 @@ describe('AppLayout Navigation', () => {
 
     expect(wrapper.text()).toContain('Live-Anwesenheit')
     expect(wrapper.text()).toContain('Klassen')
+    expect(wrapper.get('a[href="/schueler"]').text()).toBe('Schüler')
+    expect(wrapper.find('a[href="/historie"]').exists()).toBe(false)
     wrapper.unmount()
   })
 

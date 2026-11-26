@@ -40,8 +40,30 @@ const router = createRouter({
           name: 'live-anwesenheit',
           component: LiveAttendanceView
         },
-        { path: 'klassen', name: 'klassen', component: ClassesView },
-        { path: 'schueler', name: 'schueler', component: StudentsView },
+        {
+          path: 'klassen',
+          children: [
+            { path: '', name: 'klassen', component: ClassesView },
+            {
+              path: ':classId(\\d+)',
+              name: 'klasse-schueler',
+              component: StudentsView,
+              props: (route) => ({ classId: Number(route.params.classId) })
+            }
+          ]
+        },
+        {
+          path: 'schueler',
+          children: [
+            { path: '', name: 'schueler', component: StudentsView },
+            {
+              path: ':studentId(\\d+)',
+              name: 'schueler-detail',
+              component: () => import('./views/StudentDetailView.vue'),
+              props: (route) => ({ studentId: Number(route.params.studentId) })
+            }
+          ]
+        },
         { path: 'planung', name: 'planung', component: SchedulePlanningView },
         { path: 'auswertungen', name: 'auswertungen', component: ReportsView },
         {

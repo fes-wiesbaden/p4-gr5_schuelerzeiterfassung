@@ -1,105 +1,147 @@
 <script setup lang="ts">
-import InputText from 'primevue/inputtext'
+import { computed, onMounted, ref } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import MasterDataList from '@/components/MasterDataList.vue'
-import StudentRfidCards from '@/components/StudentRfidCards.vue'
-import { ref, onMounted, computed } from 'vue'
+import StudentFormFields from '@/components/StudentFormFields.vue'
+import StudentRfidAssignments from '@/components/StudentRfidAssignments.vue'
 import { loadData } from '@/api/client'
+import { studentLabel, type Student, type StudentClass } from '@/api/students'
 import { useAuthStore } from '@/stores/auth'
+
+const props = defineProps<{ classId?: number }>()
 const auth = useAuthStore()
+const route = useRoute()
+const router = useRouter()
+const classes = ref<StudentClass[]>([])
 const staffId = ref<number>()
 const error = ref('')
-const classes = ref<
-  { id: number; classCode: string; classTeacherId: number }[]
->([])
-const selected = ref<number>()
-const cardFormVersion = ref(0)
-const own = computed(
-  () =>
-    classes.value.find((c) => c.id === selected.value)?.classTeacherId ===
-    staffId.value
-)
-onMounted(async () => {
-  try {
-    staffId.value = await loadData('/api/staff-id')
-    classes.value = await loadData('/api/classes')
-    selected.value = classes.value[0]?.id
-  } catch {
-    error.value = 'Klassen konnten nicht geladen werden.'
+const loading = ref(true)
+const selection = computed({
+  get: () =>
+    classes.value.find(
+      (entry) =>
+        String(entry.id) === (props.classId?.toString() ?? route.query.klasse)
+    ),
+  set: (entry: StudentClass | undefined) => {
+    void router.replace({
+      name: 'schueler',
+      query: entry ? { klasse: entry.id } : {}
+    })
   }
 })
-type Row = {
-  id: number
-  firstName: string
-  lastName: string
-  birthDate: string
-  excusedMinutes: number
-  unexcusedMinutes: number
-}
-function label(r: Row) {
-  return r.lastName + ', ' + r.firstName
-}
-</script>
-<template>
-  <h1 v-if="!selected">Schüler</h1>
-  <p v-if="error" role="alert">{{ error }}</p>
+const rosterUrl = computed(() =>
+  selection.value
+    ? `/api/classes/${selection.value.id}/students`
+    : '/api/students'
+)
+const canCreate = computed(() =>
+  Boolean(
+    selection.value &&
+    (auth.isAdmin || selection.value.classTeacherId === staffId.value)
+  )
+)
+const classPage = computed(() => props.classId !== undefined)
+const title = computed(() =>
+  classPage.value && selection.value ? selection.value.classCode : 'Schüler'
+)
+const columns = computed(() => [
+  ...(!classPage.value
+    ? [
+        {
+          field: 'classId' as const,
+          title: 'Klasse',
+          format: (row: Student) =>
+            classes.value.find((entry) => entry.id === row.classId)
+              ?.classCode ?? '—'
+        }
+      ]
+    : []),
+  { field: 'unexcusedMinutes' as const, title: 'Unentschuldigt (min)' },
+  { field: 'excusedMinutes' as const, title: 'Entschuldigt (min)' }
+])
+const profileContext = computed(() =>
+  classPage.value
+    ? { von: 'klasse' }
+    : selection.value
+      ? { klasse: selection.value.id }
+      : {}
+)
 
-  <p v-if="staffId && !classes.length && !error">Keine Klasse verfügbar.</p>
+onMounted(async () => {
+  try {
+    const [available, currentStaffId] = await Promise.all([
+      loadData<StudentClass[]>('/api/classes'),
+      loadData<number>('/api/staff-id')
+    ])
+    classes.value = available
+    staffId.value = currentStaffId
+  } catch {
+    error.value = 'Klassen konnten nicht geladen werden.'
+  } finally {
+    loading.value = false
+  }
+})
+</script>
+
+<template>
+  <RouterLink v-if="classPage" class="back" :to="{ name: 'klassen' }">
+    Zur Klassenliste
+  </RouterLink>
+  <h1 v-if="loading || error || (classPage && !selection)">{{ title }}</h1>
+  <p v-if="error" role="alert">{{ error }}</p>
+  <p v-else-if="loading" role="status">Klassen werden geladen …</p>
+  <p v-else-if="classPage && !selection" role="alert">
+    Klasse nicht gefunden oder kein Zugriff.
+  </p>
   <MasterDataList
-    v-if="selected"
-    :key="selected"
-    :url="'/api/classes/' + selected + '/students'"
-    item-url="/api/students"
-    :editable="auth.isAdmin || own"
-    title="Schüler"
+    v-else
+    :url="rosterUrl"
+    :editable="false"
+    :can-create="canCreate"
+    :title="title"
     column-title="Name"
-    :columns="[
-      { field: 'unexcusedMinutes', title: 'Unentschuldigt (min)' },
-      { field: 'excusedMinutes', title: 'Entschuldigt (min)' }
-    ]"
-    :label="label"
-    @saved="cardFormVersion++"
+    :columns="columns"
+    :label="studentLabel"
   >
-    <template #filter>
-      <label class="class-filter">
-        Klasse
-        <select v-model="selected">
-          <option v-for="c in classes" :key="c.id" :value="c.id">
-            {{ c.classCode }}
+    <template #filter="{ saving }">
+      <div v-if="!classPage" class="class-filter">
+        <label for="student-list-class">Klasse</label>
+        <select id="student-list-class" v-model="selection" :disabled="saving">
+          <option :value="undefined">Alle Klassen</option>
+          <option v-for="entry in classes" :key="entry.id" :value="entry">
+            {{ entry.classCode }}
           </option>
         </select>
-      </label>
+      </div>
     </template>
-    <template #form="{ row }">
-      <label>
-        Vorname
-        <InputText
-          name="firstName"
-          type="text"
-          :default-value="row?.firstName"
-          maxlength="100"
-          required
-        />
-      </label>
-      <label>
-        Nachname
-        <InputText
-          name="lastName"
-          type="text"
-          :default-value="row?.lastName"
-          maxlength="100"
-          required
-        />
-      </label>
-      <label>
-        Geburtsdatum
-        <InputText
-          name="birthDate"
-          type="date"
-          :default-value="row?.birthDate"
-          required
-        />
-      </label>
+    <template #name="{ row }">
+      <RouterLink
+        :to="{
+          name: 'schueler-detail',
+          params: { studentId: row.id },
+          query: profileContext
+        }"
+      >
+        {{ studentLabel(row) }}
+      </RouterLink>
+    </template>
+    <template #form>
+      <StudentFormFields />
     </template>
   </MasterDataList>
-  <StudentRfidCards :key="cardFormVersion" :classes="classes" />
+  <StudentRfidAssignments
+    v-if="!classPage && !auth.isAdmin && !loading"
+    :classes="classes"
+  />
 </template>
+
+<style scoped>
+a {
+  color: var(--accent);
+}
+
+.back {
+  display: inline-block;
+  margin-bottom: 1rem;
+}
+</style>

@@ -172,7 +172,9 @@ public class SecurityConfig {
                         "/api/classes",
                         "/api/classes/{classId}/students",
                         "/api/classes/{classId}/attendance",
+                        "/api/students",
                         "/api/students/rfid-uids",
+                        "/api/students/{studentId}/attendance/week",
                         "/api/students/{studentId}")
                     .authenticated()
                     .requestMatchers(
@@ -182,7 +184,11 @@ public class SecurityConfig {
                         "/api/classes",
                         "/api/classes/{classId}/students",
                         "/api/classes/{classId}/account-resets",
-                        "/api/students/{studentId}/attendance/{date}/status-corrections")
+                        "/api/students/{studentId}/attendance/{date}/status-corrections",
+                        "/api/students/{studentId}/attendance/{date}/open-absence-excuses",
+                        "/api/students/{studentId}/attendance/{date}/manual-absence-minutes",
+                        "/api/students/{studentId}/attendance/{date}/status-periods",
+                        "/api/students/{studentId}/attendance/{date}/school-day-excuses")
                     .authenticated()
                     .requestMatchers(HttpMethod.GET, "/api/planning")
                     .authenticated()

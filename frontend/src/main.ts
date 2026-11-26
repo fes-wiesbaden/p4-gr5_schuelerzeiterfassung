@@ -33,6 +33,55 @@ const app = createApp(App)
 app.use(createPinia())
 app.use(router)
 app.use(PrimeVue, {
+  locale: {
+    firstDayOfWeek: 1,
+    dayNames: [
+      'Sonntag',
+      'Montag',
+      'Dienstag',
+      'Mittwoch',
+      'Donnerstag',
+      'Freitag',
+      'Samstag'
+    ],
+    dayNamesMin: ['So', 'Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa'],
+    monthNames: [
+      'Januar',
+      'Februar',
+      'März',
+      'April',
+      'Mai',
+      'Juni',
+      'Juli',
+      'August',
+      'September',
+      'Oktober',
+      'November',
+      'Dezember'
+    ],
+    monthNamesShort: [
+      'Jan',
+      'Feb',
+      'Mär',
+      'Apr',
+      'Mai',
+      'Jun',
+      'Jul',
+      'Aug',
+      'Sep',
+      'Okt',
+      'Nov',
+      'Dez'
+    ],
+    weekHeader: 'KW',
+    chooseDate: 'Datum auswählen',
+    chooseMonth: 'Monat auswählen',
+    chooseYear: 'Jahr auswählen',
+    prevMonth: 'Vorheriger Monat',
+    nextMonth: 'Nächster Monat',
+    prevYear: 'Vorheriges Jahr',
+    nextYear: 'Nächstes Jahr'
+  },
   theme: {
     preset: AttendanceTheme,
     options: { darkModeSelector: false }

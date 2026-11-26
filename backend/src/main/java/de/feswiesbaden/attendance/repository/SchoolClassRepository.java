@@ -15,7 +15,7 @@ import org.springframework.stereotype.Repository;
  */
 @Repository
 public class SchoolClassRepository {
-  private static final String CLASS_ACCESS =
+  static final String CLASS_ACCESS =
       """
       (? OR c.class_teacher_id = ? OR EXISTS
         (SELECT 1 FROM teacher_class tc WHERE tc.school_class_id = c.id AND tc.staff_id = ?))

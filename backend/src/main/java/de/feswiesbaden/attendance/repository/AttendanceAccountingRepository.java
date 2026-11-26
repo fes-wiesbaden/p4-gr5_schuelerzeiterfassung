@@ -15,6 +15,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.UUID;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.support.GeneratedKeyHolder;
 import org.springframework.stereotype.Repository;
@@ -197,6 +198,48 @@ public class AttendanceAccountingRepository {
         today);
   }
 
+  /** Liest die aufbewahrten Tagesaudits eines Schülers aus dem gewählten Datumsbereich */
+  public Map<LocalDate, List<Audit>> findStudentDayAudits(
+      Long studentId, LocalDate from, LocalDate through, LocalDate today) {
+    return jdbc.query(
+        """
+        SELECT h.id, h.attendance_id, h.deletion_date_id, h.event_type, h.occurred_at,
+               h.old_status, h.new_status, h.unexcused_minutes_delta, h.excused_minutes_delta,
+               a.attendance_date
+        FROM attendance_audit h
+        JOIN attendance a ON a.id = h.attendance_id AND a.student_id = h.student_id
+        JOIN deletion_date d ON d.id = h.deletion_date_id
+        WHERE h.student_id = ? AND a.attendance_date BETWEEN ? AND ? AND d.delete_after > ?
+        """,
+        rows -> {
+          Map<LocalDate, List<Audit>> audits = new HashMap<>();
+          while (rows.next()) {
+            audits
+                .computeIfAbsent(
+                    rows.getObject("attendance_date", LocalDate.class), date -> new ArrayList<>())
+                .add(audit(rows));
+          }
+          return audits;
+        },
+        studentId,
+        from,
+        through,
+        today);
+  }
+
+  /** Liefert den Zeitpunkt des letzten Kontenresets für die Anzeige der Korrektursperre */
+  public Optional<LocalDateTime> latestResetAt(Long studentId) {
+    return jdbc.query(
+        """
+        SELECT occurred_at FROM attendance_audit
+        WHERE student_id = ? AND event_type = 'ACCOUNT_RESET'
+        ORDER BY id DESC LIMIT 1
+        """,
+        rows ->
+            rows.next() ? Optional.of(rows.getObject(1, LocalDateTime.class)) : Optional.empty(),
+        studentId);
+  }
+
   /** Liest ein Audit mit Statuswechsel und beiden Minutendeltas */
   private Audit audit(ResultSet row) throws SQLException {
     String oldStatus = row.getString("old_status");
@@ -235,35 +278,91 @@ public class AttendanceAccountingRepository {
     return key.getKey().longValue();
   }
 
-  /**
-   * Fügt ein Änderungsprotokoll ein und speichert die übergebenen Fehlminutenkonten und den
-   * Tagesstatus
-   */
-  public void book(
-      Account account,
-      Long attendanceId,
-      AttendanceStatus status,
-      Audit audit,
-      Long staffId,
-      Integer terminalId,
-      LocalDateTime now) {
+  /** Liest die aufbewahrten Vormerkungen eines Schülers für den angegebenen Zeitraum */
+  public List<PlannedStatus> findPlannedStatuses(
+      Long studentId, LocalDate from, LocalDate through, LocalDate today, boolean lock) {
+    return jdbc.query(
+        """
+        SELECT p.student_id, p.attendance_date, p.starts_at, p.ends_at, p.status
+        FROM planned_attendance_status p JOIN deletion_date d ON d.id = p.deletion_date_id
+        WHERE p.student_id = ? AND p.attendance_date BETWEEN ? AND ? AND d.delete_after > ?
+        ORDER BY p.starts_at
+        """
+            + (lock ? " FOR UPDATE" : ""),
+        this::plannedStatus,
+        studentId,
+        from,
+        through,
+        today);
+  }
+
+  /** Liest die Vormerkungen aller Schüler eines Klassentags */
+  public List<PlannedStatus> findClassPlannedStatuses(
+      Long classId, LocalDate date, LocalDate today) {
+    return jdbc.query(
+        """
+        SELECT p.student_id, p.attendance_date, p.starts_at, p.ends_at, p.status
+        FROM planned_attendance_status p JOIN deletion_date d ON d.id = p.deletion_date_id
+        JOIN student s ON s.id = p.student_id
+        WHERE s.school_class_id = ? AND p.attendance_date = ? AND d.delete_after > ?
+        ORDER BY p.starts_at
+        """,
+        this::plannedStatus,
+        classId,
+        date,
+        today);
+  }
+
+  /** Protokolliert die Vormerkung mit ihrem Erstellungszeitpunkt, Akteur und Löschdatum */
+  public void insertPlannedStatus(
+      PlannedStatus period, Long staffId, Long deletionDateId, LocalDateTime now) {
     jdbc.update(
-        "INSERT INTO attendance_audit (student_id, attendance_id, deletion_date_id, event_type,"
-            + " changed_by_staff_id, terminal_id, old_status, new_status, occurred_at,"
-            + " unexcused_minutes_delta, excused_minutes_delta, created_at)"
-            + " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        account.id(),
-        attendanceId,
-        audit.deletionDateId(),
-        audit.type().name(),
+        """
+        INSERT INTO planned_attendance_status
+            (student_id, attendance_date, starts_at, ends_at, status, changed_by_staff_id,
+             deletion_date_id, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        period.studentId(),
+        period.date(),
+        period.start(),
+        period.end(),
+        period.status().name(),
         staffId,
-        terminalId,
-        audit.oldStatus() == null ? null : audit.oldStatus().name(),
-        audit.status() == null ? null : audit.status().name(),
-        audit.occurredAt(),
-        audit.unexcusedDelta(),
-        audit.excusedDelta(),
+        deletionDateId,
         now);
+  }
+
+  private PlannedStatus plannedStatus(ResultSet row, int index) throws SQLException {
+    return new PlannedStatus(
+        row.getLong("student_id"),
+        row.getObject("attendance_date", LocalDate.class),
+        row.getObject("starts_at", LocalDateTime.class),
+        row.getObject("ends_at", LocalDateTime.class),
+        AttendanceStatus.valueOf(row.getString("status")));
+  }
+
+  /** Enthält den ausgewählten Berliner Tag und den Zeitraum als UTC-Zeit */
+  public record PlannedStatus(
+      Long studentId,
+      LocalDate date,
+      LocalDateTime start,
+      LocalDateTime end,
+      AttendanceStatus status) {}
+
+  /** Prüft einen bereits verarbeiteten Buchungsauftrag der Tagesanwesenheit */
+  public Optional<Integer> findManualBooking(Long attendanceId, UUID requestId) {
+    return jdbc.query(
+        "SELECT unexcused_minutes_delta FROM attendance_audit"
+            + " WHERE attendance_id = ? AND request_id = ? AND event_type = 'MANUAL_ABSENCE_MINUTES' FOR UPDATE",
+        rows -> rows.next() ? Optional.of(rows.getInt(1)) : Optional.empty(),
+        attendanceId,
+        requestId.toString());
+  }
+
+  /** Speichert die berechneten Fehlminutenkonten und den Tagesstatus */
+  public void updateTotals(
+      Account account, Long attendanceId, AttendanceStatus status, LocalDateTime now) {
     jdbc.update(
         "UPDATE student SET unexcused_minutes_account = ?, excused_minutes_account = ? WHERE id = ?",
         account.unexcused(),
@@ -274,6 +373,35 @@ public class AttendanceAccountingRepository {
         status.name(),
         now,
         attendanceId);
+  }
+
+  /** Fügt ein unveränderliches Änderungsprotokoll ein */
+  public void insertAudit(
+      Long studentId,
+      Long attendanceId,
+      Audit audit,
+      Long staffId,
+      Integer terminalId,
+      LocalDateTime now,
+      UUID requestId) {
+    jdbc.update(
+        "INSERT INTO attendance_audit (student_id, attendance_id, deletion_date_id, event_type,"
+            + " changed_by_staff_id, terminal_id, old_status, new_status, occurred_at,"
+            + " unexcused_minutes_delta, excused_minutes_delta, created_at, request_id)"
+            + " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        studentId,
+        attendanceId,
+        audit.deletionDateId(),
+        audit.type().name(),
+        staffId,
+        terminalId,
+        audit.oldStatus() == null ? null : audit.oldStatus().name(),
+        audit.status() == null ? null : audit.status().name(),
+        audit.occurredAt(),
+        audit.unexcusedDelta(),
+        audit.excusedDelta(),
+        now,
+        requestId == null ? null : requestId.toString());
   }
 
   /** Liest Schüler-ID, Fehlminutenkonten und Erstellungszeitpunkt aus dem SQL-Abfrageergebnis */
