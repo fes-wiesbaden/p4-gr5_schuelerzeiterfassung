@@ -10,10 +10,6 @@ export const STATUS_LABELS = {
 
 export type AttendanceStatus = keyof typeof STATUS_LABELS
 
-export const ATTENDANCE_STATUSES = Object.keys(
-  STATUS_LABELS
-) as AttendanceStatus[]
-
 export interface DailyStudent {
   studentId: number
   firstName: string

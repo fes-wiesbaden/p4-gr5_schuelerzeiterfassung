@@ -237,6 +237,13 @@ describe('LiveAttendanceView', () => {
 
   it('sendet eine Statusänderung ab der gewählten Uhrzeit und lädt die Minuten neu', async () => {
     const wrapper = await mountView()
+    fetchMock.mockImplementation(async (_: string, options: RequestInit) =>
+      options?.method === 'POST'
+        ? respond(200, { changed: true })
+        : respond(200, [
+            { ...day[0], status: 'ENTSCHULDIGT', unexcusedMinutes: 15 }
+          ])
+    )
 
     const form = wrapper.find('form.correction')
     await form.find('select').setValue('ENTSCHULDIGT')
@@ -254,7 +261,9 @@ describe('LiveAttendanceView', () => {
       status: 'ENTSCHULDIGT',
       occurredAt: '2026-09-14T05:45:00.000Z'
     })
-    expect(attendanceCalls(fetchMock)).toHaveLength(2)
+    const cells = wrapper.findAll('tbody td').map((cell) => cell.text())
+    expect(cells[1]).toBe('Entschuldigt')
+    expect(cells[2]).toBe('15')
     expect(wrapper.text()).toContain('Status von Beispiel, Erika gespeichert.')
   })
 

@@ -4,7 +4,6 @@ import InputText from 'primevue/inputtext'
 import { onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 
 import {
-  ATTENDANCE_STATUSES,
   BERLIN,
   STATUS_LABELS,
   berlinDate,
@@ -64,7 +63,6 @@ async function load() {
   if (classId.value === undefined) return
   // Bleibt die Seite über Mitternacht offen, wechselt die Ansicht auf den neuen
   // Tag. Anzeige und Eingaben wechseln erst mit der erfolgreichen Antwort
-  // Tag, vorbelegte Uhrzeit und Stand stammen aus demselben Zeitpunkt
   const now = serverNow()
   const day = berlinDate(now)
   const request = ++latestRequest
@@ -208,8 +206,8 @@ onUnmounted(() => clearInterval(timer))
       :rows="rows"
       row-key="studentId"
     >
-      <template #cell-status="{ value }">
-        <StatusBadge :status="value as AttendanceStatus" />
+      <template #cell-status="{ row }">
+        <StatusBadge :status="row.status" />
       </template>
       <template #cell-studentId="{ row }">
         <form
@@ -222,8 +220,8 @@ onUnmounted(() => clearInterval(timer))
             :aria-label="`Neuer Status für ${row.name}`"
             @change="drafts[row.studentId].touched = true"
           >
-            <option v-for="s in ATTENDANCE_STATUSES" :key="s" :value="s">
-              {{ STATUS_LABELS[s] }}
+            <option v-for="(label, s) in STATUS_LABELS" :key="s" :value="s">
+              {{ label }}
             </option>
           </select>
           <InputText
