@@ -76,7 +76,7 @@ class Issue43IntegrationTest {
   /**
    * Laufender Slot, Pause vor dem nächsten Slot, Unterrichtsende, Block der anderen Klasse und der
    * Berliner Tag kurz nach Mitternacht. Beim Administrator laufen Klasse 1 und 2 gleichzeitig. Am
-   * 21.09. läuft nur Klasse 3 von Lehrkraft A, daher erhält Lehrkraft B keine fremde Klasse Slots:
+   * 21.09. läuft nur Klasse 3 von Lehrkraft A, daher erhält Lehrkraft B keine fremde Klasse. Slots:
    * montags 07:30-09:00 und 09:15-10:45 Berliner Zeit
    */
   @ParameterizedTest

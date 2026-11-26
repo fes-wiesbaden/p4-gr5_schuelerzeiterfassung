@@ -38,16 +38,17 @@ import org.springframework.test.context.jdbc.Sql;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.ResultActions;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
-import org.springframework.util.ClassUtils;
 import org.testcontainers.containers.MySQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
 /**
- * Prüft die Rechte der Lehrkraft in der aktuellen Anwesenheitsansicht und beim Abruf vergangener
- * Tage über HTTP (Issue #45). Die Klassenliste prüfen Issue23IntegrationTest und
- * AttendanceAccountingIntegrationTest, die Vorauswahl nur zugänglicher Klassen
- * Issue43IntegrationTest und das Polling-Verhalten aus #43 LiveAttendanceView.test.ts
+ * Prüft die Rechte der Lehrkraft in der aktuellen Anwesenheitsansicht und bei vergangenen Tagen
+ * über HTTP (Issue #45). Bereits anderswo geprüft und hier nicht wiederholt: Klassenliste und
+ * Ablehnung des heutigen Tages fremder Klassen in Issue23IntegrationTest und
+ * AttendanceAccountingIntegrationTest, Vorauswahl nur zugänglicher Klassen in
+ * Issue43IntegrationTest, Polling-Verhalten aus #43 in LiveAttendanceView.test.ts und
+ * EventSource-Freiheit des Frontends in noServerSentEvents.test.ts
  */
 @SpringBootTest
 @AutoConfigureMockMvc
@@ -110,12 +111,12 @@ class Issue45IntegrationTest {
   }
 
   /**
-   * Der Abruf eines vergangenen Tages und Statuskorrekturen in fremden Klassen werden abgelehnt und
-   * ändern weder Anwesenheit, Protokoll noch Minutenkonten. Den heutigen Tag prüft
-   * AttendanceAccountingIntegrationTest
+   * Der Abruf eines vergangenen Tages und die rückwirkende Statuskorrektur am Folgetag in einer
+   * fremden Klasse werden abgelehnt und ändern weder Anwesenheit, Protokoll noch Minutenkonten
    */
   @Test
   void rejectsDirectAccessToForeignClassesWithoutSideEffects() throws Exception {
+    setTime("2026-09-15T06:00:00Z");
     var teacher = staffSession("test.teacher.b");
     String pastDay = "/api/classes/1/attendance?date=2026-09-11";
     mvc.perform(get(pastDay).session(teacher))
@@ -130,14 +131,16 @@ class Issue45IntegrationTest {
   /**
    * Die Korrektur der Lehrkraft wird am selben Tag und rückwirkend am Folgetag mit Mitarbeiter,
    * Zeitpunkten, Status, Löschfrist und Minutendeltas protokolliert und ist beim nächsten
-   * REST-Abruf mit neu berechneten Minuten sichtbar. Eine Korrektur eines vergangenen Tages ohne
-   * Unterricht wird abgelehnt und schreibt kein Protokoll. Den nach einem Kontenreset gesperrten
-   * Tag prüft AttendanceAccountingIntegrationTest
+   * REST-Abruf mit neu berechneten Minuten sichtbar. Weitere Löschfristen stellen sicher, dass die
+   * zum Blockplan passende Frist gewählt wird
    */
   @ParameterizedTest
   @ValueSource(strings = {"2026-09-14T08:45:00Z", "2026-09-15T06:00:00Z"})
   void auditsTeacherCorrectionCompletelyAndShowsItOnTheNextRestRead(String now) throws Exception {
     setTime(now);
+    jdbc.update("UPDATE deletion_date SET delete_after = '2026-12-31' WHERE id = 1");
+    jdbc.update(
+        "INSERT INTO deletion_date (id, delete_after) VALUES (2, '2027-06-30'), (3, '2027-12-31')");
     var teacher = staffSession("test.teacher.a");
     mvc.perform(get(CLASS_DAY).session(teacher))
         .andExpect(status().isOk())
@@ -145,37 +148,25 @@ class Issue45IntegrationTest {
         .andExpect(jsonPath("$[0].status").value("ABWESEND"))
         .andExpect(jsonPath("$[0].unexcusedMinutes").value(180));
 
-    write(
-            post("/api/students/1/attendance/2026-09-11/status-corrections"),
-            teacher,
-            "{\"status\":\"ENTSCHULDIGT\",\"occurredAt\":\"2026-09-11T06:00:00Z\"}")
-        .andExpect(status().isConflict())
-        .andExpect(content().json("{\"code\":\"ATTENDANCE_DAY_LOCKED_OR_UNPLANNED\"}"));
-    assertNoAttendanceBooked();
-
     write(post(CORRECTION), teacher, EXCUSE)
         .andExpect(status().isOk())
         .andExpect(content().json("{\"changed\":true}"));
-    var attendanceId =
-        jdbc.queryForObject("SELECT id FROM attendance WHERE student_id = 1", Long.class);
-    assertThat(jdbc.queryForList("SELECT * FROM attendance_audit"))
-        .singleElement()
-        .satisfies(
-            audit ->
-                assertThat(audit)
-                    .containsEntry("student_id", 1L)
-                    .containsEntry("attendance_id", attendanceId)
-                    .containsEntry("event_type", "STATUS_CHANGE")
-                    .containsEntry("changed_by_staff_id", 1L)
-                    .containsEntry("terminal_id", null)
-                    .containsEntry("deletion_date_id", 1L)
-                    .containsEntry("old_status", "ABWESEND")
-                    .containsEntry("new_status", "ENTSCHULDIGT")
-                    .containsEntry("occurred_at", LocalDateTime.of(2026, 9, 14, 5, 45))
-                    .containsEntry(
-                        "created_at", LocalDateTime.ofInstant(clock.instant(), ZoneOffset.UTC))
-                    .containsEntry("unexcused_minutes_delta", 15)
-                    .containsEntry("excused_minutes_delta", 165));
+    // queryForMap verlangt genau einen Protokolleintrag
+    assertThat(jdbc.queryForMap("SELECT * FROM attendance_audit"))
+        .containsEntry("student_id", 1L)
+        .containsEntry(
+            "attendance_id",
+            jdbc.queryForObject("SELECT id FROM attendance WHERE student_id = 1", Long.class))
+        .containsEntry("event_type", "STATUS_CHANGE")
+        .containsEntry("changed_by_staff_id", 1L)
+        .containsEntry("terminal_id", null)
+        .containsEntry("deletion_date_id", 2L)
+        .containsEntry("old_status", "ABWESEND")
+        .containsEntry("new_status", "ENTSCHULDIGT")
+        .containsEntry("occurred_at", LocalDateTime.of(2026, 9, 14, 5, 45))
+        .containsEntry("created_at", LocalDateTime.ofInstant(clock.instant(), ZoneOffset.UTC))
+        .containsEntry("unexcused_minutes_delta", 15)
+        .containsEntry("excused_minutes_delta", 165);
 
     mvc.perform(get(CLASS_DAY).session(teacher))
         .andExpect(jsonPath("$[0].status").value("ENTSCHULDIGT"))
@@ -183,9 +174,35 @@ class Issue45IntegrationTest {
   }
 
   /**
-   * Tagesstatus und Korrektur sind nur mit Anmeldung erreichbar. Die Vorauswahl prüft
-   * Issue43IntegrationTest
+   * Nach dem Kontenreset ist der Tag gesperrt. Die rückwirkende Korrektur der Lehrkraft wird
+   * abgelehnt und ändert weder Anwesenheit, Protokoll noch Minutenkonten
    */
+  @Test
+  void rejectsCorrectionOfADayLockedByTheAccountReset() throws Exception {
+    setTime("2026-09-15T06:00:00Z");
+    write(
+            post("/api/classes/1/account-resets"),
+            staffSession("test.admin"),
+            "{\"expectedBlockPlanId\":1}")
+        .andExpect(status().isOk());
+    var history =
+        List.of(
+            jdbc.queryForList("SELECT * FROM attendance ORDER BY id"),
+            jdbc.queryForList("SELECT * FROM attendance_audit ORDER BY id"),
+            jdbc.queryForList("SELECT * FROM student ORDER BY id"));
+
+    write(post(CORRECTION), staffSession("test.teacher.a"), EXCUSE)
+        .andExpect(status().isConflict())
+        .andExpect(content().json("{\"code\":\"ATTENDANCE_DAY_LOCKED_OR_UNPLANNED\"}"));
+    assertThat(
+            List.of(
+                jdbc.queryForList("SELECT * FROM attendance ORDER BY id"),
+                jdbc.queryForList("SELECT * FROM attendance_audit ORDER BY id"),
+                jdbc.queryForList("SELECT * FROM student ORDER BY id")))
+        .isEqualTo(history);
+  }
+
+  /** Tagesstatus und Korrektur sind nur mit Anmeldung erreichbar */
   @Test
   void requiresAuthenticationForLiveAttendance() throws Exception {
     mvc.perform(get(CLASS_DAY)).andExpect(status().isUnauthorized());
@@ -195,13 +212,11 @@ class Issue45IntegrationTest {
 
   /**
    * Der Produktionscode enthält keine SSE-Infrastruktur, auch nicht als ResponseEntity-Generic oder
-   * manuell gesetzten Content-Type; WebFlux liegt nicht auf dem Klassenpfad. Der Quellpfad wird aus
-   * target/test-classes abgeleitet, damit der Test unabhängig vom Arbeitsverzeichnis läuft
+   * manuell gesetzten Content-Type. Der Quellpfad wird aus target/test-classes abgeleitet, damit
+   * der Test unabhängig vom Arbeitsverzeichnis läuft
    */
   @Test
   void usesNoServerSentEvents() throws Exception {
-    assertThat(ClassUtils.isPresent("org.springframework.web.reactive.DispatcherHandler", null))
-        .isFalse();
     var testClasses =
         Path.of(getClass().getProtectionDomain().getCodeSource().getLocation().toURI());
     try (var files = Files.walk(testClasses.resolve("../../src/main").normalize())) {
@@ -211,11 +226,7 @@ class Issue45IntegrationTest {
         assertThat(Files.readString(file))
             .as(file.toString())
             .doesNotContain(
-                "SseEmitter",
-                "ServerSentEvent",
-                "EventSource",
-                "TEXT_EVENT_STREAM",
-                "text/event-stream");
+                "SseEmitter", "ServerSentEvent", "TEXT_EVENT_STREAM", "text/event-stream");
       }
     }
   }
