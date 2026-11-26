@@ -24,7 +24,7 @@ export interface DailyStudent {
 
 export interface CurrentClass {
   classId: number | null
-  date: string
+  serverTime: string
 }
 
 const BERLIN = 'Europe/Berlin'
@@ -45,6 +45,7 @@ export function berlinTime(at: Date): string {
 
 // Wandelt Berliner Datum und Uhrzeit unabhängig von der Zeitzone des Browsers
 // in einen sekundengenauen UTC-Zeitpunkt um
+// shortcut: Offset wird zur als UTC gelesenen Uhrzeit bestimmt und kann in der Stunde der nächtlichen Zeitumstellung um eine Stunde abweichen; genügt, solange dann kein Unterricht stattfindet
 export function berlinInstant(date: string, time: string): string {
   const local = `${date}T${time}:00`
   const offset = new Intl.DateTimeFormat('en-US', {

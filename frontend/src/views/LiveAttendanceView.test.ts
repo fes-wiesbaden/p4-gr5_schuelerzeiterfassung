@@ -43,7 +43,7 @@ describe('LiveAttendanceView', () => {
     fetchMock.mockImplementation(async (url: string, options: RequestInit) => {
       if (url === '/api/classes') return respond(200, classes)
       if (url === '/api/attendance/current-class')
-        return respond(200, { classId: 2, date: '2026-09-14' })
+        return respond(200, { classId: 2, serverTime: '2026-09-14T06:00:00Z' })
       if (options?.method === 'POST') return respond(200, { changed: true })
       return respond(200, day)
     })
@@ -82,7 +82,7 @@ describe('LiveAttendanceView', () => {
       url === '/api/classes'
         ? respond(200, classes)
         : url === '/api/attendance/current-class'
-          ? respond(200, { classId: null, date: '2026-09-14' })
+          ? respond(200, { classId: null, serverTime: '2026-09-14T06:00:00Z' })
           : respond(200, day)
     )
     await mountView()
@@ -132,6 +132,53 @@ describe('LiveAttendanceView', () => {
     expect((form.find('select').element as HTMLSelectElement).value).toBe(
       'ENTSCHULDIGT'
     )
+  })
+
+  it('richtet Tag und vorbelegte Uhrzeit an der Serverzeit statt an der Browseruhr aus', async () => {
+    // Browseruhr geht 30 Minuten vor und steht schon auf dem Folgetag
+    vi.setSystemTime(new Date('2026-09-14T22:20:00Z'))
+    fetchMock.mockImplementation(async (url: string) =>
+      url === '/api/classes'
+        ? respond(200, classes)
+        : url === '/api/attendance/current-class'
+          ? respond(200, { classId: 2, serverTime: '2026-09-14T21:50:00Z' })
+          : respond(200, day)
+    )
+    const wrapper = await mountView()
+
+    expect(attendanceCalls(fetchMock)).toEqual([
+      '/api/classes/2/attendance?date=2026-09-14'
+    ])
+    expect(
+      (wrapper.find('form.correction input').element as HTMLInputElement).value
+    ).toBe('23:50')
+  })
+
+  it('versucht das fehlgeschlagene Laden der Klassen beim nächsten Takt erneut', async () => {
+    fetchMock.mockImplementationOnce(async () => respond(500, {}))
+    const wrapper = await mountView()
+    expect(wrapper.get('[role="alert"]').text()).toContain(
+      'Klassen konnten nicht geladen werden'
+    )
+
+    await vi.advanceTimersByTimeAsync(30_000)
+
+    expect(wrapper.find('[role="alert"]').exists()).toBe(false)
+    expect(attendanceCalls(fetchMock)).toEqual([
+      '/api/classes/2/attendance?date=2026-09-14'
+    ])
+  })
+
+  it('behält das Änderungsformular, wenn das Neuladen nach einer Änderung scheitert', async () => {
+    const wrapper = await mountView()
+    fetchMock
+      .mockImplementationOnce(async () => respond(200, { changed: true }))
+      .mockImplementationOnce(async () => respond(500, {}))
+
+    await wrapper.find('form.correction').trigger('submit')
+    await flushPromises()
+
+    expect(wrapper.find('form.correction').exists()).toBe(true)
   })
 
   it('lädt bei manuellem Aktualisieren sofort neu', async () => {
@@ -221,7 +268,7 @@ describe('LiveAttendanceView', () => {
       url === '/api/classes'
         ? respond(200, classes)
         : url === '/api/attendance/current-class'
-          ? respond(200, { classId: 2, date: '2026-09-14' })
+          ? respond(200, { classId: 2, serverTime: '2026-09-14T06:00:00Z' })
           : new Promise<Response>(() => {})
     )
     const wrapper = await mountView()

@@ -230,7 +230,7 @@ public class AttendanceAccountingService {
   }
 
   /**
-   * Ermittelt den heutigen Berliner Tag und die zugängliche Klasse, deren Slot gerade läuft. Ohne
+   * Ermittelt die zugängliche Klasse, deren Slot am heutigen Berliner Tag gerade läuft. Ohne
    * laufenden Slot gilt die Klasse mit dem nächsten heutigen Slot, sonst keine Klasse. Haben
    * mehrere Klassen gleichzeitig Unterricht, etwa bei Administratoren, gewinnt die niedrigste
    * Klassen-ID. Klassen mit planfremder Blockzuordnung werden protokolliert und übersprungen
@@ -257,7 +257,7 @@ public class AttendanceAccountingService {
       }
       for (var slot : slots) {
         if (!time.isBefore(slot.startsAt()) && time.isBefore(slot.endsAt())) {
-          return new CurrentClass(schoolClass.id(), today);
+          return new CurrentClass(schoolClass.id(), now.toInstant(ZoneOffset.UTC));
         }
         if (slot.startsAt().isAfter(time)
             && (nextStart == null || slot.startsAt().isBefore(nextStart))) {
@@ -266,11 +266,14 @@ public class AttendanceAccountingService {
         }
       }
     }
-    return new CurrentClass(nextClassId, today);
+    return new CurrentClass(nextClassId, now.toInstant(ZoneOffset.UTC));
   }
 
-  /** Enthält den heutigen Berliner Tag und die vorausgewählte Klasse oder null */
-  public record CurrentClass(Long classId, LocalDate date) {}
+  /**
+   * Enthält die vorausgewählte Klasse oder null und die Serverzeit, an der die Ansicht Tag und
+   * Uhrzeit unabhängig von der Browseruhr ausrichtet
+   */
+  public record CurrentClass(Long classId, Instant serverTime) {}
 
   /** Liefert geplante Slots des Tages, solange die Aufbewahrungsfrist des Plans läuft */
   private List<Slot> readDaySlots(ClassPlan plan, LocalDate date, LocalDateTime now) {

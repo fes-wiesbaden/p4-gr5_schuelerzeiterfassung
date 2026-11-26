@@ -79,20 +79,20 @@ class Issue43IntegrationTest {
    */
   @ParameterizedTest
   @CsvSource({
-    "test.teacher.a, 2026-09-14T06:00:00Z, 1, 2026-09-14",
-    "test.teacher.a, 2026-09-14T07:05:00Z, 1, 2026-09-14",
-    "test.teacher.a, 2026-09-14T04:00:00Z, 1, 2026-09-14",
-    "test.teacher.a, 2026-09-14T09:00:00Z, , 2026-09-14",
-    "test.teacher.a, 2026-09-21T06:00:00Z, 3, 2026-09-21",
-    "test.teacher.b, 2026-09-14T06:00:00Z, 2, 2026-09-14",
-    "test.teacher.a, 2026-09-13T22:30:00Z, 1, 2026-09-14"
+    "test.teacher.a, 2026-09-14T06:00:00Z, 1",
+    "test.teacher.a, 2026-09-14T07:05:00Z, 1",
+    "test.teacher.a, 2026-09-14T04:00:00Z, 1",
+    "test.teacher.a, 2026-09-14T09:00:00Z, ",
+    "test.teacher.a, 2026-09-21T06:00:00Z, 3",
+    "test.teacher.b, 2026-09-14T06:00:00Z, 2",
+    "test.teacher.a, 2026-09-13T22:30:00Z, 1"
   })
-  void preselectsTheAccessibleClassByTimetable(
-      String username, String now, Long classId, String date) throws Exception {
+  void preselectsTheAccessibleClassByTimetable(String username, String now, Long classId)
+      throws Exception {
     when(clock.instant()).thenReturn(Instant.parse(now));
     mvc.perform(get(CURRENT_CLASS).session(staffSession(username)))
         .andExpect(status().isOk())
-        .andExpect(content().json("{\"classId\":" + classId + ",\"date\":\"" + date + "\"}"));
+        .andExpect(content().json("{\"classId\":" + classId + ",\"serverTime\":\"" + now + "\"}"));
   }
 
   /** Ohne Anmeldung liefert der Endpunkt keine Klasse */

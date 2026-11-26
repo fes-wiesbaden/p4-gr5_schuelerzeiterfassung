@@ -51,15 +51,23 @@ const updatedAt = ref('')
 const error = ref('')
 const message = ref('')
 const drafts = reactive<Record<number, Draft>>({})
+const initialized = ref(false)
 let latestRequest = 0
+// Abstand der Browseruhr zur Serverzeit, damit Tageswechsel und vorbelegte
+// Uhrzeit nicht an einer falsch gehenden Browseruhr scheitern
+let clockOffset = 0
 let timer: ReturnType<typeof setInterval> | undefined
+
+function serverNow() {
+  return new Date(Date.now() + clockOffset)
+}
 
 // Lädt den Tagesstatus per REST. Nur die Antwort der jüngsten Anfrage wird
 // angezeigt, damit ein langsamer Polling-Abruf keinen neueren Stand überschreibt
 async function load() {
   if (classId.value === undefined) return
   // Bleibt die Seite über Mitternacht offen, wechselt die Ansicht auf den neuen Tag
-  const today = berlinDate(new Date())
+  const today = berlinDate(serverNow())
   if (today > date.value) {
     date.value = today
     clearDrafts()
@@ -82,12 +90,14 @@ async function load() {
       if (!drafts[student.studentId]?.touched) {
         drafts[student.studentId] = {
           status: student.status,
-          time: berlinTime(new Date()),
+          time: berlinTime(serverNow()),
           touched: false
         }
       }
     }
-    updatedAt.value = new Date().toLocaleTimeString('de-DE')
+    updatedAt.value = serverNow().toLocaleTimeString('de-DE', {
+      timeZone: 'Europe/Berlin'
+    })
     loaded.value = true
     error.value = ''
   } catch {
@@ -123,7 +133,8 @@ async function correct(row: Row) {
   message.value = changed
     ? `Status von ${row.name} gespeichert.`
     : `Keine Änderung: ${row.name} hatte ab dieser Uhrzeit bereits diesen Status.`
-  delete drafts[row.studentId]
+  // Die Eingabe bleibt sichtbar und übernimmt beim nächsten Abruf den neuen Status
+  draft.touched = false
   await load()
 }
 
@@ -134,19 +145,31 @@ watch(classId, () => {
   load()
 })
 
-onMounted(async () => {
+// Lädt Klassen, Vorauswahl und Serverzeit. Schlägt das fehl, versucht es der
+// nächste Polling-Takt erneut
+async function initialize() {
   try {
     const [visible, current] = await Promise.all([
       loadData<SchoolClass[]>('/api/classes'),
       loadData<CurrentClass>('/api/attendance/current-class')
     ])
+    clockOffset = Date.parse(current.serverTime) - Date.now()
+    date.value = berlinDate(serverNow())
     classes.value = visible
-    date.value = current.date
     classId.value = current.classId ?? visible[0]?.id
+    initialized.value = true
+    error.value = ''
   } catch {
     error.value = 'Die Klassen konnten nicht geladen werden.'
   }
-  timer = setInterval(load, POLL_INTERVAL_MS)
+}
+
+onMounted(async () => {
+  await initialize()
+  timer = setInterval(
+    () => (initialized.value ? load() : initialize()),
+    POLL_INTERVAL_MS
+  )
 })
 
 onUnmounted(() => clearInterval(timer))
@@ -177,7 +200,7 @@ onUnmounted(() => clearInterval(timer))
     <p v-if="loaded && !rows.length">
       Für heute ist für diese Klasse kein Tagesstatus vorhanden.
     </p>
-    <p v-if="!error && !classes.length && date">
+    <p v-if="initialized && !classes.length">
       Ihnen ist keine Klasse zugeordnet.
     </p>
     <AppDataTable
