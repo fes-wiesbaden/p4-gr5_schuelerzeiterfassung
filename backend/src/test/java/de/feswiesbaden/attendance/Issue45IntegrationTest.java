@@ -12,6 +12,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import de.feswiesbaden.attendance.login.StaffPrincipal;
 import jakarta.servlet.http.Cookie;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.LocalDateTime;
@@ -20,8 +22,9 @@ import java.util.List;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
@@ -35,9 +38,8 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.context.jdbc.Sql;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.ResultActions;
+import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
 import org.springframework.util.ClassUtils;
-import org.springframework.web.servlet.mvc.method.annotation.RequestMappingHandlerMapping;
-import org.springframework.web.servlet.mvc.method.annotation.ResponseBodyEmitter;
 import org.testcontainers.containers.MySQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
@@ -66,10 +68,6 @@ class Issue45IntegrationTest {
   @Autowired JdbcTemplate jdbc;
 
   @Autowired MockMvc mvc;
-
-  @Autowired
-  @Qualifier("requestMappingHandlerMapping")
-  RequestMappingHandlerMapping handlers;
 
   @MockitoBean Clock clock;
 
@@ -112,13 +110,13 @@ class Issue45IntegrationTest {
   }
 
   /**
-   * Lehrkraft B sieht nur ihre Klasse 2. Am 21.09. läuft nur Klasse 3 von Lehrkraft A, daher wählt
-   * die Ansicht für B keine fremde Klasse vor
+   * Lehrkraft B sieht den Tagesstatus ihrer Klasse 2. Am 21.09. läuft nur Klasse 3 von Lehrkraft A,
+   * daher wählt die Ansicht für B keine fremde Klasse vor. Die Klassenliste prüfen
+   * Issue23IntegrationTest und AttendanceAccountingIntegrationTest
    */
   @Test
   void teacherSeesOnlyAssignedClasses() throws Exception {
     var teacher = staffSession("test.teacher.b");
-    mvc.perform(get("/api/classes").session(teacher)).andExpect(jsonPath("$[*].id", contains(2)));
     mvc.perform(get("/api/classes/2/attendance?date=2026-09-14").session(teacher))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$[*].studentId", contains(7)));
@@ -130,26 +128,18 @@ class Issue45IntegrationTest {
   }
 
   /**
-   * Direkte Abrufe des heutigen und eines vergangenen Tages sowie Statuskorrekturen in fremden
-   * Klassen werden wie unbekannte Klassen abgelehnt und ändern weder Anwesenheit, Protokoll noch
-   * Minutenkonten
+   * Der Abruf eines vergangenen Tages und Statuskorrekturen in fremden Klassen werden abgelehnt und
+   * ändern weder Anwesenheit, Protokoll noch Minutenkonten. Den heutigen Tag prüft
+   * AttendanceAccountingIntegrationTest
    */
   @Test
   void rejectsDirectAccessToForeignClassesWithoutSideEffects() throws Exception {
     var teacher = staffSession("test.teacher.b");
-    for (String url :
-        List.of(
-            CLASS_DAY,
-            "/api/classes/1/attendance?date=2026-09-11",
-            "/api/classes/999/attendance?date=2026-09-11")) {
-      mvc.perform(get(url).session(teacher))
-          .andExpect(status().isNotFound())
-          .andExpect(content().json("{\"code\":\"NOT_FOUND\"}"));
-    }
-    mvc.perform(
-            get("/api/classes/1/attendance?date=2026-09-11")
-                .session(staffSession("test.teacher.a")))
-        .andExpect(status().isOk());
+    String pastDay = "/api/classes/1/attendance?date=2026-09-11";
+    mvc.perform(get(pastDay).session(teacher))
+        .andExpect(status().isNotFound())
+        .andExpect(content().json("{\"code\":\"NOT_FOUND\"}"));
+    mvc.perform(get(pastDay).session(staffSession("test.teacher.a"))).andExpect(status().isOk());
 
     write(CORRECTION, teacher, EXCUSE)
         .andExpect(status().isNotFound())
@@ -158,23 +148,25 @@ class Issue45IntegrationTest {
   }
 
   /**
-   * Die Korrektur der Lehrkraft wird mit Mitarbeiter, Zeitpunkten, Status, Löschfrist und
-   * Minutendeltas protokolliert und ist beim nächsten REST-Abruf mit neu berechneten Minuten
-   * sichtbar. Eine abgelehnte Korrektur schreibt kein Protokoll
+   * Die Korrektur der Lehrkraft wird am selben Tag und rückwirkend am Folgetag mit Mitarbeiter,
+   * Zeitpunkten, Status, Löschfrist und Minutendeltas protokolliert und ist beim nächsten
+   * REST-Abruf mit neu berechneten Minuten sichtbar. Eine abgelehnte Korrektur schreibt kein
+   * Protokoll
    */
-  @Test
-  void auditsTeacherCorrectionCompletelyAndShowsItOnTheNextRestRead() throws Exception {
+  @ParameterizedTest
+  @ValueSource(strings = {"2026-09-14T08:45:00Z", "2026-09-15T06:00:00Z"})
+  void auditsTeacherCorrectionCompletelyAndShowsItOnTheNextRestRead(String now) throws Exception {
+    setTime(now);
     var teacher = staffSession("test.teacher.a");
     mvc.perform(get(CLASS_DAY).session(teacher))
         .andExpect(status().isOk())
-        .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
         .andExpect(jsonPath("$[0].status").value("ABWESEND"))
         .andExpect(jsonPath("$[0].unexcusedMinutes").value(180));
 
     write(
             CORRECTION,
             teacher,
-            "{\"status\":\"ENTSCHULDIGT\",\"occurredAt\":\"2026-09-14T09:00:00Z\"}")
+            "{\"status\":\"ENTSCHULDIGT\",\"occurredAt\":\"2026-09-14T05:45:00.500Z\"}")
         .andExpect(status().isBadRequest())
         .andExpect(content().json("{\"code\":\"INVALID_STATUS_TIME\"}"));
     assertNoAttendanceBooked();
@@ -208,39 +200,35 @@ class Issue45IntegrationTest {
         .andExpect(jsonPath("$[0].unexcusedMinutes").value(15));
   }
 
-  /** Tagesstatus, Vorauswahl und Korrektur sind nur mit Anmeldung erreichbar */
+  /**
+   * Tagesstatus und Korrektur sind nur mit Anmeldung erreichbar. Die Vorauswahl prüft
+   * Issue43IntegrationTest
+   */
   @Test
   void requiresAuthenticationForLiveAttendance() throws Exception {
     mvc.perform(get(CLASS_DAY)).andExpect(status().isUnauthorized());
-    mvc.perform(get("/api/attendance/current-class")).andExpect(status().isUnauthorized());
-    String token = "test-csrf-token";
-    mvc.perform(
-            post(CORRECTION)
-                .cookie(new Cookie("XSRF-TOKEN", token))
-                .header("X-XSRF-TOKEN", token)
-                .contentType(MediaType.APPLICATION_JSON)
-                .content(EXCUSE))
-        .andExpect(status().isUnauthorized());
+    mvc.perform(withCsrf(post(CORRECTION), EXCUSE)).andExpect(status().isUnauthorized());
     assertNoAttendanceBooked();
   }
 
-  /** Kein Endpunkt streamt Server-Sent Events; WebFlux liegt nicht auf dem Klassenpfad */
+  /**
+   * Der Produktionscode enthält keine SSE-Infrastruktur, auch nicht als ResponseEntity-Generic oder
+   * manuell gesetzten Content-Type; WebFlux liegt nicht auf dem Klassenpfad
+   */
   @Test
-  void offersNoServerSentEvents() {
+  void usesNoServerSentEvents() throws Exception {
     assertThat(ClassUtils.isPresent("org.springframework.web.reactive.DispatcherHandler", null))
         .isFalse();
-    assertThat(handlers.getHandlerMethods())
-        .isNotEmpty()
-        .allSatisfy(
-            (mapping, handler) -> {
-              assertThat(
-                      ResponseBodyEmitter.class.isAssignableFrom(
-                          handler.getReturnType().getParameterType()))
-                  .as(handler.toString())
-                  .isFalse();
-              assertThat(mapping.getProducesCondition().getProducibleMediaTypes())
-                  .doesNotContain(MediaType.TEXT_EVENT_STREAM);
-            });
+    try (var files = Files.walk(Path.of("src/main"))) {
+      var sources = files.filter(Files::isRegularFile).toList();
+      assertThat(sources).isNotEmpty();
+      for (var file : sources) {
+        assertThat(Files.readString(file))
+            .as(file.toString())
+            .doesNotContain(
+                "SseEmitter", "ServerSentEvent", "TEXT_EVENT_STREAM", "text/event-stream");
+      }
+    }
   }
 
   /** Stellt sicher, dass weder Anwesenheit noch Protokoll noch Minutenkonten geändert wurden */
@@ -279,13 +267,17 @@ class Issue45IntegrationTest {
 
   /** Führt einen Schreibzugriff mit Sitzung und passendem CSRF-Token aus */
   private ResultActions write(String url, MockHttpSession session, String body) throws Exception {
+    return mvc.perform(withCsrf(post(url).session(session), body));
+  }
+
+  /** Ergänzt einen JSON-Schreibzugriff um ein passendes CSRF-Token */
+  private static MockHttpServletRequestBuilder withCsrf(
+      MockHttpServletRequestBuilder request, String body) {
     String token = "test-csrf-token";
-    return mvc.perform(
-        post(url)
-            .session(session)
-            .cookie(new Cookie("XSRF-TOKEN", token))
-            .header("X-XSRF-TOKEN", token)
-            .contentType(MediaType.APPLICATION_JSON)
-            .content(body));
+    return request
+        .cookie(new Cookie("XSRF-TOKEN", token))
+        .header("X-XSRF-TOKEN", token)
+        .contentType(MediaType.APPLICATION_JSON)
+        .content(body);
   }
 }

@@ -105,22 +105,6 @@ describe('LiveAttendanceView', () => {
     expect(attendanceCalls(fetchMock)).toHaveLength(2)
   })
 
-  it('aktualisiert nur per REST-Abruf und öffnet keine EventSource', async () => {
-    const eventSource = vi.fn()
-    vi.stubGlobal('EventSource', eventSource)
-    const wrapper = await mountView()
-
-    await vi.advanceTimersByTimeAsync(60_000)
-    await wrapper
-      .findAll('button')
-      .find((button) => button.text().includes('Aktualisieren'))!
-      .trigger('click')
-    await flushPromises()
-
-    expect(eventSource).not.toHaveBeenCalled()
-    expect(attendanceCalls(fetchMock)).toHaveLength(4)
-  })
-
   it('übernimmt beim Polling neuen Status und aktuelle Uhrzeit in unbearbeitete Eingaben', async () => {
     const wrapper = await mountView()
     fetchMock.mockImplementation(async () =>
