@@ -231,8 +231,9 @@ public class AttendanceAccountingService {
 
   /**
    * Ermittelt den heutigen Berliner Tag und die zugängliche Klasse, deren Slot gerade läuft. Ohne
-   * laufenden Slot gilt die Klasse mit dem nächsten heutigen Slot, sonst keine Klasse. Klassen mit
-   * planfremder Blockzuordnung werden übersprungen
+   * laufenden Slot gilt die Klasse mit dem nächsten heutigen Slot, sonst keine Klasse. Haben
+   * mehrere Klassen gleichzeitig Unterricht, etwa bei Administratoren, gewinnt die niedrigste
+   * Klassen-ID. Klassen mit planfremder Blockzuordnung werden protokolliert und übersprungen
    */
   @Transactional(readOnly = true)
   public CurrentClass findCurrentClass() {
@@ -251,6 +252,7 @@ public class AttendanceAccountingService {
       try {
         slots = readDaySlots(plan, today, now);
       } catch (InvalidClassBlockAssignmentException dataProblem) {
+        LOG.warn("CURRENT_CLASS_SKIPPED_INVALID_BLOCK_ASSIGNMENT classId={}", schoolClass.id());
         continue;
       }
       for (var slot : slots) {

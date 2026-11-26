@@ -6,12 +6,15 @@ import { onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import {
   ATTENDANCE_STATUSES,
   STATUS_LABELS,
-  correctionError,
+  berlinDate,
+  berlinInstant,
+  berlinTime,
   type AttendanceStatus,
   type CurrentClass,
   type DailyStudent
 } from '@/api/attendance'
 import { loadData, postJson } from '@/api/client'
+import { errorMessage } from '@/api/planning'
 import AppDataTable, {
   type DataTableColumn
 } from '@/components/AppDataTable.vue'
@@ -26,6 +29,12 @@ type Row = {
   unexcusedMinutes: number
 }
 
+type SchoolClass = { id: number; classCode: string }
+
+// Eingaben der Statusänderung je Schüler. touched verhindert, dass Polling
+// eine begonnene Eingabe überschreibt
+type Draft = { status: AttendanceStatus; time: string; touched: boolean }
+
 const columns: DataTableColumn<Row>[] = [
   { field: 'name', header: 'Schüler' },
   { field: 'status', header: 'Status' },
@@ -33,28 +42,28 @@ const columns: DataTableColumn<Row>[] = [
   { field: 'studentId', header: 'Status ändern' }
 ]
 
-const classes = ref<{ id: number; classCode: string }[]>([])
+const classes = ref<SchoolClass[]>([])
 const classId = ref<number>()
-// shortcut: Tag wird beim Öffnen vom Backend übernommen; bleibt die Seite über Mitternacht offen, zeigt sie bis zum Neuladen den Vortag
 const date = ref('')
 const rows = ref<Row[]>([])
+const loaded = ref(false)
 const updatedAt = ref('')
 const error = ref('')
 const message = ref('')
-const drafts = reactive<
-  Record<number, { status: AttendanceStatus; time: string; touched: boolean }>
->({})
+const drafts = reactive<Record<number, Draft>>({})
 let latestRequest = 0
 let timer: ReturnType<typeof setInterval> | undefined
-
-function currentTime() {
-  return new Date().toTimeString().slice(0, 5)
-}
 
 // Lädt den Tagesstatus per REST. Nur die Antwort der jüngsten Anfrage wird
 // angezeigt, damit ein langsamer Polling-Abruf keinen neueren Stand überschreibt
 async function load() {
   if (classId.value === undefined) return
+  // Bleibt die Seite über Mitternacht offen, wechselt die Ansicht auf den neuen Tag
+  const today = berlinDate(new Date())
+  if (today > date.value) {
+    date.value = today
+    clearDrafts()
+  }
   const request = ++latestRequest
   try {
     const students = await loadData<DailyStudent[]>(
@@ -73,12 +82,13 @@ async function load() {
       if (!drafts[student.studentId]?.touched) {
         drafts[student.studentId] = {
           status: student.status,
-          time: currentTime(),
+          time: berlinTime(new Date()),
           touched: false
         }
       }
     }
     updatedAt.value = new Date().toLocaleTimeString('de-DE')
+    loaded.value = true
     error.value = ''
   } catch {
     if (request === latestRequest)
@@ -86,38 +96,48 @@ async function load() {
   }
 }
 
+function clearDrafts() {
+  for (const studentId of Object.keys(drafts)) delete drafts[Number(studentId)]
+}
+
 async function correct(row: Row) {
   const draft = drafts[row.studentId]
   message.value = ''
-  // shortcut: rechnet die Uhrzeit in der Zeitzone des Browsers um und setzt Berliner Ortszeit voraus; bei Nutzung außerhalb Deutschlands die Zeitzone explizit umrechnen
-  const occurredAt = new Date(`${date.value}T${draft.time}:00`).toISOString()
+  const occurredAt = berlinInstant(date.value, draft.time)
+  let changed: boolean
   try {
     const response = await postJson(
       `/api/students/${row.studentId}/attendance/${date.value}/status-corrections`,
       { status: draft.status, occurredAt }
     )
+    const body = await response.json().catch(() => ({}))
     if (!response.ok) {
-      message.value = await correctionError(response)
+      message.value = errorMessage(body.code)
       return
     }
+    changed = body.changed === true
   } catch {
     message.value = 'Statusänderung fehlgeschlagen. Bitte Verbindung prüfen.'
     return
   }
-  message.value = `Status von ${row.name} gespeichert.`
+  message.value = changed
+    ? `Status von ${row.name} gespeichert.`
+    : `Keine Änderung: ${row.name} hatte ab dieser Uhrzeit bereits diesen Status.`
   delete drafts[row.studentId]
   await load()
 }
 
 watch(classId, () => {
   rows.value = []
+  loaded.value = false
+  clearDrafts()
   load()
 })
 
 onMounted(async () => {
   try {
     const [visible, current] = await Promise.all([
-      loadData<{ id: number; classCode: string }[]>('/api/classes'),
+      loadData<SchoolClass[]>('/api/classes'),
       loadData<CurrentClass>('/api/attendance/current-class')
     ])
     classes.value = visible
@@ -154,7 +174,7 @@ onUnmounted(() => clearInterval(timer))
     </div>
     <p v-if="error" role="alert">{{ error }}</p>
     <p v-if="message" role="status">{{ message }}</p>
-    <p v-if="!error && classId !== undefined && !rows.length">
+    <p v-if="loaded && !rows.length">
       Für heute ist für diese Klasse kein Tagesstatus vorhanden.
     </p>
     <p v-if="!error && !classes.length && date">

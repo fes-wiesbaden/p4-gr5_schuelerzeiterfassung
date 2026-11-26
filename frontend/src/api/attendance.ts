@@ -27,18 +27,32 @@ export interface CurrentClass {
   date: string
 }
 
-const CORRECTION_ERRORS: Record<string, string> = {
-  ATTENDANCE_DAY_LOCKED_OR_UNPLANNED:
-    'Für diesen Tag ist keine Änderung möglich: kein Unterricht geplant oder Tag bereits abgeschlossen.',
-  INVALID_STATUS_TIME:
-    'Die Uhrzeit muss am heutigen Tag und nicht in der Zukunft liegen.'
+const BERLIN = 'Europe/Berlin'
+
+// Liefert den Berliner Kalendertag als YYYY-MM-DD
+export function berlinDate(at: Date): string {
+  return new Intl.DateTimeFormat('sv-SE', { timeZone: BERLIN }).format(at)
 }
 
-// Liefert eine verständliche Meldung zu einer abgelehnten Statusänderung
-export async function correctionError(response: Response): Promise<string> {
-  const body = await response.json().catch(() => ({}))
-  return (
-    CORRECTION_ERRORS[body.code] ??
-    'Statusänderung fehlgeschlagen. Bitte Eingaben und Berechtigung prüfen.'
-  )
+// Liefert die Berliner Uhrzeit als HH:MM
+export function berlinTime(at: Date): string {
+  return new Intl.DateTimeFormat('de-DE', {
+    timeZone: BERLIN,
+    hour: '2-digit',
+    minute: '2-digit'
+  }).format(at)
+}
+
+// Wandelt Berliner Datum und Uhrzeit unabhängig von der Zeitzone des Browsers
+// in einen sekundengenauen UTC-Zeitpunkt um
+export function berlinInstant(date: string, time: string): string {
+  const local = `${date}T${time}:00`
+  const offset = new Intl.DateTimeFormat('en-US', {
+    timeZone: BERLIN,
+    timeZoneName: 'longOffset'
+  })
+    .formatToParts(new Date(`${local}Z`))
+    .find((part) => part.type === 'timeZoneName')!
+    .value.replace('GMT', '')
+  return new Date(`${local}${offset || 'Z'}`).toISOString()
 }

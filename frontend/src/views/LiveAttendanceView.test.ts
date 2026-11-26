@@ -37,7 +37,8 @@ describe('LiveAttendanceView', () => {
 
   beforeEach(() => {
     vi.useFakeTimers()
-    vi.setSystemTime(new Date('2026-09-14T08:00:00'))
+    // 08:00 Berliner Sommerzeit
+    vi.setSystemTime(new Date('2026-09-14T06:00:00Z'))
     vi.stubGlobal('fetch', fetchMock)
     fetchMock.mockImplementation(async (url: string, options: RequestInit) => {
       if (url === '/api/classes') return respond(200, classes)
@@ -173,10 +174,59 @@ describe('LiveAttendanceView', () => {
     )
     expect(JSON.parse(post[1].body)).toEqual({
       status: 'ENTSCHULDIGT',
-      occurredAt: new Date('2026-09-14T07:45:00').toISOString()
+      occurredAt: '2026-09-14T05:45:00.000Z'
     })
     expect(attendanceCalls(fetchMock)).toHaveLength(2)
     expect(wrapper.text()).toContain('Status von Beispiel, Erika gespeichert.')
+  })
+
+  it('meldet eine Statusänderung ohne Wirkung nicht als gespeichert', async () => {
+    const wrapper = await mountView()
+    fetchMock.mockImplementationOnce(async () =>
+      respond(200, { changed: false })
+    )
+
+    await wrapper.find('form.correction').trigger('submit')
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('Keine Änderung')
+    expect(wrapper.text()).not.toContain('gespeichert')
+  })
+
+  it('behält beim fehlgeschlagenen Polling die letzte Anzeige und meldet den Fehler', async () => {
+    const wrapper = await mountView()
+    fetchMock.mockImplementationOnce(async () => respond(500, {}))
+
+    await vi.advanceTimersByTimeAsync(30_000)
+
+    expect(wrapper.get('[role="alert"]').text()).toContain(
+      'konnte nicht geladen werden'
+    )
+    expect(wrapper.text()).toContain('Beispiel, Erika')
+  })
+
+  it('wechselt nach Mitternacht beim nächsten Abruf auf den neuen Tag', async () => {
+    await mountView()
+
+    vi.setSystemTime(new Date('2026-09-14T22:00:30Z'))
+    await vi.advanceTimersByTimeAsync(30_000)
+
+    expect(attendanceCalls(fetchMock).at(-1)).toBe(
+      '/api/classes/2/attendance?date=2026-09-15'
+    )
+  })
+
+  it('zeigt während des Ladens keinen Hinweis auf fehlenden Tagesstatus', async () => {
+    fetchMock.mockImplementation(async (url: string) =>
+      url === '/api/classes'
+        ? respond(200, classes)
+        : url === '/api/attendance/current-class'
+          ? respond(200, { classId: 2, date: '2026-09-14' })
+          : new Promise<Response>(() => {})
+    )
+    const wrapper = await mountView()
+
+    expect(wrapper.text()).not.toContain('kein Tagesstatus')
   })
 
   it('zeigt eine abgelehnte Statusänderung verständlich an', async () => {
