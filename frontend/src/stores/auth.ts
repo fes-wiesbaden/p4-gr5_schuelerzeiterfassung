@@ -12,9 +12,9 @@ export interface AuthUser {
 
 // Abgelehnte Anmeldungen erhalten denselben Text, damit kein Rückschluss auf
 // vorhandene Benutzernamen möglich ist. Verbindungsfehler haben einen eigenen Hinweis
-const LOGIN_FAILED = 'Anmeldung fehlgeschlagen. Bitte Eingaben pruefen.'
+const LOGIN_FAILED = 'Anmeldung fehlgeschlagen. Bitte Eingaben prüfen.'
 const SERVER_UNREACHABLE =
-  'Server nicht erreichbar. Bitte spaeter erneut versuchen.'
+  'Server nicht erreichbar. Bitte später erneut versuchen.'
 
 export const useAuthStore = defineStore('auth', () => {
   const user = ref<AuthUser | null>(null)

@@ -1,9 +1,11 @@
 import { flushPromises, mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
+import { routeLocationKey } from 'vue-router'
 import PrimeVue from 'primevue/config'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { errorMessage, type PlanningOverview } from '@/api/planning'
+import { formatCalendarWeek } from '@/dateTime'
 import { useAuthStore } from '@/stores/auth'
 import SchedulePlanningView from './SchedulePlanningView.vue'
 
@@ -66,7 +68,17 @@ function mountAs(role: 'admin' | 'lehrkraft') {
   const pinia = createPinia()
   setActivePinia(pinia)
   useAuthStore().user = { name: 'Test', role }
-  return mount(SchedulePlanningView, { global: { plugins: [pinia, PrimeVue] } })
+  return mount(SchedulePlanningView, {
+    global: {
+      plugins: [pinia, PrimeVue],
+      stubs: { ClassTimetableWeek: role === 'admin' },
+      provide: {
+        [routeLocationKey as symbol]: {
+          query: { klasse: '1', datum: '2026-09-14' }
+        }
+      }
+    }
+  })
 }
 
 describe('SchedulePlanningView', () => {
@@ -82,11 +94,155 @@ describe('SchedulePlanningView', () => {
     fetchMock.mockReset()
   })
 
-  it('zeigt Lehrkräften nur einen Hinweis und lädt keine Planung', () => {
+  it('zeigt Lehrkräften den Kalenderstundenplan ihrer Klassen ohne Bearbeitung', async () => {
+    fetchMock
+      .mockResolvedValueOnce(respond(200, [{ id: 1, classCode: 'KL-A' }]))
+      .mockResolvedValueOnce(
+        respond(200, {
+          schoolYear: 2026,
+          periods: [],
+          regularWeek: [],
+          blocks: [{ startsOn: '2026-09-14', endsOn: '2026-09-18' }]
+        })
+      )
+      .mockResolvedValueOnce(
+        respond(200, [
+          {
+            date: '2026-09-14',
+            lessons: [
+              {
+                startsAt: '07:30:00',
+                endsAt: '09:00:00',
+                roomNumber: 'R01',
+                learningField: 'LF 5 · Software entwickeln',
+                teacherName: 'Lehrkraft Muster'
+              }
+            ]
+          },
+          { date: '2026-09-15', lessons: [] },
+          { date: '2026-09-16', lessons: [] },
+          { date: '2026-09-17', lessons: [] },
+          { date: '2026-09-18', lessons: [] }
+        ])
+      )
     const wrapper = mountAs('lehrkraft')
+    await flushPromises()
 
-    expect(wrapper.text()).toContain('von Administratoren gepflegt')
-    expect(fetchMock).not.toHaveBeenCalled()
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
+      '/api/classes',
+      '/api/planning/classes/1/schedule',
+      '/api/planning/classes/1/week?date=2026-09-14'
+    ])
+    const table = wrapper.get('table')
+    expect(table.text()).toContain('Montag')
+    expect(table.text()).toContain('Freitag')
+    expect(table.text()).toContain('LF 5 · Software entwickeln')
+    expect(table.text()).toContain('Lehrkraft Muster')
+    expect(table.find('td[rowspan="2"]').exists()).toBe(true)
+    expect(table.text()).not.toContain('Raum R01')
+    expect(wrapper.text()).toContain('Raum R01')
+    expect(wrapper.text()).toContain('38. KW 2026')
+    expect(wrapper.text()).toContain('Schuljahr 2026/27')
+    expect(wrapper.text()).not.toContain('Stundenpläne bearbeiten')
+    wrapper.unmount()
+  })
+
+  it('zeigt nummerierte Freistunden und verbindet gleiche Unterrichtsblöcke über kurze Pausen', async () => {
+    const firstLesson = {
+      startsAt: '07:30',
+      endsAt: '08:15',
+      roomNumber: 'A 213',
+      learningField: 'LF',
+      teacherName: 'Lehrkraft Beispiel'
+    }
+    fetchMock
+      .mockResolvedValueOnce(respond(200, [{ id: 1, classCode: 'KL-TEST' }]))
+      .mockResolvedValueOnce(
+        respond(200, {
+          schoolYear: 2026,
+          periods: [],
+          regularWeek: [],
+          blocks: [{ startsOn: '2026-09-14', endsOn: '2026-09-18' }]
+        })
+      )
+      .mockResolvedValueOnce(
+        respond(200, [
+          {
+            date: '2026-09-14',
+            periods: [
+              { number: 1, startsAt: '07:30', endsAt: '08:15' },
+              { number: 2, startsAt: '08:30', endsAt: '09:15' },
+              { number: 3, startsAt: '09:15', endsAt: '10:00' }
+            ],
+            lessons: [
+              firstLesson,
+              { ...firstLesson, startsAt: '08:30', endsAt: '09:15' }
+            ]
+          },
+          { date: '2026-09-15', lessons: [] },
+          { date: '2026-09-16', lessons: [] },
+          { date: '2026-09-17', lessons: [] },
+          { date: '2026-09-18', lessons: [] }
+        ])
+      )
+    const wrapper = mountAs('lehrkraft')
+    try {
+      await flushPromises()
+      expect(wrapper.get('td[rowspan="3"]').text()).toContain(
+        'Lehrkraft Beispiel'
+      )
+      expect(wrapper.findAll('.week-grid__lesson')).toHaveLength(1)
+      expect(
+        wrapper.findAll('.week-grid__period').map((period) => period.text())
+      ).toEqual(['1', '2', '3'])
+      expect(wrapper.get('.week-grid__room').text()).toBe('Raum A 213')
+    } finally {
+      wrapper.unmount()
+    }
+  })
+
+  it('zeigt die Jahresvorlage in einer blockfreien Woche und springt zum nächsten Block', async () => {
+    const lessons = [
+      {
+        startsAt: '07:30',
+        endsAt: '09:00',
+        roomNumber: 'A 213',
+        learningField: 'LF',
+        teacherName: 'Lehrkraft Beispiel'
+      }
+    ]
+    fetchMock
+      .mockResolvedValueOnce(respond(200, [{ id: 1, classCode: 'KL-TEST' }]))
+      .mockResolvedValueOnce(
+        respond(200, {
+          schoolYear: 2026,
+          periods: [],
+          regularWeek: [{ lessons }],
+          blocks: [{ startsOn: '2026-09-28', endsOn: '2026-10-02' }]
+        })
+      )
+      .mockResolvedValueOnce(
+        respond(200, [{ date: '2026-09-14', lessons: [] }])
+      )
+      .mockResolvedValueOnce(respond(200, [{ date: '2026-09-28', lessons }]))
+    const wrapper = mountAs('lehrkraft')
+    try {
+      await flushPromises()
+      expect(wrapper.text()).toContain('kein Unterrichtsblock zugeordnet')
+      const mode = wrapper.get('.class-week__views button:last-child')
+      await mode.trigger('click')
+      expect(mode.attributes('aria-pressed')).toBe('true')
+      expect(wrapper.get('table').text()).toContain('Lehrkraft Beispiel')
+      await wrapper.get('.class-week__controls select').setValue('2026-09-28')
+      await flushPromises()
+      expect(fetchMock.mock.lastCall?.[0]).toBe(
+        '/api/planning/classes/1/week?date=2026-09-28'
+      )
+      expect(wrapper.text()).toContain('40. KW 2026')
+      expect(wrapper.text()).not.toContain('kein Unterrichtsblock zugeordnet')
+    } finally {
+      wrapper.unmount()
+    }
   })
 
   it('zeigt Slots, Blöcke mit Klassen und das berechnete Löschdatum', async () => {
@@ -127,10 +283,12 @@ describe('SchedulePlanningView', () => {
 
     const form = wrapper
       .findAll('form')
-      .find((candidate) => candidate.text().includes('Slot hinzufügen'))!
+      .find((candidate) =>
+        candidate.text().includes('Unterrichtszeit hinzufügen')
+      )!
     await form.find('select').setValue('DIENSTAG')
-    await form.find('input[type="time"]').setValue('08:00')
-    await form.findAll('input[type="time"]')[1].setValue('08:45')
+    await form.find('input[aria-label="Beginn"]').setValue('08:00')
+    await form.find('input[aria-label="Ende"]').setValue('08:45')
     await form.findAll('select')[1].setValue('1')
     await form.trigger('submit')
     await flushPromises()
@@ -148,9 +306,9 @@ describe('SchedulePlanningView', () => {
       })
     )
     expect(wrapper.find('[role="alert"]').text()).toBe(
-      'Der Slot überschneidet sich mit einem vorhandenen Slot dieses Stundenplans.'
+      'Die Unterrichtszeit überschneidet sich mit einer vorhandenen Unterrichtszeit dieses Stundenplans.'
     )
-    expect(form.find('input[type="time"]').element.value).toBe('08:00')
+    expect(form.find('input[aria-label="Beginn"]').element.value).toBe('08:00')
   })
 
   it('füllt die Slotbearbeitung vor und zeigt den ersten geänderten Termin', async () => {
@@ -162,13 +320,16 @@ describe('SchedulePlanningView', () => {
     await flushPromises()
 
     await wrapper
-      .get('button[aria-label="Slot Montag 07:30 bearbeiten"]')
+      .get('button[aria-label="Unterrichtszeit Montag 07:30 bearbeiten"]')
       .trigger('click')
     const form = wrapper
       .findAll('form')
-      .find((candidate) => candidate.text().includes('Slot bearbeiten'))!
+      .find((candidate) =>
+        candidate.text().includes('Unterrichtszeit bearbeiten')
+      )!
     const [weekday, room] = form.findAll('select')
-    const [startsAt, endsAt] = form.findAll('input[type="time"]')
+    const startsAt = form.get('input[aria-label="Beginn"]')
+    const endsAt = form.get('input[aria-label="Ende"]')
     expect([
       weekday.element.value,
       startsAt.element.value,
@@ -196,7 +357,7 @@ describe('SchedulePlanningView', () => {
       })
     )
     expect(wrapper.get('[role="status"]').text()).toBe(
-      'Slot geändert ab 22.09.2026.'
+      'Unterrichtszeit geändert ab 22.09.2026.'
     )
   })
 
@@ -212,7 +373,9 @@ describe('SchedulePlanningView', () => {
     const wrapper = mountAs('admin')
     await flushPromises()
 
-    const button = wrapper.get('button[aria-label="Slot Montag 07:30 löschen"]')
+    const button = wrapper.get(
+      'button[aria-label="Unterrichtszeit Montag 07:30 löschen"]'
+    )
     await button.trigger('click')
     expect(fetchMock).toHaveBeenCalledTimes(1)
     await button.trigger('click')
@@ -225,8 +388,13 @@ describe('SchedulePlanningView', () => {
       expect.objectContaining({ method: 'DELETE' })
     )
     expect(wrapper.get('[role="status"]').text()).toBe(
-      'Slot entfällt ab 21.09.2026.'
+      'Unterrichtszeit entfällt ab 21.09.2026.'
     )
+  })
+
+  it('berechnet die Kalenderwoche auch beim Jahreswechsel nach ISO', () => {
+    expect(formatCalendarWeek('2027-01-01')).toBe('53. KW 2026')
+    expect(formatCalendarWeek('2027-01-04')).toBe('1. KW 2027')
   })
 
   it('liefert für unbekannte Fehlercodes einen allgemeinen Hinweis', () => {

@@ -14,7 +14,12 @@ import org.springframework.web.method.annotation.MethodArgumentTypeMismatchExcep
 
 /** Übersetzt bekannte Fehler der Mitarbeiter-API in HTTP-Status und feste Fehlercodes */
 @RestControllerAdvice(
-    assignableTypes = {StaffController.class, MasterDataController.class, PlanningController.class})
+    assignableTypes = {
+      StaffController.class,
+      MasterDataController.class,
+      PlanningController.class,
+      AssistantController.class
+    })
 class StaffApiErrors {
   /** Meldet ungültige Anfragen ohne Eingabewerte in der Antwort */
   @ExceptionHandler({
@@ -77,6 +82,9 @@ class StaffApiErrors {
               "CLASS_HAS_NO_STUDENTS",
               "ATTENDANCE_DAY_LOCKED_OR_UNPLANNED",
               "ATTENDANCE_BOOKING_CHANGED",
+              "EXCUSAL_PREVIEW_CHANGED",
+              "EXCUSAL_PREVIEW_EXPIRED",
+              "ATTENDANCE_ALREADY_PRESENT",
               "OVERLAPPING_PLANNED_ATTENDANCE_STATUS" ->
           error(HttpStatus.CONFLICT, code);
       case "INVALID_TEACHER_PASSWORD",
@@ -85,8 +93,11 @@ class StaffApiErrors {
               "INVALID_STUDENT",
               "INVALID_TIMETABLE",
               "INVALID_TIMETABLE_SLOT",
+              "INVALID_LESSON_DETAILS",
               "INVALID_BLOCK_PLAN",
               "INVALID_BLOCK_ASSIGNMENT",
+              "INVALID_ASSISTANT_MESSAGE",
+              "INVALID_EXCUSAL_TIME",
               "INVALID_STATUS_TIME",
               "INVALID_ATTENDANCE_DATE",
               "INVALID_MANUAL_ABSENCE_MINUTES",
@@ -95,6 +106,8 @@ class StaffApiErrors {
               "INVALID_PLANNED_ATTENDANCE_TIME",
               "INVALID_ATTENDANCE_STATUS" ->
           error(HttpStatus.BAD_REQUEST, code);
+      case "ASSISTANT_BUSY" -> error(HttpStatus.TOO_MANY_REQUESTS, code);
+      case "ASSISTANT_UNAVAILABLE" -> error(HttpStatus.SERVICE_UNAVAILABLE, code);
       case "RFID_UID_UPDATE_FAILED" -> error(HttpStatus.INTERNAL_SERVER_ERROR, code);
       default -> throw exception;
     };

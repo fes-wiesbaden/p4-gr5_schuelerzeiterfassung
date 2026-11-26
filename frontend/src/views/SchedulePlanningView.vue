@@ -1,8 +1,21 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
+import {
+  computed,
+  nextTick,
+  onMounted,
+  onUnmounted,
+  reactive,
+  ref,
+  watch
+} from 'vue'
 import Button from 'primevue/button'
 import InputText from 'primevue/inputtext'
 
+import ClassTimetableWeek from '@/components/ClassTimetableWeek.vue'
+import TimetableGrid from '@/components/TimetableGrid.vue'
+import GermanDateInput from '@/components/GermanDateInput.vue'
+import GermanTimeInput from '@/components/GermanTimeInput.vue'
+import { formatDate } from '@/dateTime'
 import { useAuthStore } from '@/stores/auth'
 import {
   WEEKDAYS,
@@ -13,7 +26,6 @@ import {
   createBlockPlan,
   createTimetable,
   deleteSlot,
-  formatDate,
   formatTime,
   loadOverview,
   resetAccounts,
@@ -41,7 +53,9 @@ const slotForm = reactive({
   weekday: 'MONTAG' as Weekday,
   startsAt: '',
   endsAt: '',
-  roomId: null as number | null
+  roomId: null as number | null,
+  learningField: '',
+  teacherId: null as number | null
 })
 const blockPlanForm = reactive({ name: '', startsOn: '', endsOn: '' })
 const blockForm = reactive({ startsOn: '', endsOn: '' })
@@ -50,6 +64,13 @@ const planChangeForm = reactive({ nextBlockPlanId: null as number | null })
 
 const selectedTimetable = computed(() =>
   overview.value?.timetables.find((t) => t.id === selectedTimetableId.value)
+)
+const templateDays = computed(() =>
+  WEEKDAYS.map((day) => ({
+    lessons: (selectedTimetable.value?.slots ?? [])
+      .filter((slot) => slot.weekday === day.value)
+      .map((slot) => ({ ...slot, slot }))
+  }))
 )
 const selectedBlockPlan = computed(() =>
   overview.value?.blockPlans.find((p) => p.id === selectedBlockPlanId.value)
@@ -116,6 +137,7 @@ async function run(action: () => Promise<string>): Promise<boolean> {
     feedback.text = await action()
     feedback.error = false
     await refresh()
+    window.dispatchEvent(new Event('planning:changed'))
     return true
   } catch (error) {
     feedback.text =
@@ -153,16 +175,27 @@ async function submitSlot() {
         endsAt: slotForm.endsAt,
         roomId
       }
+      const current = selectedTimetable.value?.slots.find(
+        (item) => item.id === editingSlotId.value
+      )
+      const learningField = slotForm.learningField.trim() || null
+      const teacherId = slotForm.teacherId
+      const detailsChanged =
+        learningField !== (current?.learningField ?? null) ||
+        teacherId !== (current?.teacherId ?? null)
+      const payload = detailsChanged
+        ? { ...slot, lessonDetails: { learningField, teacherId } }
+        : slot
       if (editingSlotId.value !== null) {
         const effectiveOn = await updateSlot(
           timetableId,
           editingSlotId.value,
-          slot
+          payload
         )
-        return `Slot geändert ab ${formatDate(effectiveOn)}.`
+        return `Unterrichtszeit geändert ab ${formatDate(effectiveOn)}.`
       }
-      await addSlot(timetableId, slot)
-      return 'Slot hinzugefügt.'
+      await addSlot(timetableId, payload)
+      return 'Unterrichtszeit hinzugefügt.'
     })
   ) {
     resetSlotForm()
@@ -175,7 +208,9 @@ async function editSlot(slot: Slot) {
     weekday: slot.weekday,
     startsAt: slot.startsAt,
     endsAt: slot.endsAt,
-    roomId: slot.roomId
+    roomId: slot.roomId,
+    learningField: slot.learningField ?? '',
+    teacherId: slot.teacherId ?? null
   })
   await nextTick()
   slotWeekday.value?.focus()
@@ -185,6 +220,8 @@ function resetSlotForm() {
   editingSlotId.value = null
   slotForm.startsAt = ''
   slotForm.endsAt = ''
+  slotForm.learningField = ''
+  slotForm.teacherId = null
 }
 
 async function removeSlot(slot: Slot) {
@@ -192,14 +229,14 @@ async function removeSlot(slot: Slot) {
   if (
     timetableId === null ||
     !window.confirm(
-      `Alle zukünftigen Termine dieses Slots löschen (geplant für ${weekdayLabel(slot.weekday)} um ${formatTime(slot.startsAt)} Uhr)?`
+      `Die Unterrichtszeit am ${weekdayLabel(slot.weekday)} um ${formatTime(slot.startsAt)} Uhr für alle zukünftigen Termine löschen?`
     )
   ) {
     return
   }
   const removed = await run(async () => {
     const effectiveOn = await deleteSlot(timetableId, slot.id)
-    return `Slot entfällt ab ${formatDate(effectiveOn)}.`
+    return `Unterrichtszeit entfällt ab ${formatDate(effectiveOn)}.`
   })
   if (removed && editingSlotId.value === slot.id) {
     resetSlotForm()
@@ -299,28 +336,27 @@ watch(selectedClassId, () => {
 
 onMounted(() => {
   if (auth.isAdmin) {
-    refresh()
+    void refresh()
+    window.addEventListener('management:changed', refresh)
   }
 })
+onUnmounted(() => window.removeEventListener('management:changed', refresh))
 </script>
 
 <template>
   <section class="planning">
     <h1>Stunden- und Blockplan</h1>
 
-    <p v-if="!auth.isAdmin" class="planning__hint">
-      Die Stunden- und Blockplanung wird von Administratoren gepflegt.
-    </p>
+    <ClassTimetableWeek />
 
     <p
-      v-else-if="loadError"
+      v-if="auth.isAdmin && loadError"
       class="planning__message planning__message--error"
       role="alert"
     >
       {{ loadError }}
     </p>
-
-    <template v-else-if="overview">
+    <template v-else-if="auth.isAdmin && overview">
       <p
         v-if="feedback.text"
         class="planning__message"
@@ -333,7 +369,7 @@ onMounted(() => {
       <!-- Stundenpläne mit festen Slots -->
       <article class="planning__card">
         <header class="planning__card-header">
-          <h2>Stundenpläne</h2>
+          <h2>Stundenpläne bearbeiten</h2>
           <label class="planning__inline">
             <span>Stundenplan</span>
             <select
@@ -351,63 +387,26 @@ onMounted(() => {
           </label>
         </header>
 
-        <div class="planning__table-scroll">
-          <table class="planning__table">
-            <caption class="planning__sr-only">
-              Slots des gewählten Stundenplans
-            </caption>
-            <thead>
-              <tr>
-                <th scope="col">Wochentag</th>
-                <th scope="col">Beginn</th>
-                <th scope="col">Ende</th>
-                <th scope="col">Raum</th>
-                <th scope="col">Gültig ab</th>
-                <th scope="col">Aktionen</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-for="slot in selectedTimetable?.slots ?? []" :key="slot.id">
-                <td>{{ weekdayLabel(slot.weekday) }}</td>
-                <td>{{ formatTime(slot.startsAt) }}</td>
-                <td>{{ formatTime(slot.endsAt) }}</td>
-                <td>{{ slot.roomNumber }}</td>
-                <td>{{ slot.validFrom ? formatDate(slot.validFrom) : '—' }}</td>
-                <td>
-                  <Button
-                    type="button"
-                    label="Bearbeiten"
-                    severity="secondary"
-                    size="small"
-                    :aria-label="`Slot ${weekdayLabel(slot.weekday)} ${formatTime(slot.startsAt)} bearbeiten`"
-                    :disabled="busy"
-                    @click="editSlot(slot)"
-                  />
-                  <Button
-                    type="button"
-                    label="Löschen"
-                    severity="danger"
-                    size="small"
-                    :aria-label="`Slot ${weekdayLabel(slot.weekday)} ${formatTime(slot.startsAt)} löschen`"
-                    :disabled="busy"
-                    @click="removeSlot(slot)"
-                  />
-                </td>
-              </tr>
-              <tr v-if="!selectedTimetable?.slots.length">
-                <td colspan="6" class="planning__empty">
-                  Noch keine Slots vorhanden.
-                </td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
+        <p class="planning__hint">
+          Das Wochenraster gilt in allen Unterrichtsblöcken der zugeordneten
+          Klassen.
+        </p>
+        <TimetableGrid
+          :days="templateDays"
+          :periods="selectedTimetable?.periods"
+          :caption="selectedTimetable?.name ?? 'Stundenplan'"
+          :busy="busy"
+          @edit="editSlot"
+          @remove="removeSlot"
+        />
 
         <div class="planning__forms">
           <form class="planning__form" @submit.prevent="submitSlot">
             <h3>
               {{
-                editingSlotId === null ? 'Slot hinzufügen' : 'Slot bearbeiten'
+                editingSlotId === null
+                  ? 'Unterrichtszeit hinzufügen'
+                  : 'Unterrichtszeit bearbeiten'
               }}
             </h3>
             <p v-if="editingSlotId !== null" class="planning__hint">
@@ -428,19 +427,19 @@ onMounted(() => {
             <div class="planning__pair">
               <label>
                 <span>Beginn</span>
-                <InputText
+                <GermanTimeInput
                   v-model="slotForm.startsAt"
-                  type="time"
-                  step="1"
+                  label="Beginn"
+                  seconds
                   required
                 />
               </label>
               <label>
                 <span>Ende</span>
-                <InputText
+                <GermanTimeInput
                   v-model="slotForm.endsAt"
-                  type="time"
-                  step="1"
+                  label="Ende"
+                  seconds
                   required
                 />
               </label>
@@ -457,9 +456,26 @@ onMounted(() => {
                 </option>
               </select>
             </label>
+            <label>
+              <span>Lernfeld oder Fach</span>
+              <InputText v-model="slotForm.learningField" maxlength="100" />
+            </label>
+            <label>
+              <span>Zuständige Lehrkraft</span>
+              <select v-model="slotForm.teacherId">
+                <option :value="null">Ohne Zuordnung</option>
+                <option
+                  v-for="teacher in overview.teachers ?? []"
+                  :key="teacher.id"
+                  :value="teacher.id"
+                >
+                  {{ teacher.name }}
+                </option>
+              </select>
+            </label>
             <Button
               type="submit"
-              label="Slot speichern"
+              label="Unterrichtszeit speichern"
               :disabled="busy || selectedTimetableId === null"
             />
             <Button
@@ -563,11 +579,19 @@ onMounted(() => {
             <div class="planning__pair">
               <label>
                 <span>Beginn</span>
-                <InputText v-model="blockForm.startsOn" type="date" required />
+                <GermanDateInput
+                  v-model="blockForm.startsOn"
+                  label="Beginn"
+                  required
+                />
               </label>
               <label>
                 <span>Ende</span>
-                <InputText v-model="blockForm.endsOn" type="date" required />
+                <GermanDateInput
+                  v-model="blockForm.endsOn"
+                  label="Ende"
+                  required
+                />
               </label>
             </div>
             <Button
@@ -590,17 +614,17 @@ onMounted(() => {
             <div class="planning__pair">
               <label>
                 <span>Beginn</span>
-                <InputText
+                <GermanDateInput
                   v-model="blockPlanForm.startsOn"
-                  type="date"
+                  label="Beginn"
                   required
                 />
               </label>
               <label>
                 <span>Ende</span>
-                <InputText
+                <GermanDateInput
                   v-model="blockPlanForm.endsOn"
-                  type="date"
+                  label="Ende"
                   required
                 />
               </label>
@@ -721,7 +745,9 @@ onMounted(() => {
       </article>
     </template>
 
-    <p v-else class="planning__hint">Planung wird geladen …</p>
+    <p v-else-if="auth.isAdmin" class="planning__hint">
+      Planung wird geladen …
+    </p>
   </section>
 </template>
 
@@ -741,9 +767,9 @@ onMounted(() => {
   flex-direction: column;
   gap: 16px;
   padding: 20px;
-  background: white;
+  background: var(--surface);
   border: 1px solid var(--line);
-  border-radius: 14px;
+  border-radius: var(--radius);
 }
 
 .planning__card-header {
@@ -768,7 +794,7 @@ onMounted(() => {
 
 .planning__forms {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr));
   gap: 16px;
 }
 
@@ -777,7 +803,7 @@ onMounted(() => {
   flex-direction: column;
   gap: 12px;
   padding: 16px;
-  background: #f7f8fa;
+  background: var(--paper);
   border-radius: 8px;
 }
 
@@ -826,7 +852,7 @@ onMounted(() => {
 
 .planning__facts dt {
   font-size: 0.8rem;
-  color: #6b7688;
+  color: var(--muted);
 }
 
 .planning__facts dd {
@@ -853,7 +879,7 @@ onMounted(() => {
 }
 
 .planning__table th {
-  color: #4a5568;
+  color: var(--muted);
   font-size: 0.8rem;
   font-weight: 600;
   text-transform: uppercase;
@@ -864,7 +890,7 @@ onMounted(() => {
 .planning__hint,
 .planning__note {
   margin: 0;
-  color: #6b7688;
+  color: var(--muted);
   font-size: 0.9rem;
 }
 

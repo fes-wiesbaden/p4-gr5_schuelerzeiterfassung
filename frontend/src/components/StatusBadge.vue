@@ -54,8 +54,12 @@ const props = defineProps<{ status: AttendanceStatus }>()
 }
 
 .status-badge--info {
-  color: #6c3fc5;
-  background: #f1eafb;
-  border-color: #dcc9f5;
+  color: var(--accent-ink);
+  background: var(--accent-soft);
+}
+
+.status-badge--neutral {
+  color: var(--muted);
+  background: var(--paper);
 }
 </style>

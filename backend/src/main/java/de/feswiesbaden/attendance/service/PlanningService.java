@@ -1,11 +1,19 @@
 package de.feswiesbaden.attendance.service;
 
+import de.feswiesbaden.attendance.repository.AttendanceAccountingRepository;
+import de.feswiesbaden.attendance.repository.AttendanceAccountingRepository.Slot;
 import de.feswiesbaden.attendance.repository.PlanningOverviewRepository;
 import de.feswiesbaden.attendance.repository.PlanningOverviewRepository.ClassBlockRow;
+import de.feswiesbaden.attendance.repository.PlanningOverviewRepository.PeriodRow;
 import de.feswiesbaden.attendance.repository.PlanningOverviewRepository.RoomRow;
 import de.feswiesbaden.attendance.repository.PlanningOverviewRepository.SlotRow;
+import de.feswiesbaden.attendance.repository.PlanningOverviewRepository.TeacherRow;
 import de.feswiesbaden.attendance.repository.SchoolClassRepository;
+import java.time.DayOfWeek;
 import java.time.LocalDate;
+import java.time.LocalTime;
+import java.time.Month;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -21,13 +29,21 @@ public class PlanningService {
 
   private final StaffAuthorization authorization;
 
+  private final AttendanceAccountingService attendance;
+
+  private final AttendanceAccountingRepository accounting;
+
   public PlanningService(
       PlanningOverviewRepository overview,
       SchoolClassRepository classes,
-      StaffAuthorization authorization) {
+      StaffAuthorization authorization,
+      AttendanceAccountingService attendance,
+      AttendanceAccountingRepository accounting) {
     this.overview = overview;
     this.classes = classes;
     this.authorization = authorization;
+    this.attendance = attendance;
+    this.accounting = accounting;
   }
 
   /**
@@ -67,7 +83,8 @@ public class PlanningService {
                     new TimetableView(
                         timetable.id(),
                         timetable.name(),
-                        slotsByTimetable.getOrDefault(timetable.id(), List.of())))
+                        slotsByTimetable.getOrDefault(timetable.id(), List.of()),
+                        overview.findPeriods(timetable.id())))
             .toList(),
         overview.findBlockPlans().stream()
             .map(
@@ -81,6 +98,7 @@ public class PlanningService {
                         blocksByPlan.getOrDefault(plan.id(), List.of())))
             .toList(),
         overview.findRooms(),
+        overview.findTeachers(),
         classes.findAccessible(actor.id(), true).stream()
             .map(
                 schoolClass ->
@@ -92,15 +110,107 @@ public class PlanningService {
             .toList());
   }
 
+  /** Liefert die Unterrichtszeiten und Raumnummern einer zugänglichen Klasse. */
+  @Transactional(readOnly = true)
+  public List<WeekDay> readWeek(Long classId, LocalDate date) {
+    var week = attendance.readClassWeek(classId, date);
+    var periods = overview.findPeriods(week.timetableId());
+    var rooms =
+        overview.findRooms().stream().collect(Collectors.toMap(RoomRow::id, RoomRow::roomNumber));
+    return week.days().entrySet().stream()
+        .map(
+            day ->
+                new WeekDay(
+                    day.getKey(),
+                    day.getValue().stream().map(slot -> lesson(slot, rooms)).toList(),
+                    periods))
+        .toList();
+  }
+
+  /** Liefert das Wochenraster und die zugeordneten Unterrichtsblöcke des Schuljahres. */
+  @Transactional(readOnly = true)
+  public ClassSchedule readSchedule(Long classId) {
+    authorization.requireClassAccess(classId, authorization.currentStaff());
+    var plan =
+        classes
+            .findPlan(classId, false)
+            .orElseThrow(() -> new IllegalArgumentException("CLASS_NOT_FOUND"));
+    var schoolYear = schoolYearStartingIn(plan.startsOn());
+    var schoolYearEnd = LocalDate.of(schoolYear + 1, Month.JULY, 31);
+    var rooms =
+        overview.findRooms().stream().collect(Collectors.toMap(RoomRow::id, RoomRow::roomNumber));
+    var blocks =
+        accounting.findPeriods(classId, false).stream()
+            .filter(period -> period.planId().equals(plan.planId()))
+            .map(period -> new TeachingBlock(period.startsOn(), period.endsOn()))
+            .sorted(Comparator.comparing(TeachingBlock::startsOn))
+            .toList();
+    var lessonsByWeekday =
+        accounting.findSlots(plan.timetableId(), false).stream()
+            .filter(
+                slot ->
+                    (slot.validFrom() == null || !slot.validFrom().isAfter(schoolYearEnd))
+                        && (slot.validUntil() == null || slot.validUntil().isAfter(schoolYearEnd)))
+            .collect(
+                Collectors.groupingBy(
+                    Slot::weekday,
+                    Collectors.mapping(slot -> lesson(slot, rooms), Collectors.toList())));
+    var regularWeek =
+        List.of(
+                DayOfWeek.MONDAY,
+                DayOfWeek.TUESDAY,
+                DayOfWeek.WEDNESDAY,
+                DayOfWeek.THURSDAY,
+                DayOfWeek.FRIDAY)
+            .stream()
+            .map(day -> new TemplateDay(lessonsByWeekday.getOrDefault(day, List.of())))
+            .toList();
+    return new ClassSchedule(
+        schoolYear, overview.findPeriods(plan.timetableId()), regularWeek, blocks);
+  }
+
+  private static int schoolYearStartingIn(LocalDate date) {
+    return date.getMonthValue() < Month.AUGUST.getValue() ? date.getYear() - 1 : date.getYear();
+  }
+
+  private static Lesson lesson(Slot slot, Map<Long, String> rooms) {
+    return new Lesson(
+        slot.startsAt(),
+        slot.endsAt(),
+        rooms.get(slot.roomId()),
+        slot.learningField(),
+        slot.teacherName());
+  }
+
+  public record ClassSchedule(
+      int schoolYear,
+      List<PeriodRow> periods,
+      List<TemplateDay> regularWeek,
+      List<TeachingBlock> blocks) {}
+
+  public record TeachingBlock(LocalDate startsOn, LocalDate endsOn) {}
+
+  public record TemplateDay(List<Lesson> lessons) {}
+
+  public record WeekDay(LocalDate date, List<Lesson> lessons, List<PeriodRow> periods) {}
+
+  public record Lesson(
+      LocalTime startsAt,
+      LocalTime endsAt,
+      String roomNumber,
+      String learningField,
+      String teacherName) {}
+
   /** Enthält alle Daten der Planungsansicht */
   public record Overview(
       List<TimetableView> timetables,
       List<BlockPlanView> blockPlans,
       List<RoomRow> rooms,
+      List<TeacherRow> teachers,
       List<ClassPlanView> classes) {}
 
   /** Enthält einen Stundenplan mit seinen Slots */
-  public record TimetableView(Long id, String name, List<SlotRow> slots) {}
+  public record TimetableView(Long id, String name, List<SlotRow> slots, List<PeriodRow> periods) {}
 
   /** Enthält Zeitraum, berechnetes Löschdatum und Blöcke eines Blockplans */
   public record BlockPlanView(

@@ -1,6 +1,14 @@
 <script setup lang="ts" generic="T extends { id: number }">
 import InputText from 'primevue/inputtext'
-import { computed, nextTick, ref, shallowRef, watch } from 'vue'
+import {
+  computed,
+  nextTick,
+  onMounted,
+  onUnmounted,
+  ref,
+  shallowRef,
+  watch
+} from 'vue'
 import { changeData, loadData } from '@/api/client'
 const props = defineProps<{
   url: string
@@ -158,6 +166,16 @@ async function submit(method: 'POST' | 'PUT' | 'DELETE', body?: unknown) {
   if (saved && isCurrentLoad(source, version)) focusListAction()
   return saved
 }
+function refreshAfterCommand() {
+  if (!editing.value && !busy.value) void retryLoad()
+}
+
+onMounted(() =>
+  window.addEventListener('management:changed', refreshAfterCommand)
+)
+onUnmounted(() =>
+  window.removeEventListener('management:changed', refreshAfterCommand)
+)
 </script>
 <template>
   <section ref="list">
@@ -246,9 +264,13 @@ async function submit(method: 'POST' | 'PUT' | 'DELETE', body?: unknown) {
               </thead>
               <tbody>
                 <tr v-for="row in visibleRows" :key="row.id">
-                  <th scope="row">
+                  <component
+                    :is="columns?.length || editable ? 'th' : 'td'"
+                    :scope="columns?.length || editable ? 'row' : undefined"
+                    class="entry-name"
+                  >
                     <slot name="name" :row="row">{{ label(row) }}</slot>
-                  </th>
+                  </component>
                   <td
                     v-for="column in columns"
                     :key="String(column.field)"
@@ -314,12 +336,12 @@ button {
   cursor: pointer;
   color: var(--accent);
   border: 1px solid var(--line);
-  background: white;
+  background: var(--surface);
   padding: 0.55rem 0.75rem;
   border-radius: 10px;
 }
 button:hover {
-  background: #e7eef9;
+  background: var(--accent-soft);
 }
 button:disabled {
   opacity: 0.6;
@@ -332,17 +354,17 @@ button:disabled {
   font-weight: 600;
 }
 .primary:hover {
-  background: #174884;
+  background: var(--accent-ink);
 }
 .toolbar {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 1rem;
-  border-radius: 14px;
+  border-radius: var(--radius);
   padding: 1rem;
   border: 1px solid var(--line);
-  background: white;
+  background: var(--surface);
 }
 .search {
   min-width: 0;
@@ -354,7 +376,7 @@ button:disabled {
   border: 1px solid var(--line);
   padding: 0.45rem 0.65rem;
   border-radius: 10px;
-  color: #4a5665;
+  color: var(--muted);
 }
 .search :deep(input) {
   border: 0;
@@ -374,11 +396,11 @@ button:disabled {
 }
 .count {
   font-size: 0.85rem;
-  color: #4a5665;
+  color: var(--muted);
   margin: 1rem 0 0.5rem;
 }
 tbody tr:nth-child(even) {
-  background: #f8f9fb;
+  background: var(--paper);
 }
 @media (max-width: 600px) {
   .search {
@@ -409,8 +431,8 @@ tbody tr:nth-child(even) {
 }
 .register {
   overflow-x: auto;
-  border-radius: 14px;
-  background: white;
+  border-radius: var(--radius);
+  background: var(--surface);
   border: 1px solid var(--line);
 }
 table {
@@ -425,11 +447,11 @@ td {
   border-bottom: 1px solid var(--line);
 }
 thead th {
-  background: #f9fafb;
+  background: var(--paper);
   font-size: 0.83rem;
-  color: #45505e;
+  color: var(--muted);
 }
-tbody th {
+tbody .entry-name {
   font-weight: 600;
 }
 .number {
@@ -445,20 +467,20 @@ tbody th {
   background: transparent;
 }
 .actions button:hover {
-  background: #e6effc;
+  background: var(--accent-soft);
 }
 .actions span {
   margin-left: 0.45rem;
 }
 fieldset {
-  border-radius: 14px;
+  border-radius: var(--radius);
   width: 100%;
   min-width: 0;
   max-width: 38rem;
   margin: 1.4rem 0;
   border: 1px solid var(--line);
   padding: 1.25rem;
-  background: white;
+  background: var(--surface);
 }
 legend {
   max-width: 100%;
@@ -528,14 +550,14 @@ tbody tr:last-child td {
   tbody tr:last-child {
     border-bottom: 0;
   }
-  tbody th,
+  tbody .entry-name,
   tbody td {
     display: block;
     padding: 0;
     border: 0;
     text-align: left;
   }
-  tbody th {
+  tbody .entry-name {
     font-size: 1.05rem;
   }
   td.number {
@@ -545,7 +567,7 @@ tbody tr:last-child td {
   }
   td.number::before {
     content: attr(data-label);
-    color: #45505e;
+    color: var(--muted);
     font-variant-numeric: normal;
   }
   td.actions {
@@ -555,7 +577,7 @@ tbody tr:last-child td {
     padding-top: 0.25rem;
   }
   .actions button {
-    background: #edf3fb;
+    background: var(--accent-soft);
     padding: 0.5rem 0.75rem;
   }
   .actions span {

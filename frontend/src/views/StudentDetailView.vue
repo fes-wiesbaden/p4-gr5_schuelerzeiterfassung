@@ -1,9 +1,22 @@
 <script setup lang="ts">
-import { computed, defineAsyncComponent, nextTick, ref, watch } from 'vue'
+import {
+  computed,
+  defineAsyncComponent,
+  nextTick,
+  onMounted,
+  onUnmounted,
+  ref,
+  watch
+} from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import Button from 'primevue/button'
 import { changeData, getJson, loadData } from '@/api/client'
-import type { Student, StudentClass } from '@/api/students'
+import {
+  formatAbsenceTotals,
+  type Student,
+  type StudentClass
+} from '@/api/students'
+import { formatDate } from '@/dateTime'
 import StudentFormFields from '@/components/StudentFormFields.vue'
 import StudentRfidCards from '@/components/StudentRfidCards.vue'
 import { useAuthStore } from '@/stores/auth'
@@ -21,6 +34,7 @@ const schoolClass = ref<StudentClass>()
 const staffId = ref<number>()
 const loading = ref(true)
 const editing = ref(false)
+const attendanceRevision = ref(0)
 const busy = ref(false)
 const error = ref('')
 const actionError = ref('')
@@ -36,16 +50,22 @@ const canManage = computed(
 const fromClass = computed(
   () => route.query.von === 'klasse' && student.value !== undefined
 )
+const fromLive = computed(() => typeof route.query.datum === 'string')
 const returnTo = computed(() =>
-  fromClass.value && student.value
-    ? { name: 'klasse-schueler', params: { classId: student.value.classId } }
-    : {
-        name: 'schueler',
-        query:
-          typeof route.query.klasse === 'string'
-            ? { klasse: route.query.klasse }
-            : {}
+  fromLive.value
+    ? {
+        name: 'live-anwesenheit',
+        query: { klasse: route.query.klasse, datum: route.query.datum }
       }
+    : fromClass.value && student.value
+      ? { name: 'klasse-schueler', params: { classId: student.value.classId } }
+      : {
+          name: 'schueler',
+          query:
+            typeof route.query.klasse === 'string'
+              ? { klasse: route.query.klasse }
+              : {}
+        }
 )
 
 watch(
@@ -108,7 +128,17 @@ async function closeEditor() {
 async function reloadStudent() {
   const id = props.studentId
   try {
-    const data = await loadData<Student>(`/api/students/${id}`)
+    const response = await getJson(`/api/students/${id}`)
+    if (props.studentId !== id || student.value?.id !== id) return
+    if (response.status === 404) {
+      await router.replace({
+        name: 'schueler',
+        query: { klasse: student.value.classId }
+      })
+      return
+    }
+    if (!response.ok) throw new Error()
+    const data: Student = await response.json()
     if (props.studentId === id && student.value?.id === id) student.value = data
   } catch {
     if (props.studentId === id) {
@@ -116,6 +146,18 @@ async function reloadStudent() {
     }
   }
 }
+
+function refreshAttendance() {
+  attendanceRevision.value += 1
+  void reloadStudent()
+}
+
+onMounted(() =>
+  window.addEventListener('attendance:changed', refreshAttendance)
+)
+onUnmounted(() =>
+  window.removeEventListener('attendance:changed', refreshAttendance)
+)
 
 async function save(event: Event) {
   const id = props.studentId
@@ -166,20 +208,19 @@ async function remove() {
     if (props.studentId === id) busy.value = false
   }
 }
-
-function birthday(value: string) {
-  return new Intl.DateTimeFormat('de-DE', {
-    dateStyle: 'medium',
-    timeZone: 'UTC'
-  }).format(new Date(value))
-}
 </script>
 
 <template>
   <section class="student-detail">
     <RouterLink class="back" :to="returnTo">
       <i class="pi pi-arrow-left" aria-hidden="true" />
-      {{ fromClass ? 'Zur Klasse' : 'Zur Schülerliste' }}
+      {{
+        fromLive
+          ? 'Zur Live-Anwesenheit'
+          : fromClass
+            ? 'Zur Klasse'
+            : 'Zur Schülerübersicht'
+      }}
     </RouterLink>
     <p v-if="loading" role="status">Schülerdaten werden geladen …</p>
     <p v-else-if="error" role="alert">{{ error }}</p>
@@ -187,8 +228,9 @@ function birthday(value: string) {
       <header class="profile-header">
         <div>
           <h1>{{ student.firstName }} {{ student.lastName }}</h1>
-          <p v-if="schoolClass" class="class-code">
-            {{ schoolClass.classCode }}
+          <p class="profile-meta">
+            <strong v-if="schoolClass">{{ schoolClass.classCode }}</strong>
+            <span>Geburtsdatum {{ formatDate(student.birthDate) }}</span>
           </p>
         </div>
         <div v-if="canManage && !editing" class="actions">
@@ -227,24 +269,42 @@ function birthday(value: string) {
           </div>
         </form>
       </fieldset>
-      <dl v-else class="student-facts">
-        <div>
-          <dt>Geburtsdatum</dt>
-          <dd>{{ birthday(student.birthDate) }}</dd>
-        </div>
-        <div>
-          <dt>Unentschuldigt</dt>
-          <dd>{{ student.unexcusedMinutes }} min</dd>
-        </div>
-        <div>
-          <dt>Entschuldigt</dt>
-          <dd>{{ student.excusedMinutes }} min</dd>
-        </div>
-      </dl>
+      <section class="certificate" aria-labelledby="certificate-title">
+        <h2 id="certificate-title">Fehlzeiten fürs Zeugnis</h2>
+        <dl class="student-facts">
+          <div>
+            <dt>Unentschuldigt</dt>
+            <dd>
+              {{
+                formatAbsenceTotals(
+                  student.unexcusedDays,
+                  student.unexcusedHours
+                )
+              }}
+            </dd>
+          </div>
+          <div>
+            <dt>Entschuldigt</dt>
+            <dd>
+              {{
+                formatAbsenceTotals(student.excusedDays, student.excusedHours)
+              }}
+            </dd>
+          </div>
+        </dl>
+      </section>
 
       <StudentAttendanceHistory
         :key="student.id"
         :student-id="student.id"
+        :revision="attendanceRevision"
+        :initial-date="
+          typeof route.query.datum === 'string'
+            ? route.query.datum
+            : typeof route.query.woche === 'string'
+              ? route.query.woche
+              : undefined
+        "
         @corrected="reloadStudent"
       />
       <StudentRfidCards
@@ -257,65 +317,103 @@ function birthday(value: string) {
 </template>
 
 <style scoped>
+.student-detail {
+  display: grid;
+  gap: 22px;
+  min-width: 0;
+}
+
 .back {
   display: inline-flex;
+  width: fit-content;
   align-items: center;
-  gap: 0.5rem;
-  color: var(--accent);
+  gap: 8px;
+  color: var(--accent-ink);
+  text-underline-offset: 3px;
 }
 
 .profile-header,
 .actions,
-.student-facts {
+.profile-meta {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 0.75rem;
+  gap: 8px 12px;
 }
 
 .profile-header {
   justify-content: space-between;
-  margin-block: 1rem;
 }
 
-h1,
-.class-code {
+h1 {
   margin: 0;
+  font-size: 2.5rem;
+  overflow-wrap: anywhere;
 }
 
-.class-code,
-dt {
-  color: #445161;
+.profile-meta {
+  margin: 5px 0 0;
+  color: var(--muted);
+}
+
+.profile-meta strong {
+  color: var(--accent-ink);
+}
+
+.certificate,
+fieldset {
+  padding: 18px 22px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+.certificate h2 {
+  margin: 0 0 12px;
+  font-size: 1.1rem;
 }
 
 .student-facts {
-  gap: 1rem 2rem;
-  margin-block: 0 1.5rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px 36px;
+  margin: 0;
+}
+
+dt {
+  color: var(--muted);
+  font-size: 0.9rem;
 }
 
 dd {
-  margin: 0.25rem 0 0;
-  font-weight: 600;
+  margin: 4px 0 0;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
 }
 
 fieldset {
-  width: 100%;
   min-width: 0;
   max-width: 34rem;
-  margin: 0 0 1.5rem;
-  padding: 1rem;
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  background: white;
+  margin: 0;
 }
 
 form,
 form :deep(label) {
   display: grid;
-  gap: 0.375rem;
+  gap: 6px;
 }
 
 form {
-  gap: 0.75rem;
+  gap: 12px;
+}
+
+@media (max-width: 42rem) {
+  h1 {
+    font-size: 1.9rem;
+  }
+  .certificate,
+  fieldset {
+    padding: 15px;
+  }
 }
 </style>

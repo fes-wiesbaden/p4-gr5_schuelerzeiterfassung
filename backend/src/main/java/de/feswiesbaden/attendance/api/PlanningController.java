@@ -4,14 +4,19 @@ import de.feswiesbaden.attendance.api.StaffController.Created;
 import de.feswiesbaden.attendance.enums.Weekday;
 import de.feswiesbaden.attendance.service.BlockPlanService;
 import de.feswiesbaden.attendance.service.PlanningService;
+import de.feswiesbaden.attendance.service.PlanningService.ClassSchedule;
 import de.feswiesbaden.attendance.service.PlanningService.Overview;
+import de.feswiesbaden.attendance.service.PlanningService.WeekDay;
 import de.feswiesbaden.attendance.service.SchoolClassService;
 import de.feswiesbaden.attendance.service.TimetableService;
+import de.feswiesbaden.attendance.service.TimetableService.LessonDetails;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Positive;
 import java.time.LocalDate;
 import java.time.LocalTime;
+import java.util.List;
+import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -20,6 +25,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -56,6 +62,20 @@ public class PlanningController {
     return planning.read();
   }
 
+  /** Liefert die Kalenderwoche einer zugänglichen Klasse. */
+  @GetMapping("/classes/{classId}/week")
+  public List<WeekDay> week(
+      @PathVariable Long classId,
+      @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date) {
+    return planning.readWeek(classId, date);
+  }
+
+  /** Liefert das Wochenraster und die Unterrichtsblöcke einer zugänglichen Klasse. */
+  @GetMapping("/classes/{classId}/schedule")
+  public ClassSchedule schedule(@PathVariable Long classId) {
+    return planning.readSchedule(classId);
+  }
+
   /** Legt einen leeren Stundenplan an */
   @PostMapping("/timetables")
   @ResponseStatus(HttpStatus.CREATED)
@@ -73,7 +93,8 @@ public class PlanningController {
             request.weekday(),
             request.startsAt(),
             request.endsAt(),
-            request.roomId()));
+            request.roomId(),
+            request.lessonDetails()));
   }
 
   /** Ändert einen Slot ab einem zukünftigen Termin */
@@ -87,7 +108,8 @@ public class PlanningController {
             request.weekday(),
             request.startsAt(),
             request.endsAt(),
-            request.roomId()));
+            request.roomId(),
+            request.lessonDetails()));
   }
 
   /** Löscht die zukünftigen Termine des Slots */
@@ -130,7 +152,12 @@ public class PlanningController {
   public record NameRequest(String name) {}
 
   /** Enthält Wochentag, Beginn, Ende und Raum eines Slots */
-  public record SlotRequest(Weekday weekday, LocalTime startsAt, LocalTime endsAt, Long roomId) {}
+  public record SlotRequest(
+      Weekday weekday,
+      LocalTime startsAt,
+      LocalTime endsAt,
+      Long roomId,
+      LessonDetails lessonDetails) {}
 
   /** Enthält das Datum des ersten geänderten oder gelöschten Termins */
   public record SlotChange(LocalDate effectiveOn) {}

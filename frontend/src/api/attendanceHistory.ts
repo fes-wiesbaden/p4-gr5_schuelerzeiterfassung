@@ -12,6 +12,16 @@ export interface HistoryDay {
   manualAbsenceMinutes: number
   canCorrectStatus: boolean
   canPlanStatus: boolean
+  fullAbsence?: 'ABWESEND' | 'ENTSCHULDIGT' | null
+  wasPresent?: boolean
+  canBookMinutes?: boolean
+  excusals?: {
+    startsAt: string
+    endsAt: string
+    status:
+      'ENTSCHULDIGT' | 'BETRIEBLICH_ENTSCHULDIGT' | 'MIT_ATTEST_ENTSCHULDIGT'
+    reason: string | null
+  }[]
   plannedStatuses: {
     startsAt: string
     endsAt: string

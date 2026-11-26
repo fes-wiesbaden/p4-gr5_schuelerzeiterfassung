@@ -121,10 +121,14 @@ public class StudentService {
         student.birthDate(),
         student.classId(),
         student.unexcusedMinutes(),
-        student.excusedMinutes());
+        student.excusedMinutes(),
+        student.unexcusedDays(),
+        student.excusedDays(),
+        student.unexcusedHours(),
+        student.excusedHours());
   }
 
-  /** Enthält sichtbare Schülerstammdaten, Klasse und getrennte Minutenkonten */
+  /** Enthält sichtbare Schülerstammdaten, Klasse, Minutenkonten und Zeugniswerte */
   public record StudentView(
       Long id,
       String firstName,
@@ -132,5 +136,9 @@ public class StudentService {
       LocalDate birthDate,
       Long classId,
       int unexcusedMinutes,
-      int excusedMinutes) {}
+      int excusedMinutes,
+      int unexcusedDays,
+      int excusedDays,
+      int unexcusedHours,
+      int excusedHours) {}
 }

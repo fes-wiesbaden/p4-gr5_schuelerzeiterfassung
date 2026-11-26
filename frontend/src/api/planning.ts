@@ -1,4 +1,10 @@
-import { deleteResource, getJson, postJson, putJson } from '@/api/client'
+import {
+  deleteResource,
+  getJson,
+  loadData,
+  postJson,
+  putJson
+} from '@/api/client'
 
 export type Weekday =
   'MONTAG' | 'DIENSTAG' | 'MITTWOCH' | 'DONNERSTAG' | 'FREITAG'
@@ -16,18 +22,26 @@ interface SlotInput {
   startsAt: string
   endsAt: string
   roomId: number
+  lessonDetails?: { learningField: string | null; teacherId: number | null }
 }
 
-export interface Slot extends SlotInput {
+export interface Slot extends SlotInput, ScheduledLesson {
   id: number
-  roomNumber: string
   validFrom: string | null
+  teacherId?: number | null
 }
 
 export interface Timetable {
   id: number
   name: string
   slots: Slot[]
+  periods?: TimetablePeriod[]
+}
+
+export interface TimetablePeriod {
+  number: number
+  startsAt: string
+  endsAt: string
 }
 
 export interface Block {
@@ -62,6 +76,7 @@ export interface PlanningOverview {
   timetables: Timetable[]
   blockPlans: BlockPlan[]
   rooms: Room[]
+  teachers?: { id: number; name: string }[]
   classes: PlanningClass[]
 }
 
@@ -69,6 +84,7 @@ export interface PlanningOverview {
 const ERROR_MESSAGES: Record<string, string> = {
   INVALID_REQUEST: 'Die Eingaben sind unvollständig oder ungültig.',
   INVALID_TIMETABLE: 'Bitte einen Namen mit höchstens 150 Zeichen angeben.',
+  INVALID_LESSON_DETAILS: 'Prüfe das Lernfeld und die ausgewählte Lehrkraft.',
   INVALID_TIMETABLE_SLOT:
     'Der Beginn muss vor dem Ende liegen und ein Raum muss gewählt sein.',
   INVALID_BLOCK_PLAN:
@@ -76,7 +92,7 @@ const ERROR_MESSAGES: Record<string, string> = {
   INVALID_BLOCK_ASSIGNMENT:
     'Der Block muss innerhalb des Blockplans liegen; der Beginn darf nicht nach dem Ende liegen.',
   OVERLAPPING_TIMETABLE_SLOT:
-    'Der Slot überschneidet sich mit einem vorhandenen Slot dieses Stundenplans.',
+    'Die Unterrichtszeit überschneidet sich mit einer vorhandenen Unterrichtszeit dieses Stundenplans.',
   OVERLAPPING_BLOCK_ASSIGNMENT:
     'Der Block überschneidet sich mit einem vorhandenen Block dieses Blockplans.',
   BLOCK_ASSIGNMENT_BELONGS_TO_ANOTHER_PLAN:
@@ -94,7 +110,8 @@ const ERROR_MESSAGES: Record<string, string> = {
     'Der Folgeplan muss nach dem Ende des aktuellen Blockplans beginnen.',
   NEXT_PLAN_FINISHED: 'Der gewählte Folgeplan ist bereits beendet.',
   CLASS_HAS_NO_STUDENTS: 'Die Klasse hat keine Schüler.',
-  CLASS_HAS_REMAINING_SLOTS: 'Heute finden für die Klasse noch Slots statt.',
+  CLASS_HAS_REMAINING_SLOTS:
+    'Heute stehen für die Klasse noch Unterrichtszeiten an.',
   CLASS_NOT_FULLY_ACCOUNTED:
     'Es sind noch nicht alle Tage der Klasse abgerechnet.',
   CONCURRENT_PLANNING_CHANGE:
@@ -102,6 +119,8 @@ const ERROR_MESSAGES: Record<string, string> = {
   ADMINISTRATOR_REQUIRED: 'Diese Aktion ist Administratoren vorbehalten.',
   CLASS_MANAGEMENT_DENIED: 'Nur die Klassenleitung darf den Plan wechseln.',
   NOT_FOUND: 'Der Datensatz wurde nicht gefunden.',
+  ATTENDANCE_ALREADY_PRESENT:
+    'Für diesen Tag wurde bereits Anwesenheit erfasst. Buche zusätzliche Fehlminuten im Schülerprofil.',
   ATTENDANCE_DAY_LOCKED_OR_UNPLANNED:
     'Für diesen Tag ist keine Änderung möglich: kein Unterricht geplant oder Tag bereits abgeschlossen.',
   INVALID_STATUS_TIME:
@@ -233,12 +252,50 @@ export async function resetAccounts(
   return ((await response.json()) as { resetCount: number }).resetCount
 }
 
-// Zeigt ISO-Datumsangaben im deutschen Format an
-export function formatDate(iso: string): string {
-  const [year, month, day] = iso.split('-')
-  return `${day}.${month}.${year}`
+export function formatTime(time: string): string {
+  return time.length === 8 && time.endsWith(':00') ? time.slice(0, 5) : time
 }
 
-export function formatTime(time: string): string {
-  return time.slice(0, 5)
+export interface ScheduledLesson {
+  startsAt: string
+  endsAt: string
+  roomNumber: string
+  learningField?: string | null
+  teacherName?: string | null
+}
+
+export interface ClassWeekDay {
+  date: string
+  lessons: ScheduledLesson[]
+  periods?: TimetablePeriod[]
+}
+
+export interface TeachingBlock {
+  startsOn: string
+  endsOn: string
+}
+
+export interface ClassSchedule {
+  schoolYear: number
+  periods: TimetablePeriod[]
+  regularWeek: { lessons: ScheduledLesson[] }[]
+  blocks: TeachingBlock[]
+}
+
+export function loadClassSchedule(classId: number, signal?: AbortSignal) {
+  return loadData<ClassSchedule>(
+    `/api/planning/classes/${classId}/schedule`,
+    signal
+  )
+}
+
+export function loadClassWeek(
+  classId: number,
+  date: string,
+  signal?: AbortSignal
+) {
+  return loadData<ClassWeekDay[]>(
+    `/api/planning/classes/${classId}/week?date=${encodeURIComponent(date)}`,
+    signal
+  )
 }

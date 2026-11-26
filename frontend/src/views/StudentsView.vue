@@ -5,7 +5,12 @@ import MasterDataList from '@/components/MasterDataList.vue'
 import StudentFormFields from '@/components/StudentFormFields.vue'
 import StudentRfidAssignments from '@/components/StudentRfidAssignments.vue'
 import { loadData } from '@/api/client'
-import { studentLabel, type Student, type StudentClass } from '@/api/students'
+import {
+  formatAbsenceTotals,
+  studentLabel,
+  type Student,
+  type StudentClass
+} from '@/api/students'
 import { useAuthStore } from '@/stores/auth'
 
 const props = defineProps<{ classId?: number }>()
@@ -56,8 +61,18 @@ const columns = computed(() => [
         }
       ]
     : []),
-  { field: 'unexcusedMinutes' as const, title: 'Unentschuldigt (min)' },
-  { field: 'excusedMinutes' as const, title: 'Entschuldigt (min)' }
+  {
+    field: 'unexcusedDays' as const,
+    title: 'Unentschuldigt',
+    format: (row: Student) =>
+      formatAbsenceTotals(row.unexcusedDays, row.unexcusedHours)
+  },
+  {
+    field: 'excusedDays' as const,
+    title: 'Entschuldigt',
+    format: (row: Student) =>
+      formatAbsenceTotals(row.excusedDays, row.excusedHours)
+  }
 ])
 const profileContext = computed(() =>
   classPage.value

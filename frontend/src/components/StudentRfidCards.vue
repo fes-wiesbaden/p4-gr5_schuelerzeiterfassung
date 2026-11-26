@@ -89,6 +89,16 @@ async function updateCard(remove: boolean) {
   margin: 0;
 }
 
+.card-form select {
+  min-width: 0;
+  padding: 0.55rem 0.75rem;
+  border: 1px solid var(--control-border);
+  border-radius: 10px;
+  background: var(--surface);
+  color: inherit;
+  font: inherit;
+}
+
 .card-actions {
   display: flex;
   flex-wrap: wrap;

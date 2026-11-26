@@ -1,8 +1,18 @@
 <script setup lang="ts">
 import InputText from 'primevue/inputtext'
+import { ref, watch } from 'vue'
+import GermanDateInput from './GermanDateInput.vue'
 import type { Student } from '@/api/students'
 
-defineProps<{ student?: Student }>()
+const props = defineProps<{ student?: Student }>()
+const birthDate = ref('')
+watch(
+  () => props.student?.birthDate,
+  (date) => {
+    birthDate.value = date ?? ''
+  },
+  { immediate: true }
+)
 </script>
 
 <template>
@@ -26,10 +36,10 @@ defineProps<{ student?: Student }>()
   </label>
   <label>
     Geburtsdatum
-    <InputText
+    <GermanDateInput
+      v-model="birthDate"
+      label="Geburtsdatum"
       name="birthDate"
-      type="date"
-      :default-value="student?.birthDate"
       required
     />
   </label>

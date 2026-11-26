@@ -70,6 +70,25 @@ Vite leitet `/api/` an `http://127.0.0.1:8080` weiter. Nach dem
 [CA-Import](#tls-und-terminal) die Weboberfläche auf `https://<TLS_HOST>:5173/`
 öffnen, standardmäßig `https://127.0.0.1:5173/`.
 
+### Codex-Demo
+
+Die Schaltfläche für den Assistenten erscheint unten rechts im angemeldeten
+Webbereich. Die lokale Entschuldigungsfunktion zeigt zuerst die betroffenen
+Minuten an und bucht dann auf Bestätigung. Sie ist auch ohne Codex verfügbar.
+
+Für den Codex-Chat das Backend auf dem Entwicklungsrechner mit einer
+Datenbank für fiktive Testdaten starten. Das Backend benötigt `codex` im
+`PATH` und eine bestehende ChatGPT-Anmeldung, sichtbar mit `codex login status`.
+
+```sh
+ATTENDANCE_ASSISTANT_DEMO=true mvn -pl backend spring-boot:run
+```
+
+Im Chat ausschließlich fiktive Angaben verwenden. Codex erhält die kurze
+Chat-Anfrage und einen begrenzten Verlauf. Spring lädt die Klassenliste für
+die Auswahl im Browser und prüft die Buchung. Bei Bedarf lässt sich das
+verfügbare Codex-Modell mit `ATTENDANCE_ASSISTANT_MODEL` vorgeben.
+
 ## Lokal debuggen
 
 Für IntelliJ IDEA die Root-`pom.xml` importieren; sie enthält `backend` und

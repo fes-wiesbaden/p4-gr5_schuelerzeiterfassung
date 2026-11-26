@@ -34,60 +34,75 @@ async function handleSubmit() {
 
 <template>
   <main class="login">
-    <form class="login__card" @submit.prevent="handleSubmit">
-      <h1 class="login__title">RFID-Anwesenheitserfassung</h1>
-      <p class="login__subtitle">Bitte melde dich an.</p>
-
-      <div class="login__field">
-        <label class="login__label" for="login-username">Benutzername</label>
-        <InputText
-          id="login-username"
-          v-model="username"
-          autocomplete="username"
-          required
-          autofocus
-          :disabled="auth.busy"
-        />
-      </div>
-
-      <div class="login__field">
-        <label class="login__label" for="login-password">Passwort</label>
-        <div class="login__password">
-          <InputText
-            id="login-password"
-            v-model="password"
-            :type="passwordVisible ? 'text' : 'password'"
-            autocomplete="current-password"
-            required
-            :disabled="auth.busy"
-          />
-          <Button
-            type="button"
-            class="login__password-toggle"
-            :icon="passwordVisible ? 'pi pi-eye-slash' : 'pi pi-eye'"
-            text
-            rounded
-            size="small"
-            aria-label="Passwort anzeigen"
-            aria-controls="login-password"
-            :aria-pressed="passwordVisible"
-            :disabled="auth.busy"
-            @click="passwordVisible = !passwordVisible"
-          />
+    <div class="login__frame">
+      <div class="login__visual" aria-hidden="true">
+        <div class="login__card-art login__card-art--back" />
+        <div class="login__card-art login__card-art--front">
+          <i class="pi pi-wifi" />
         </div>
       </div>
+      <div class="login__main">
+        <div class="login__brand">
+          <i class="brand-mark pi pi-id-card" aria-hidden="true" />
+          Anwesenheitserfassung
+        </div>
+        <form class="login__form" @submit.prevent="handleSubmit">
+          <h1>Anmelden</h1>
 
-      <p v-if="auth.errorMessage" class="login__error" role="alert">
-        {{ auth.errorMessage }}
-      </p>
+          <div class="login__field">
+            <label for="login-username">Benutzername</label>
+            <InputText
+              id="login-username"
+              v-model="username"
+              autocomplete="username"
+              required
+              autofocus
+              :disabled="auth.busy"
+            />
+          </div>
 
-      <Button
-        type="submit"
-        label="Anmelden"
-        class="login__submit"
-        :loading="auth.busy"
-      />
-    </form>
+          <div class="login__field">
+            <label for="login-password">Passwort</label>
+            <div class="login__password">
+              <InputText
+                id="login-password"
+                v-model="password"
+                :type="passwordVisible ? 'text' : 'password'"
+                autocomplete="current-password"
+                required
+                :disabled="auth.busy"
+              />
+              <Button
+                type="button"
+                class="login__password-toggle"
+                :icon="passwordVisible ? 'pi pi-eye-slash' : 'pi pi-eye'"
+                text
+                rounded
+                size="small"
+                :aria-label="
+                  passwordVisible ? 'Passwort verbergen' : 'Passwort anzeigen'
+                "
+                aria-controls="login-password"
+                :aria-pressed="passwordVisible"
+                :disabled="auth.busy"
+                @click="passwordVisible = !passwordVisible"
+              />
+            </div>
+          </div>
+
+          <p v-if="auth.errorMessage" class="login__error" role="alert">
+            {{ auth.errorMessage }}
+          </p>
+
+          <Button
+            type="submit"
+            label="Anmelden"
+            class="login__submit"
+            :loading="auth.busy"
+          />
+        </form>
+      </div>
+    </div>
   </main>
 </template>
 
@@ -95,66 +110,112 @@ async function handleSubmit() {
 .login {
   display: grid;
   place-items: center;
-  min-height: 100vh;
+  min-height: 100svh;
   padding: 24px;
-  background: var(--paper);
+  background:
+    radial-gradient(ellipse at 16% 10%, #ede3f9, transparent 60%), var(--paper);
 }
 
-.login__card {
+.login__frame {
+  display: grid;
+  grid-template-columns: minmax(0, 0.92fr) minmax(0, 1fr);
+  width: min(100%, 880px);
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+.login__visual {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  background:
+    radial-gradient(ellipse at 44% 90%, #a17ade, transparent 70%), #442970;
+}
+
+.login__card-art {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: min(60%, 228px);
+  aspect-ratio: 1.58;
+  border-radius: 14px;
+}
+
+.login__card-art--back {
+  background: #8360be;
+  transform: translate(-54%, -55%) rotate(-23deg);
+}
+
+.login__card-art--front {
+  display: grid;
+  place-items: center;
+  background: #e9def7;
+  color: #51348e;
+  box-shadow: 0 14px 30px #26154154;
+  transform: translate(-44%, -40%) rotate(13deg);
+}
+
+.login__card-art--front i {
+  font-size: clamp(1.5rem, 4vw, 2.25rem);
+  transform: rotate(90deg);
+}
+
+.login__main {
+  display: grid;
+  align-content: center;
+  gap: 36px;
+  min-width: 0;
+  padding: clamp(26px, 5vw, 62px);
+}
+
+.login__brand {
   display: flex;
-  flex-direction: column;
-  gap: 16px;
-  width: 100%;
-  max-width: 380px;
-  padding: clamp(20px, 5vw, 32px);
-  background: #ffffff;
-  border: 1px solid #e2e5ea;
-  border-radius: 16px;
-}
-
-.login__title {
-  margin: 0;
-  font-size: 1.15rem;
-  color: var(--ink);
-}
-
-.login__subtitle {
-  margin: -8px 0 0;
+  align-items: center;
+  gap: 9px;
   font-size: 0.9rem;
-  color: #6b7688;
+  font-weight: 650;
+}
+
+.login__form {
+  display: grid;
+  gap: 18px;
+}
+
+.login__form h1 {
+  margin: 0 0 6px;
+  font-size: clamp(2rem, 5vw, 3rem);
 }
 
 .login__field {
-  display: flex;
-  flex-direction: column;
+  display: grid;
   gap: 6px;
 }
 
-.login__label {
+.login__field label {
   font-size: 0.85rem;
-  font-weight: 600;
-  color: #2b3648;
+  font-weight: 650;
 }
 
 .login__error {
   margin: 0;
   padding: 10px 12px;
-  border: 1px solid #f0b4b4;
-  border-radius: 6px;
-  background: #fdf2f2;
+  border-radius: 8px;
+  background: #fff2f2;
+  color: #8c3038;
   font-size: 0.85rem;
-  color: #a12525;
 }
 
 .login__submit {
-  background: var(--accent);
-  border-color: var(--accent);
+  min-height: 44px;
   margin-top: 4px;
 }
 
 .login__field :deep(input) {
   width: 100%;
   min-height: 44px;
+  border-color: var(--control-border);
   border-radius: 10px;
 }
 
@@ -171,5 +232,30 @@ async function handleSubmit() {
   inset-inline-end: 4px;
   top: 50%;
   transform: translateY(-50%);
+}
+
+@media (max-width: 650px) {
+  .login__frame {
+    grid-template-columns: minmax(0, 1fr);
+    max-width: 440px;
+  }
+
+  .login__visual {
+    min-height: 122px;
+  }
+
+  .login__card-art {
+    width: 114px;
+  }
+
+  .login__main {
+    gap: 24px;
+  }
+}
+
+@media (max-width: 360px) {
+  .login {
+    padding: 14px;
+  }
 }
 </style>

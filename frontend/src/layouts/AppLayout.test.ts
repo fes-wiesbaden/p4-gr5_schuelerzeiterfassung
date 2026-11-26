@@ -31,12 +31,14 @@ describe('AppLayout Navigation', () => {
     auth.user = { name: 'A. Muster', role: 'admin' }
 
     const wrapper = mount(AppLayout, {
-      global: { plugins: [router, PrimeVue] }
+      global: { plugins: [router, PrimeVue], stubs: ['RouterView'] }
     })
 
     expect(wrapper.text()).toContain('Administration')
     expect(wrapper.text()).toContain('Räume')
     expect(wrapper.find('a[href="/personal"]').exists()).toBe(true)
+    expect(wrapper.find('a[href="/terminals"]').exists()).toBe(false)
+    expect(wrapper.find('a[href="/auswertungen"]').exists()).toBe(false)
     wrapper.unmount()
   })
 
@@ -45,7 +47,7 @@ describe('AppLayout Navigation', () => {
     auth.user = { name: 'L. Kraft', role: 'lehrkraft' }
 
     const wrapper = mount(AppLayout, {
-      global: { plugins: [router, PrimeVue] }
+      global: { plugins: [router, PrimeVue], stubs: ['RouterView'] }
     })
 
     expect(wrapper.text()).not.toContain('Administration')
@@ -58,7 +60,7 @@ describe('AppLayout Navigation', () => {
     auth.user = { name: 'L. Kraft', role: 'lehrkraft' }
 
     const wrapper = mount(AppLayout, {
-      global: { plugins: [router, PrimeVue] }
+      global: { plugins: [router, PrimeVue], stubs: ['RouterView'] }
     })
 
     expect(wrapper.text()).toContain('Live-Anwesenheit')

@@ -1,5 +1,6 @@
 import { flushPromises, mount, RouterLinkStub } from '@vue/test-utils'
 import PrimeVue from 'primevue/config'
+import { routeLocationKey } from 'vue-router'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import LiveAttendanceView from './LiveAttendanceView.vue'
@@ -57,7 +58,11 @@ describe('LiveAttendanceView', () => {
 
   async function mountView() {
     const wrapper = mount(LiveAttendanceView, {
-      global: { plugins: [PrimeVue], stubs: { RouterLink: RouterLinkStub } }
+      global: {
+        plugins: [PrimeVue],
+        provide: { [routeLocationKey as symbol]: { query: {} } },
+        stubs: { RouterLink: RouterLinkStub }
+      }
     })
     await flushPromises()
     return wrapper
@@ -77,7 +82,7 @@ describe('LiveAttendanceView', () => {
     expect(profileLink.props('to')).toEqual({
       name: 'schueler-detail',
       params: { studentId: 7 },
-      query: { klasse: 2 }
+      query: { klasse: 2, datum: '2026-09-14' }
     })
     expect(wrapper.text()).toContain('Abwesend')
     expect(wrapper.text()).toContain('30')
@@ -124,8 +129,9 @@ describe('LiveAttendanceView', () => {
       'ANWESEND'
     )
     expect(
-      (form.find('input[type="time"]').element as HTMLInputElement).value
+      (form.find('input.german-time').element as HTMLInputElement).value
     ).toBe('08:30')
+    expect(form.find('option[value="ABWESEND"]').exists()).toBe(false)
   })
 
   it.each([
@@ -194,7 +200,11 @@ describe('LiveAttendanceView', () => {
       () => new Promise<Response>((resolve) => (finishClasses = resolve))
     )
     const wrapper = mount(LiveAttendanceView, {
-      global: { plugins: [PrimeVue], stubs: { RouterLink: RouterLinkStub } }
+      global: {
+        plugins: [PrimeVue],
+        provide: { [routeLocationKey as symbol]: { query: {} } },
+        stubs: { RouterLink: RouterLinkStub }
+      }
     })
 
     wrapper.unmount()
@@ -253,7 +263,7 @@ describe('LiveAttendanceView', () => {
 
     const form = wrapper.find('form.correction')
     await form.find('select').setValue('ENTSCHULDIGT')
-    await form.find('input[type="time"]').setValue('07:45')
+    await form.find('input.german-time').setValue('07:45')
     await form.trigger('submit')
     await flushPromises()
 
@@ -269,7 +279,7 @@ describe('LiveAttendanceView', () => {
     })
     const cells = wrapper.findAll('tbody td').map((cell) => cell.text())
     expect(cells[1]).toBe('Entschuldigt')
-    expect(cells[2]).toBe('15')
+    expect(cells[2]).toBe('15 Min.')
     expect(wrapper.text()).toContain('Status von Beispiel, Erika gespeichert.')
   })
 

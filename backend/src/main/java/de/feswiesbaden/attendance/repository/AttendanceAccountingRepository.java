@@ -101,9 +101,11 @@ public class AttendanceAccountingRepository {
   /** Lädt die Unterrichtszeiten nach Beginn sortiert und verwendet bei Bedarf eine Lesesperre */
   public List<Slot> findSlots(Long timetableId, boolean lock) {
     return jdbc.query(
-        "SELECT weekday, start_time, end_time, room_id, valid_from, valid_until FROM timetable_slot"
-            + " WHERE timetable_id = ? AND start_time < end_time ORDER BY start_time, id"
-            + (lock ? " FOR SHARE" : ""),
+        "SELECT s.weekday, s.start_time, s.end_time, s.room_id, s.valid_from, s.valid_until,"
+            + " s.learning_field, TRIM(CONCAT(t.first_name, ' ', t.last_name)) AS teacher_name"
+            + " FROM timetable_slot s LEFT JOIN staff t ON t.id = s.teacher_id"
+            + " WHERE s.timetable_id = ? AND s.start_time < s.end_time ORDER BY s.start_time, s.id"
+            + (lock ? " FOR SHARE OF s" : ""),
         (row, index) ->
             new Slot(
                 Weekday.valueOf(row.getString("weekday")).dayOfWeek(),
@@ -111,7 +113,9 @@ public class AttendanceAccountingRepository {
                 row.getTime("end_time").toLocalTime(),
                 row.getLong("room_id"),
                 row.getObject("valid_from", LocalDate.class),
-                row.getObject("valid_until", LocalDate.class)),
+                row.getObject("valid_until", LocalDate.class),
+                row.getString("learning_field"),
+                row.getString("teacher_name")),
         timetableId);
   }
 
@@ -153,19 +157,25 @@ public class AttendanceAccountingRepository {
   /** Lädt und sperrt alle Tagesanwesenheiten eines Schülers, nach Datum sortiert */
   public List<DayAttendance> findAttendances(Long studentId) {
     return jdbc.query(
-        "SELECT id, attendance_date, status FROM attendance WHERE student_id = ? ORDER BY attendance_date FOR UPDATE",
+        "SELECT id, attendance_date, status, full_absence, full_unexcused_minutes, full_excused_minutes"
+            + " FROM attendance WHERE student_id = ? ORDER BY attendance_date FOR UPDATE",
         (row, index) ->
             new DayAttendance(
                 row.getLong("id"),
                 row.getDate("attendance_date").toLocalDate(),
-                AttendanceStatus.valueOf(row.getString("status"))),
+                AttendanceStatus.valueOf(row.getString("status")),
+                new FullDay(
+                    nullableStatus(row.getString("full_absence")),
+                    row.getInt("full_unexcused_minutes"),
+                    row.getInt("full_excused_minutes"))),
         studentId);
   }
 
   /** Lädt und sperrt alle Änderungsprotokolle eines Schülers, nach Ereigniszeit und ID sortiert */
   public List<Audit> findAudits(Long studentId) {
     return jdbc.query(
-        "SELECT id, attendance_id, deletion_date_id, event_type, occurred_at, old_status, new_status,"
+        "SELECT id, attendance_id, deletion_date_id, event_type, occurred_at,"
+            + " excusal_ends_at, excusal_status, excusal_reason, old_status, new_status,"
             + " unexcused_minutes_delta, excused_minutes_delta"
             + " FROM attendance_audit WHERE student_id = ? ORDER BY occurred_at, id FOR UPDATE",
         (row, index) -> audit(row),
@@ -177,7 +187,8 @@ public class AttendanceAccountingRepository {
     return jdbc.query(
         """
         SELECT h.id, h.student_id, h.attendance_id, h.deletion_date_id, h.event_type, h.occurred_at,
-               h.old_status, h.new_status, h.unexcused_minutes_delta, h.excused_minutes_delta
+               h.excusal_ends_at, h.excusal_status, h.excusal_reason, h.old_status, h.new_status,
+               h.unexcused_minutes_delta, h.excused_minutes_delta
         FROM attendance_audit h
         JOIN attendance a ON a.id = h.attendance_id AND a.student_id = h.student_id
         JOIN student s ON s.id = a.student_id
@@ -204,7 +215,8 @@ public class AttendanceAccountingRepository {
     return jdbc.query(
         """
         SELECT h.id, h.attendance_id, h.deletion_date_id, h.event_type, h.occurred_at,
-               h.old_status, h.new_status, h.unexcused_minutes_delta, h.excused_minutes_delta,
+               h.excusal_ends_at, h.excusal_status, h.excusal_reason, h.old_status, h.new_status,
+               h.unexcused_minutes_delta, h.excused_minutes_delta,
                a.attendance_date
         FROM attendance_audit h
         JOIN attendance a ON a.id = h.attendance_id AND a.student_id = h.student_id
@@ -220,6 +232,33 @@ public class AttendanceAccountingRepository {
                 .add(audit(rows));
           }
           return audits;
+        },
+        studentId,
+        from,
+        through,
+        today);
+  }
+
+  /** Liest bereits abgerechnete ganze Fehltage aus aufbewahrten Anwesenheiten. */
+  public Map<LocalDate, AttendanceStatus> findFullAbsences(
+      Long studentId, LocalDate from, LocalDate through, LocalDate today) {
+    return jdbc.query(
+        """
+        SELECT a.attendance_date, a.full_absence
+        FROM attendance a
+        WHERE a.student_id = ? AND a.attendance_date BETWEEN ? AND ? AND a.full_absence IS NOT NULL
+          AND EXISTS (SELECT 1 FROM attendance_audit h
+                      JOIN deletion_date d ON d.id = h.deletion_date_id
+                      WHERE h.attendance_id = a.id AND d.delete_after > ?)
+        """,
+        rows -> {
+          Map<LocalDate, AttendanceStatus> days = new HashMap<>();
+          while (rows.next()) {
+            days.put(
+                rows.getObject("attendance_date", LocalDate.class),
+                AttendanceStatus.valueOf(rows.getString("full_absence")));
+          }
+          return days;
         },
         studentId,
         from,
@@ -250,10 +289,17 @@ public class AttendanceAccountingRepository {
         row.getLong("deletion_date_id"),
         AuditEventType.valueOf(row.getString("event_type")),
         row.getObject("occurred_at", LocalDateTime.class),
+        row.getObject("excusal_ends_at", LocalDateTime.class),
+        nullableStatus(row.getString("excusal_status")),
+        row.getString("excusal_reason"),
         newStatus == null ? null : AttendanceStatus.valueOf(newStatus),
         row.getInt("unexcused_minutes_delta"),
         row.getInt("excused_minutes_delta"),
         oldStatus == null ? null : AttendanceStatus.valueOf(oldStatus));
+  }
+
+  private static AttendanceStatus nullableStatus(String status) {
+    return status == null ? null : AttendanceStatus.valueOf(status);
   }
 
   /** Legt eine Tagesanwesenheit an und liefert ihre erzeugte ID */
@@ -375,6 +421,34 @@ public class AttendanceAccountingRepository {
         attendanceId);
   }
 
+  /** Übernimmt die Änderungen der Tageszählung getrennt vom unveränderten Minutenkonto. */
+  public void updateFullDay(Long studentId, Long attendanceId, FullDay previous, FullDay current) {
+    jdbc.update(
+        """
+        UPDATE student
+        SET unexcused_days_account = unexcused_days_account + ?,
+            excused_days_account = excused_days_account + ?,
+            full_unexcused_minutes_account = full_unexcused_minutes_account + ?,
+            full_excused_minutes_account = full_excused_minutes_account + ?
+        WHERE id = ?
+        """,
+        current.unexcusedDays() - previous.unexcusedDays(),
+        current.excusedDays() - previous.excusedDays(),
+        current.unexcusedMinutes() - previous.unexcusedMinutes(),
+        current.excusedMinutes() - previous.excusedMinutes(),
+        studentId);
+    jdbc.update(
+        """
+        UPDATE attendance
+        SET full_absence = ?, full_unexcused_minutes = ?, full_excused_minutes = ?, changed_at = changed_at
+        WHERE id = ?
+        """,
+        current.status() == null ? null : current.status().name(),
+        current.unexcusedMinutes(),
+        current.excusedMinutes(),
+        attendanceId);
+  }
+
   /** Fügt ein unveränderliches Änderungsprotokoll ein */
   public void insertAudit(
       Long studentId,
@@ -387,8 +461,9 @@ public class AttendanceAccountingRepository {
     jdbc.update(
         "INSERT INTO attendance_audit (student_id, attendance_id, deletion_date_id, event_type,"
             + " changed_by_staff_id, terminal_id, old_status, new_status, occurred_at,"
+            + " excusal_ends_at, excusal_status, excusal_reason,"
             + " unexcused_minutes_delta, excused_minutes_delta, created_at, request_id)"
-            + " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            + " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         studentId,
         attendanceId,
         audit.deletionDateId(),
@@ -398,6 +473,9 @@ public class AttendanceAccountingRepository {
         audit.oldStatus() == null ? null : audit.oldStatus().name(),
         audit.status() == null ? null : audit.status().name(),
         audit.occurredAt(),
+        audit.excusalEndsAt(),
+        audit.excusalStatus() == null ? null : audit.excusalStatus().name(),
+        audit.excusalReason(),
         audit.unexcusedDelta(),
         audit.excusedDelta(),
         now,
@@ -429,7 +507,9 @@ public class AttendanceAccountingRepository {
         -account.unexcused(),
         -account.excused());
     jdbc.update(
-        "UPDATE student SET unexcused_minutes_account = 0, excused_minutes_account = 0 WHERE id = ?",
+        "UPDATE student SET unexcused_minutes_account = 0, excused_minutes_account = 0,"
+            + " unexcused_days_account = 0, excused_days_account = 0,"
+            + " full_unexcused_minutes_account = 0, full_excused_minutes_account = 0 WHERE id = ?",
         account.id());
   }
 
@@ -448,7 +528,9 @@ public class AttendanceAccountingRepository {
       LocalTime endsAt,
       long roomId,
       LocalDate validFrom,
-      LocalDate validUntil) {
+      LocalDate validUntil,
+      String learningField,
+      String teacherName) {
     /** Prüft Wochentag und Gültigkeit dieser Fassung für einen Kalendertag */
     public boolean occursOn(LocalDate date) {
       return weekday == date.getDayOfWeek()
@@ -458,7 +540,26 @@ public class AttendanceAccountingRepository {
   }
 
   /** Enthält ID, Datum und aktuellen Status einer Tagesanwesenheit */
-  public record DayAttendance(Long id, LocalDate date, AttendanceStatus status) {}
+  public record DayAttendance(Long id, LocalDate date, AttendanceStatus status, FullDay fullDay) {}
+
+  /** Ein ganzer Fehltag und die Minuten, die bereits in seiner Tageszählung enthalten sind. */
+  public record FullDay(AttendanceStatus status, int unexcusedMinutes, int excusedMinutes) {
+    public static final FullDay NONE = new FullDay(null, 0, 0);
+
+    public FullDay includingManualMinutes(long minutes) {
+      return status == null || minutes == 0
+          ? this
+          : new FullDay(status, Math.toIntExact(unexcusedMinutes + minutes), excusedMinutes);
+    }
+
+    public int unexcusedDays() {
+      return status == AttendanceStatus.ABWESEND ? 1 : 0;
+    }
+
+    public int excusedDays() {
+      return status == AttendanceStatus.ENTSCHULDIGT ? 1 : 0;
+    }
+  }
 
   /**
    * Enthält ein Änderungsprotokoll mit UTC-Ereigniszeit, optionalem Statuswechsel und
@@ -471,8 +572,36 @@ public class AttendanceAccountingRepository {
       Long deletionDateId,
       AuditEventType type,
       LocalDateTime occurredAt,
+      LocalDateTime excusalEndsAt,
+      AttendanceStatus excusalStatus,
+      String excusalReason,
       AttendanceStatus status,
       int unexcusedDelta,
       int excusedDelta,
-      AttendanceStatus oldStatus) {}
+      AttendanceStatus oldStatus) {
+    public Audit(
+        Long id,
+        Long attendanceId,
+        Long deletionDateId,
+        AuditEventType type,
+        LocalDateTime occurredAt,
+        AttendanceStatus status,
+        int unexcusedDelta,
+        int excusedDelta,
+        AttendanceStatus oldStatus) {
+      this(
+          id,
+          attendanceId,
+          deletionDateId,
+          type,
+          occurredAt,
+          null,
+          null,
+          null,
+          status,
+          unexcusedDelta,
+          excusedDelta,
+          oldStatus);
+    }
+  }
 }

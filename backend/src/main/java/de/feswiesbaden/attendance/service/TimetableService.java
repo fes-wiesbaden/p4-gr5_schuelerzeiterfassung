@@ -58,11 +58,31 @@ public class TimetableService {
   @Transactional(isolation = Isolation.SERIALIZABLE)
   public Long addSlot(
       Long timetableId, Weekday weekday, LocalTime startsAt, LocalTime endsAt, Long roomId) {
+    return addSlot(timetableId, weekday, startsAt, endsAt, roomId, null);
+  }
+
+  /** Fügt den Unterricht mit optionalem Lernfeld und zuständiger Lehrkraft hinzu. */
+  @Transactional(isolation = Isolation.SERIALIZABLE)
+  public Long addSlot(
+      Long timetableId,
+      Weekday weekday,
+      LocalTime startsAt,
+      LocalTime endsAt,
+      Long roomId,
+      LessonDetails details) {
     authorization.requireAdministrator();
     validateSlot(timetableId, weekday, startsAt, endsAt, roomId);
+    var lesson = validateDetails(details == null ? new LessonDetails(null, null) : details);
     var now = LocalDateTime.ofInstant(clock.instant(), BERLIN);
     return insertSlot(
-        timetableId, weekday, startsAt, endsAt, roomId, nextDate(weekday, startsAt, now), null);
+        timetableId,
+        weekday,
+        startsAt,
+        endsAt,
+        roomId,
+        nextDate(weekday, startsAt, now),
+        null,
+        lesson);
   }
 
   /** Ersetzt den Slot ab einem noch nicht begonnenen Termin und liefert dessen Datum */
@@ -73,11 +93,15 @@ public class TimetableService {
       Weekday weekday,
       LocalTime startsAt,
       LocalTime endsAt,
-      Long roomId) {
+      Long roomId,
+      LessonDetails details) {
     authorization.requireAdministrator();
     var old = lockSlot(timetableId, slotId);
     validateSlot(timetableId, weekday, startsAt, endsAt, roomId);
     var now = LocalDateTime.ofInstant(clock.instant(), BERLIN);
+    var lesson =
+        validateDetails(
+            details == null ? new LessonDetails(old.learningField(), old.teacherId()) : details);
     var oldDate = nextDate(old.weekday(), old.startsAt(), now);
     var newDate = nextDate(weekday, startsAt, now);
     var week = monday(oldDate.isAfter(newDate) ? oldDate : newDate);
@@ -86,7 +110,7 @@ public class TimetableService {
     }
     endSlot(old, week);
     var from = week.plusDays(weekday.ordinal());
-    insertSlot(timetableId, weekday, startsAt, endsAt, roomId, from, old.seriesId());
+    insertSlot(timetableId, weekday, startsAt, endsAt, roomId, from, old.seriesId(), lesson);
     return from;
   }
 
@@ -154,6 +178,18 @@ public class TimetableService {
     }
   }
 
+  private LessonDetails validateDetails(LessonDetails details) {
+    var field = details.learningField() == null ? null : details.learningField().strip();
+    if ((field != null && field.length() > 100)
+        || (details.teacherId() != null && !timetables.teacherExists(details.teacherId()))) {
+      throw new IllegalArgumentException("INVALID_LESSON_DETAILS");
+    }
+    return new LessonDetails(field == null || field.isBlank() ? null : field, details.teacherId());
+  }
+
+  /** Enthält die optionalen Angaben zum Inhalt und zur Lehrkraft einer Unterrichtszeit. */
+  public record LessonDetails(String learningField, Long teacherId) {}
+
   private Long insertSlot(
       Long timetableId,
       Weekday weekday,
@@ -161,12 +197,22 @@ public class TimetableService {
       LocalTime endsAt,
       Long roomId,
       LocalDate from,
-      Long seriesId) {
+      Long seriesId,
+      LessonDetails details) {
     if (timetables.hasOverlappingSlot(timetableId, weekday, startsAt, endsAt, from)) {
       throw new IllegalArgumentException("OVERLAPPING_TIMETABLE_SLOT");
     }
     Long slotId =
-        timetables.insertSlot(timetableId, roomId, weekday, startsAt, endsAt, from, seriesId);
+        timetables.insertSlot(
+            timetableId,
+            roomId,
+            weekday,
+            startsAt,
+            endsAt,
+            from,
+            seriesId,
+            details.learningField(),
+            details.teacherId());
     for (var period : classes.findPeriodsByTimetable(timetableId)) {
       requireRoomAvailable(
           period.classId(), timetableId, period.startsOn(), period.endsOn(), slotId);

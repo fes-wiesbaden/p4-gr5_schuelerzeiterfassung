@@ -7,15 +7,13 @@ import LoginView from './views/LoginView.vue'
 import LiveAttendanceView from './views/LiveAttendanceView.vue'
 import ClassesView from './views/ClassesView.vue'
 import StudentsView from './views/StudentsView.vue'
-import SchedulePlanningView from './views/SchedulePlanningView.vue'
-import ReportsView from './views/ReportsView.vue'
 import RoomsView from './views/RoomsView.vue'
-import TerminalsAdminView from './views/TerminalsAdminView.vue'
 import StaffView from './views/StaffView.vue'
 
 declare module 'vue-router' {
   interface RouteMeta {
     adminOnly?: boolean
+    title?: string
     // Ohne Anmeldung erreichbar
     public?: boolean
   }
@@ -28,7 +26,7 @@ const router = createRouter({
       path: '/login',
       name: 'login',
       component: LoginView,
-      meta: { public: true }
+      meta: { public: true, title: 'Anmelden' }
     },
     {
       path: '/',
@@ -38,16 +36,23 @@ const router = createRouter({
         {
           path: 'live-anwesenheit',
           name: 'live-anwesenheit',
-          component: LiveAttendanceView
+          component: LiveAttendanceView,
+          meta: { title: 'Live-Anwesenheit' }
         },
         {
           path: 'klassen',
           children: [
-            { path: '', name: 'klassen', component: ClassesView },
+            {
+              path: '',
+              name: 'klassen',
+              component: ClassesView,
+              meta: { title: 'Klassen' }
+            },
             {
               path: ':classId(\\d+)',
               name: 'klasse-schueler',
               component: StudentsView,
+              meta: { title: 'Klassenliste' },
               props: (route) => ({ classId: Number(route.params.classId) })
             }
           ]
@@ -55,34 +60,43 @@ const router = createRouter({
         {
           path: 'schueler',
           children: [
-            { path: '', name: 'schueler', component: StudentsView },
+            {
+              path: '',
+              name: 'schueler',
+              component: StudentsView,
+              meta: { title: 'Schüler' }
+            },
             {
               path: ':studentId(\\d+)',
               name: 'schueler-detail',
               component: () => import('./views/StudentDetailView.vue'),
+              meta: { title: 'Schülerprofil' },
               props: (route) => ({ studentId: Number(route.params.studentId) })
             }
           ]
         },
-        { path: 'planung', name: 'planung', component: SchedulePlanningView },
-        { path: 'auswertungen', name: 'auswertungen', component: ReportsView },
+        {
+          path: 'planung',
+          name: 'planung',
+          component: () => import('./views/SchedulePlanningView.vue'),
+          meta: { title: 'Stunden- und Blockplan' }
+        },
+        { path: 'auswertungen', redirect: { name: 'schueler' } },
         {
           path: 'raeume',
           name: 'raeume',
           component: RoomsView,
-          meta: { adminOnly: true }
+          meta: { adminOnly: true, title: 'Räume' }
         },
         {
           path: 'terminals',
-          name: 'terminals',
-          component: TerminalsAdminView,
-          meta: { adminOnly: true }
+          redirect: { name: 'raeume' }
         },
         {
           path: 'personal',
           name: 'personal',
           component: StaffView,
-          meta: { adminOnly: true }
+          meta: { adminOnly: true, title: 'Personal' }
         }
       ]
     }
@@ -123,6 +137,13 @@ router.beforeEach(async (to) => {
   if (!to.matched.length || (to.meta.adminOnly && !auth.isAdmin)) {
     return { name: 'live-anwesenheit' }
   }
+})
+
+router.afterEach((to, _from, failure) => {
+  if (failure) return
+  document.title = to.meta.title
+    ? `${to.meta.title} · Anwesenheitserfassung`
+    : 'Anwesenheitserfassung'
 })
 
 export default router

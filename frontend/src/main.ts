@@ -3,89 +3,71 @@ import { createPinia } from 'pinia'
 import PrimeVue from 'primevue/config'
 import { definePreset } from '@primeuix/themes'
 import Aura from '@primeuix/themes/aura'
+import type { DatePickerPassThroughOptions } from 'primevue/datepicker'
 
 import App from './App.vue'
+import { germanLocale } from './germanLocale'
+import { installGermanValidation } from './formValidation'
 import router from './router'
 import './styles.css'
 import 'primeicons/primeicons.css'
 
-// Verwendet für die Primärfarbe dieselbe dunkelblaue Farbskala wie für die Seitenleiste
 const AttendanceTheme = definePreset(Aura, {
   semantic: {
     primary: {
-      50: '#f2f5f9',
-      100: '#dde5ee',
-      200: '#bccddf',
-      300: '#92aecb',
-      400: '#5b81a8',
-      500: '#1e3a5c',
-      600: '#1a3252',
-      700: '#162a45',
-      800: '#122238',
-      900: '#0e1a2b',
-      950: '#0a121e'
+      50: '#f7f3fd',
+      100: '#eee7fa',
+      200: '#dfd2f5',
+      300: '#c8b3ed',
+      400: '#a68bdb',
+      500: '#6344ad',
+      600: '#583a9d',
+      700: '#51348e',
+      800: '#412973',
+      900: '#321f58',
+      950: '#25163e'
     }
   }
 })
+
+const calendarDate = new Intl.DateTimeFormat('de-DE', { dateStyle: 'full' })
+const calendarAccessibility: DatePickerPassThroughOptions = {
+  dropdown: ({ state, instance }) => ({
+    'aria-controls': state.overlayVisible ? instance.panelId : null
+  }),
+  panel: { 'aria-modal': null },
+  selectMonth: { 'aria-label': null, title: germanLocale.chooseMonth },
+  selectYear: { 'aria-label': null, title: germanLocale.chooseYear },
+  dayView: { 'aria-label': 'Kalendertage' },
+  dayCell: ({ context }) => ({
+    'aria-label': null,
+    'aria-selected': context.selected
+  }),
+  day: ({ context: { date, today } }) => ({
+    role: 'button',
+    'aria-selected': null,
+    'aria-current': today ? 'date' : undefined,
+    'aria-label': calendarDate.format(new Date(date.year, date.month, date.day))
+  }),
+  month: ({ context }) => ({
+    role: 'button',
+    'aria-disabled': context.disabled
+  }),
+  year: ({ context }) => ({ role: 'button', 'aria-disabled': context.disabled })
+}
 
 const app = createApp(App)
 
 app.use(createPinia())
 app.use(router)
 app.use(PrimeVue, {
-  locale: {
-    firstDayOfWeek: 1,
-    dayNames: [
-      'Sonntag',
-      'Montag',
-      'Dienstag',
-      'Mittwoch',
-      'Donnerstag',
-      'Freitag',
-      'Samstag'
-    ],
-    dayNamesMin: ['So', 'Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa'],
-    monthNames: [
-      'Januar',
-      'Februar',
-      'März',
-      'April',
-      'Mai',
-      'Juni',
-      'Juli',
-      'August',
-      'September',
-      'Oktober',
-      'November',
-      'Dezember'
-    ],
-    monthNamesShort: [
-      'Jan',
-      'Feb',
-      'Mär',
-      'Apr',
-      'Mai',
-      'Jun',
-      'Jul',
-      'Aug',
-      'Sep',
-      'Okt',
-      'Nov',
-      'Dez'
-    ],
-    weekHeader: 'KW',
-    chooseDate: 'Datum auswählen',
-    chooseMonth: 'Monat auswählen',
-    chooseYear: 'Jahr auswählen',
-    prevMonth: 'Vorheriger Monat',
-    nextMonth: 'Nächster Monat',
-    prevYear: 'Vorheriges Jahr',
-    nextYear: 'Nächstes Jahr'
-  },
+  locale: germanLocale,
+  pt: { datepicker: calendarAccessibility },
   theme: {
     preset: AttendanceTheme,
     options: { darkModeSelector: false }
   }
 })
 
+installGermanValidation(document)
 app.mount('#app')

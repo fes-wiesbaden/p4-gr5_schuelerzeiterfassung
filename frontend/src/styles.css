@@ -1,3 +1,11 @@
+@font-face {
+  font-family: 'DM Sans';
+  src: url('./assets/fonts/dm-sans.woff2') format('woff2');
+  font-weight: 100 1000;
+  font-style: normal;
+  font-display: swap;
+}
+
 *,
 *::before,
 *::after {
@@ -5,28 +13,47 @@
 }
 
 :root {
-  font-family: Inter, system-ui, sans-serif;
-  color: #18202a;
-  background: #f7f8fa;
+  --paper: #f7f5fa;
+  --surface: #fff;
+  --ink: #261d34;
+  --muted: #665b76;
+  --accent: #6344ad;
+  --accent-ink: #51348e;
+  --accent-soft: #eee7fa;
+  --line: #e2dce9;
+  --control-border: #8e7d9c;
+  --radius: 14px;
+
+  font-family: 'DM Sans', 'Noto Sans', system-ui, sans-serif;
+  color: var(--ink);
+  background: var(--paper);
+  accent-color: var(--accent);
+  caret-color: var(--accent);
+  scroll-padding-block-end: 90px;
 }
 
 body {
   margin: 0;
 }
 
-:root {
-  --paper: #f1f3f6;
-  --ink: #232931;
-  --accent: #235eac;
-  --line: #cbd1d9;
-  color: var(--ink);
-  background: var(--paper);
-}
 h1 {
   font-size: 2rem;
   letter-spacing: -0.03em;
   line-height: 1.16;
+  text-wrap: balance;
 }
+
+.brand-mark.pi {
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  border-radius: 12px;
+  background: var(--accent-soft);
+  color: var(--accent-ink);
+}
+
 .class-filter {
   display: inline-flex;
   align-items: center;
@@ -41,17 +68,42 @@ select {
   font: inherit;
   color: var(--ink);
   padding: 0.5rem 0.65rem;
-  border: 1px solid var(--line);
+  border: 1px solid var(--control-border);
   border-radius: 10px;
-  background: white;
+  background: var(--surface);
 }
 :focus-visible {
-  outline: 2px solid #256bc6;
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+
+:is(.p-inputtext, .p-textarea):enabled {
+  border-color: var(--control-border);
+}
+
+:is(.p-inputtext, .p-textarea)::placeholder {
+  color: var(--muted);
+  opacity: 1;
+}
+
+:is(
+  .p-button,
+  .p-inputtext,
+  .p-textarea,
+  .p-datepicker-dropdown
+):focus-visible {
+  outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
+
+.p-button.p-button-danger {
+  --p-button-outlined-danger-color: #9f2837;
+  --p-button-text-danger-color: #9f2837;
+}
+
 ::selection {
   color: var(--ink);
-  background: #d8e8fc;
+  background: #e1d3f8;
 }
 
 @media (max-width: 600px) {

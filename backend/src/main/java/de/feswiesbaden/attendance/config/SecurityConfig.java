@@ -164,6 +164,7 @@ public class SecurityConfig {
                     .permitAll()
                     .requestMatchers(
                         HttpMethod.GET,
+                        "/api/assistant",
                         "/api/me",
                         "/api/class-options",
                         "/api/staff-id",
@@ -180,6 +181,9 @@ public class SecurityConfig {
                     .authenticated()
                     .requestMatchers(
                         HttpMethod.POST,
+                        "/api/assistant/messages",
+                        "/api/assistant/excusals/preview",
+                        "/api/assistant/excusals/{id}/confirm",
                         "/api/teachers",
                         "/api/rooms",
                         "/api/classes",
@@ -191,7 +195,11 @@ public class SecurityConfig {
                         "/api/students/{studentId}/attendance/{date}/status-periods",
                         "/api/students/{studentId}/attendance/{date}/school-day-excuses")
                     .authenticated()
-                    .requestMatchers(HttpMethod.GET, "/api/planning")
+                    .requestMatchers(
+                        HttpMethod.GET,
+                        "/api/planning",
+                        "/api/planning/classes/{classId}/week",
+                        "/api/planning/classes/{classId}/schedule")
                     .authenticated()
                     .requestMatchers(
                         HttpMethod.POST,

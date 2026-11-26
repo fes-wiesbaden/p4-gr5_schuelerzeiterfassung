@@ -8,6 +8,7 @@ import de.feswiesbaden.attendance.repository.AttendanceAccountingRepository;
 import de.feswiesbaden.attendance.repository.AttendanceAccountingRepository.Account;
 import de.feswiesbaden.attendance.repository.AttendanceAccountingRepository.Audit;
 import de.feswiesbaden.attendance.repository.AttendanceAccountingRepository.DayAttendance;
+import de.feswiesbaden.attendance.repository.AttendanceAccountingRepository.FullDay;
 import de.feswiesbaden.attendance.repository.AttendanceAccountingRepository.Period;
 import de.feswiesbaden.attendance.repository.AttendanceAccountingRepository.PlannedStatus;
 import de.feswiesbaden.attendance.repository.AttendanceAccountingRepository.Slot;
@@ -16,6 +17,9 @@ import de.feswiesbaden.attendance.repository.SchoolClassRepository;
 import de.feswiesbaden.attendance.repository.SchoolClassRepository.ClassPlan;
 import de.feswiesbaden.attendance.repository.StaffAccessRepository.StaffIdentity;
 import de.feswiesbaden.attendance.repository.StudentRepository;
+import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Positive;
+import jakarta.validation.constraints.Size;
 import java.time.Clock;
 import java.time.DayOfWeek;
 import java.time.Duration;
@@ -190,6 +194,9 @@ public class AttendanceAccountingService {
     var actor = authorization.currentStaff();
     requireStudentClassAccess(studentId, actor);
     var day = lockHistoryDay(studentId, date);
+    if (calculate(date, day.slots(), day.timeline(), day.now()).unexcusedSeconds() == 0) {
+      return false;
+    }
     var changes =
         AttendanceHistory.openAbsences(date, day.slots(), day.timeline()).stream()
             .map(
@@ -213,7 +220,13 @@ public class AttendanceAccountingService {
     if (minutes < 1 || requestId == null) {
       throw new IllegalArgumentException("INVALID_MANUAL_ABSENCE_MINUTES");
     }
-    var day = lockHistoryDay(studentId, date);
+    var day = lockEditableDay(studentId, date);
+    if (!date.isBefore(berlinDate(day.now()))
+        && !(date.equals(berlinDate(day.now()))
+            && wasPresent(day.audits())
+            && teachingTime(date, day.slots().getFirst().startsAt()).isBefore(day.now()))) {
+      throw new IllegalArgumentException("INVALID_ATTENDANCE_DATE");
+    }
     if (day.attendance() != null) {
       var recorded = accounting.findManualBooking(day.attendance().id(), requestId);
       if (recorded.isPresent()) {
@@ -251,6 +264,7 @@ public class AttendanceAccountingService {
       throw new IllegalArgumentException("INVALID_STATUS_TIME");
     }
     var day = lockEditableDay(studentId, date);
+    requireAllowedStatus(day, status);
     var changes = periodChanges(day.timeline(), status, from, until, actor.id(), true);
     return !changes.isEmpty() && reconcile(day, changes, null).changed();
   }
@@ -416,6 +430,7 @@ public class AttendanceAccountingService {
 
   private boolean applyStatusChange(
       Day day, AttendanceStatus status, Instant occurredAt, Long staffId) {
+    requireAllowedStatus(day, status);
     var at = LocalDateTime.ofInstant(occurredAt, ZoneOffset.UTC);
     return reconcile(
             day,
@@ -427,6 +442,165 @@ public class AttendanceAccountingService {
                 staffId,
                 null))
         .changed();
+  }
+
+  private static void requireAllowedStatus(Day day, AttendanceStatus status) {
+    if (status == AttendanceStatus.ABWESEND && wasPresent(day.audits())) {
+      throw new IllegalArgumentException("ATTENDANCE_ALREADY_PRESENT");
+    }
+  }
+
+  static boolean wasPresent(List<Audit> audits) {
+    return audits.stream().anyMatch(audit -> audit.status() == AttendanceStatus.ANWESEND);
+  }
+
+  /** Berechnet die Auswirkungen einer Entschuldigung ohne Buchung. */
+  @Transactional
+  public ExcusalImpact previewExcusal(Excusal request) {
+    return excusalImpact(excusalBookings(request, authorization.currentStaff()));
+  }
+
+  /** Prüft Vorschau und Rechte erneut und bucht alle bestätigten Schultage gemeinsam. */
+  @Transactional
+  public ExcusalImpact confirmExcusal(Excusal request, ExcusalImpact expected) {
+    var bookings = excusalBookings(request, authorization.currentStaff());
+    var current = excusalImpact(bookings);
+    if (!current.equals(expected) || !current.hasEffect()) {
+      throw new IllegalStateException("EXCUSAL_PREVIEW_CHANGED");
+    }
+    var account = bookings.getFirst().day().account();
+    for (var booking : bookings) {
+      account = reconcile(booking.day().withAccount(account), booking.change()).account();
+    }
+    return current;
+  }
+
+  /** Zeitfenster oder ganztägige Entschuldigung mit optionalem Grund in Berliner Ortszeit. */
+  public record Excusal(
+      @NotNull @Positive Long classId,
+      @NotNull @Positive Long studentId,
+      @NotNull LocalDate date,
+      LocalDate endDate,
+      LocalTime startsAt,
+      LocalTime endsAt,
+      AttendanceStatus status,
+      @Size(max = 250) String reason) {}
+
+  public record ExcusalImpact(long unexcusedRemoved, long excusedAdded, List<ExcusalDay> days) {
+    public boolean hasEffect() {
+      return !days.isEmpty();
+    }
+  }
+
+  public record ExcusalDay(
+      LocalDate date,
+      boolean pending,
+      AttendanceStatus before,
+      AttendanceStatus after,
+      long unexcusedRemoved,
+      long excusedAdded) {}
+
+  private record ExcusalBooking(Day day, Change change, ExcusalDay impact) {}
+
+  private List<ExcusalBooking> excusalBookings(Excusal request, StaffIdentity actor) {
+    authorization.requireClassAccess(request.classId(), actor);
+    if (!request.classId().equals(requireStudentClassAccess(request.studentId(), actor))) {
+      throw new IllegalArgumentException("STUDENT_NOT_FOUND");
+    }
+    var plan =
+        classes
+            .lockPlan(request.classId())
+            .orElseThrow(() -> new IllegalArgumentException("CLASS_NOT_FOUND"));
+    var endDate = request.endDate() == null ? request.date() : request.endDate();
+    var status = request.status() == null ? AttendanceStatus.ENTSCHULDIGT : request.status();
+    boolean timed = request.startsAt() != null || request.endsAt() != null;
+    if (!excused(status)
+        || endDate.isBefore(request.date())
+        || (!endDate.equals(request.date())
+            && (timed || status != AttendanceStatus.MIT_ATTEST_ENTSCHULDIGT))
+        || (timed && (request.startsAt() == null || request.endsAt() == null))) {
+      throw new IllegalArgumentException("INVALID_EXCUSAL_TIME");
+    }
+    if (request.date().isBefore(plan.startsOn()) || endDate.isAfter(plan.endsOn())) {
+      throw new IllegalArgumentException("ATTENDANCE_DAY_LOCKED_OR_UNPLANNED");
+    }
+    var periods = accounting.findPeriods(request.classId());
+    requirePlanPeriods(plan, periods);
+    var slots = accounting.findSlots(plan.timetableId());
+    var bookings = new ArrayList<ExcusalBooking>();
+    boolean scheduled = false;
+    for (var date = request.date(); !date.isAfter(endDate); date = date.plusDays(1)) {
+      if (slotsFor(plan, periods, slots, date).isEmpty()) {
+        continue;
+      }
+      scheduled = true;
+      var day = lockEditableDay(request.studentId(), date);
+      if (!request.classId().equals(day.plan().classId())) {
+        throw new IllegalArgumentException("STUDENT_NOT_FOUND");
+      }
+      var start =
+          timed
+              ? excusalBoundary(date, request.startsAt())
+              : teachingTime(date, day.slots().getFirst().startsAt());
+      var end =
+          timed
+              ? excusalBoundary(date, request.endsAt())
+              : teachingTime(date, day.slots().getLast().endsAt());
+      if (!start.isBefore(end) || (timed && end.isAfter(day.now()))) {
+        throw new IllegalArgumentException("INVALID_EXCUSAL_TIME");
+      }
+      var reason =
+          request.reason() == null || request.reason().isBlank() ? null : request.reason().strip();
+      var change =
+          new Change(
+              AuditEventType.TIMED_EXCUSAL,
+              null,
+              null,
+              start,
+              actor.id(),
+              null,
+              new ExcusalWindow(end, status, reason));
+      boolean pending = end.isAfter(day.now());
+      var through = pending ? end : day.now();
+      var before = calculate(date, day.slots(), day.timeline(), through);
+      var afterTimeline =
+          includePlannedStatuses(projectChanges(day, List.of(change)), day.plannedStatuses());
+      var after = calculate(date, day.slots(), afterTimeline, through);
+      if (before.unexcusedSeconds() > after.unexcusedSeconds()) {
+        bookings.add(
+            new ExcusalBooking(
+                day,
+                change,
+                new ExcusalDay(
+                    date,
+                    pending,
+                    fullDay(day, day.timeline(), before, through).status(),
+                    fullDay(day, afterTimeline, after, through).status(),
+                    before.unexcused() - after.unexcused(),
+                    after.excused() - before.excused())));
+      }
+    }
+    if (!scheduled) {
+      throw new IllegalArgumentException("ATTENDANCE_DAY_LOCKED_OR_UNPLANNED");
+    }
+    return bookings;
+  }
+
+  private static LocalDateTime excusalBoundary(LocalDate date, LocalTime time) {
+    var local = date.atTime(time);
+    var offsets = BERLIN.getRules().getValidOffsets(local);
+    if (offsets.size() != 1 || time.getNano() != 0) {
+      throw new IllegalArgumentException("INVALID_EXCUSAL_TIME");
+    }
+    return LocalDateTime.ofInstant(local.toInstant(offsets.getFirst()), ZoneOffset.UTC);
+  }
+
+  private static ExcusalImpact excusalImpact(List<ExcusalBooking> bookings) {
+    var days = bookings.stream().map(ExcusalBooking::impact).toList();
+    return new ExcusalImpact(
+        days.stream().mapToLong(ExcusalDay::unexcusedRemoved).sum(),
+        days.stream().mapToLong(ExcusalDay::excusedAdded).sum(),
+        days);
   }
 
   /** Liefert den Tagesstatus und die unentschuldigten Fehlminuten einer zugänglichen Klasse */
@@ -456,19 +630,58 @@ public class AttendanceAccountingService {
       }
       var timeline =
           includePlannedStatuses(dayAudits, plannedStatuses.getOrDefault(student.id(), List.of()));
+      var contribution = planned ? calculate(date, slots, timeline, now) : null;
+      var full = planned ? fullAbsenceStatus(date, slots, timeline, contribution, now) : null;
       long minutes =
           planned
-              ? calculate(date, slots, timeline, now).unexcused() + manualAbsenceMinutes(dayAudits)
+              ? contribution.unexcused() + manualAbsenceMinutes(dayAudits)
               : dayAudits.stream().mapToLong(Audit::unexcusedDelta).sum();
+      var status = statusAt(timeline, now);
+      boolean present = wasPresent(dayAudits);
+      if (status == AttendanceStatus.ABWESEND) {
+        status =
+            present
+                ? AttendanceStatus.ANWESEND
+                : displayedExcusal(timeline, slots, date, now, full);
+      }
       result.add(
           new DailyStudent(
               student.id(),
               student.firstName(),
               student.lastName(),
-              statusAt(timeline, now),
-              minutes));
+              status,
+              minutes,
+              present,
+              full,
+              manualAbsenceMinutes(dayAudits)));
     }
     return result;
+  }
+
+  private static AttendanceStatus displayedExcusal(
+      List<Audit> timeline,
+      List<Slot> slots,
+      LocalDate date,
+      LocalDateTime now,
+      AttendanceStatus full) {
+    var endOfLessons = slots.isEmpty() ? now : teachingTime(date, slots.getLast().endsAt());
+    var at =
+        full == AttendanceStatus.ENTSCHULDIGT && !endOfLessons.isAfter(now)
+            ? endOfLessons.minusSeconds(1)
+            : now;
+    return timeline.stream()
+        .filter(
+            audit ->
+                audit.excusalEndsAt() != null
+                    && !audit.occurredAt().isAfter(at)
+                    && audit.excusalEndsAt().isAfter(at))
+        .max(Comparator.comparing(Audit::id))
+        .map(
+            audit ->
+                audit.excusalStatus() == null
+                    ? AttendanceStatus.ENTSCHULDIGT
+                    : audit.excusalStatus())
+        .orElse(AttendanceStatus.ABWESEND);
   }
 
   /** Liefert vergangene Berliner Tagesdaten der Woche eines autorisierten Schülers */
@@ -492,6 +705,7 @@ public class AttendanceAccountingService {
     var weekStart = date.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY));
     var weekEnd = weekStart.plusDays(6);
     var audits = accounting.findStudentDayAudits(studentId, weekStart, weekEnd, today);
+    var fullAbsences = accounting.findFullAbsences(studentId, weekStart, weekEnd, today);
     var plannedStatuses = plannedByDate(studentId, weekStart, weekEnd, today, false);
     var resetDay =
         accounting
@@ -501,6 +715,13 @@ public class AttendanceAccountingService {
     var days = new ArrayList<HistoryDay>();
     for (var day = weekStart; !day.isAfter(weekEnd); day = day.plusDays(1)) {
       var dayPlans = plannedStatuses.getOrDefault(day, List.of());
+      var dayAudits = audits.getOrDefault(day, List.of());
+      var excusals =
+          dayAudits.stream()
+              .filter(audit -> audit.excusalEndsAt() != null)
+              .sorted(Comparator.comparing(Audit::occurredAt))
+              .map(ExcusalView::from)
+              .toList();
       var slots = day.isBefore(joined) ? List.<Slot>of() : readDaySlots(plan, day, now);
       if (hasOverlappingSlots(slots)) {
         slots = List.of();
@@ -521,11 +742,18 @@ public class AttendanceAccountingService {
               ? List.<PlannedStatusView>of()
               : dayPlans.stream().map(PlannedStatusView::from).toList();
       if (past || (elapsedToday && !lessonsRemaining)) {
-        var dayAudits = audits.getOrDefault(day, List.of());
         var timeline = slots.isEmpty() ? dayAudits : includePlannedStatuses(dayAudits, dayPlans);
         days.add(
             AttendanceHistory.describe(
-                day, slots, timeline, now, past && unlocked, canCorrectStatus, preview));
+                day,
+                slots,
+                timeline,
+                now,
+                past && unlocked,
+                canCorrectStatus,
+                preview,
+                fullAbsences.get(day),
+                excusals));
       } else {
         days.add(
             new HistoryDay(
@@ -537,10 +765,14 @@ public class AttendanceAccountingService {
                 null,
                 false,
                 false,
-                0,
+                manualAbsenceMinutes(dayAudits),
                 canCorrectStatus,
                 canPlanStatus,
-                preview));
+                preview,
+                null,
+                wasPresent(dayAudits),
+                unlocked && elapsedToday && wasPresent(dayAudits),
+                excusals));
       }
     }
     return new HistoryWeek(weekStart, weekEnd, days);
@@ -560,7 +792,22 @@ public class AttendanceAccountingService {
       long manualAbsenceMinutes,
       boolean canCorrectStatus,
       boolean canPlanStatus,
-      List<PlannedStatusView> plannedStatuses) {}
+      List<PlannedStatusView> plannedStatuses,
+      AttendanceStatus fullAbsence,
+      boolean wasPresent,
+      boolean canBookMinutes,
+      List<ExcusalView> excusals) {}
+
+  public record ExcusalView(
+      LocalTime startsAt, LocalTime endsAt, AttendanceStatus status, String reason) {
+    private static ExcusalView from(Audit audit) {
+      return new ExcusalView(
+          audit.occurredAt().toInstant(ZoneOffset.UTC).atZone(BERLIN).toLocalTime(),
+          audit.excusalEndsAt().toInstant(ZoneOffset.UTC).atZone(BERLIN).toLocalTime(),
+          audit.excusalStatus() == null ? AttendanceStatus.ENTSCHULDIGT : audit.excusalStatus(),
+          audit.excusalReason());
+    }
+  }
 
   public record PlannedStatusView(LocalTime startsAt, LocalTime endsAt, AttendanceStatus status) {
     private static PlannedStatusView from(PlannedStatus planned) {
@@ -630,6 +877,28 @@ public class AttendanceAccountingService {
    */
   public record CurrentClass(Long classId, Instant serverTime) {}
 
+  /** Liefert die gültigen Unterrichtszeiten der gewählten Berliner Schulwoche. */
+  @Transactional(readOnly = true)
+  public ClassWeek readClassWeek(Long classId, LocalDate date) {
+    authorization.requireClassAccess(classId, authorization.currentStaff());
+    var plan =
+        classes
+            .findPlan(classId, false)
+            .orElseThrow(() -> new IllegalArgumentException("CLASS_NOT_FOUND"));
+    var monday = date.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY));
+    var days = new TreeMap<LocalDate, List<Slot>>();
+    var periods = accounting.findPeriods(classId, false);
+    requirePlanPeriods(plan, periods);
+    var slots = accounting.findSlots(plan.timetableId(), false);
+    for (int index = 0; index < 5; index++) {
+      var day = monday.plusDays(index);
+      days.put(day, slotsFor(plan, periods, slots, day));
+    }
+    return new ClassWeek(plan.timetableId(), days);
+  }
+
+  public record ClassWeek(Long timetableId, Map<LocalDate, List<Slot>> days) {}
+
   /** Liefert geplante Slots des Tages, solange die Aufbewahrungsfrist des Plans läuft */
   private List<Slot> readDaySlots(ClassPlan plan, LocalDate date, LocalDateTime now) {
     if (!retained(plan, now) || date.isBefore(plan.startsOn()) || date.isAfter(plan.endsOn())) {
@@ -646,7 +915,10 @@ public class AttendanceAccountingService {
       String firstName,
       String lastName,
       AttendanceStatus status,
-      long unexcusedMinutes) {}
+      long unexcusedMinutes,
+      boolean wasPresent,
+      AttendanceStatus fullAbsence,
+      long manualAbsenceMinutes) {}
 
   /**
    * Rechnet beendete geplante Unterrichtstage je Schüler ab, je Klasse in einer eigenen
@@ -792,15 +1064,17 @@ public class AttendanceAccountingService {
 
   private Booking reconcile(Day day, List<Change> changes, ManualBooking manual) {
     var events = projectChanges(day, changes);
+    var timeline = includePlannedStatuses(events, day.plannedStatuses());
+    var target = calculate(day.date(), day.slots(), timeline, day.now());
+    var previous = day.attendance() == null ? FullDay.NONE : day.attendance().fullDay();
+    var full =
+        manual == null
+            ? fullDay(day, timeline, target, day.now())
+                .includingManualMinutes(manualAbsenceMinutes(day.audits()))
+            : previous.includingManualMinutes(manual.minutes());
     int unexcusedDelta;
     int excusedDelta;
     if (manual == null) {
-      var target =
-          calculate(
-              day.date(),
-              day.slots(),
-              includePlannedStatuses(events, day.plannedStatuses()),
-              day.now());
       unexcusedDelta =
           Math.toIntExact(
               target.unexcused()
@@ -814,7 +1088,13 @@ public class AttendanceAccountingService {
       excusedDelta = 0;
     }
     if (events.size() == day.audits().size() && unexcusedDelta == 0 && excusedDelta == 0) {
-      return new Booking(day.account(), false);
+      if (full.equals(previous)) {
+        return new Booking(day.account(), false);
+      }
+      if (day.attendance() != null) {
+        accounting.updateFullDay(day.account().id(), day.attendance().id(), previous, full);
+        return new Booking(day.account(), false);
+      }
     }
     var account =
         new Account(
@@ -845,13 +1125,51 @@ public class AttendanceAccountingService {
           manual == null ? null : manual.requestId());
     }
     accounting.updateTotals(account, attendanceId, status, day.now());
+    if (!full.equals(previous)) {
+      accounting.updateFullDay(account.id(), attendanceId, previous, full);
+    }
     return new Booking(account, true);
+  }
+
+  private static FullDay fullDay(
+      Day day, List<Audit> timeline, Contribution contribution, LocalDateTime through) {
+    var status = fullAbsenceStatus(day.date(), day.slots(), timeline, contribution, through);
+    return status == null
+        ? FullDay.NONE
+        : new FullDay(
+            status,
+            Math.toIntExact(contribution.unexcused()),
+            Math.toIntExact(contribution.excused()));
+  }
+
+  static AttendanceStatus fullAbsenceStatus(
+      LocalDate date,
+      List<Slot> slots,
+      List<Audit> timeline,
+      Contribution contribution,
+      LocalDateTime through) {
+    if (slots.isEmpty()
+        || hasOverlappingSlots(slots)
+        || teachingTime(date, slots.getLast().endsAt()).isAfter(through)
+        || wasPresent(timeline)) {
+      return null;
+    }
+    long teachingSeconds =
+        slots.stream()
+            .mapToLong(slot -> Duration.between(slot.startsAt(), slot.endsAt()).getSeconds())
+            .sum();
+    if (contribution.unexcusedSeconds() + contribution.excusedSeconds() != teachingSeconds) {
+      return null;
+    }
+    return contribution.unexcusedSeconds() > 0
+        ? AttendanceStatus.ABWESEND
+        : AttendanceStatus.ENTSCHULDIGT;
   }
 
   private static List<Audit> projectChanges(Day day, List<Change> changes) {
     var events = new ArrayList<>(day.audits());
     for (var change : changes) {
-      if (change.before() != change.after()) {
+      if (change.before() != change.after() || change.excusal() != null) {
         events.add(audit(day, change, Long.MAX_VALUE, null, 0, 0));
       }
     }
@@ -874,6 +1192,9 @@ public class AttendanceAccountingService {
         day.deletionDateId(),
         change.type(),
         change.at(),
+        change.excusal() == null ? null : change.excusal().end(),
+        change.excusal() == null ? null : change.excusal().status(),
+        change.excusal() == null ? null : change.excusal().reason(),
         statusChange ? change.after() : null,
         unexcusedDelta,
         excusedDelta,
@@ -968,7 +1289,10 @@ public class AttendanceAccountingService {
                         ? deletionDateId.equals(audit.deletionDateId())
                         : attendanceIds.contains(audit.attendanceId()))
             .toList();
-    if (audits.stream().anyMatch(audit -> audit.occurredAt().isAfter(now))) {
+    if (audits.stream()
+        .anyMatch(
+            audit ->
+                audit.type() != AuditEventType.TIMED_EXCUSAL && audit.occurredAt().isAfter(now))) {
       throw new IllegalStateException("INVALID_ATTENDANCE_HISTORY");
     }
     if (audits.stream()
@@ -1143,6 +1467,11 @@ public class AttendanceAccountingService {
     if (events.stream().anyMatch(event -> !berlinDate(event.occurredAt()).equals(date))) {
       throw new IllegalStateException("INVALID_ATTENDANCE_HISTORY");
     }
+    var excusals =
+        audits.stream()
+            .filter(audit -> audit.excusalEndsAt() != null)
+            .sorted(Comparator.comparing(Audit::occurredAt))
+            .toList();
     long unexcused = 0;
     long excused = 0;
     for (Slot slot : slots) {
@@ -1162,7 +1491,9 @@ public class AttendanceAccountingService {
         } else if (at.isBefore(end)) {
           long seconds = Duration.between(cursor, at).getSeconds();
           if (status == AttendanceStatus.ABWESEND) {
-            unexcused += seconds;
+            long covered = excusedSeconds(excusals, cursor, at);
+            unexcused += seconds - covered;
+            excused += covered;
           } else if (excused(status)) {
             excused += seconds;
           }
@@ -1172,12 +1503,34 @@ public class AttendanceAccountingService {
       }
       long seconds = Duration.between(cursor, end).getSeconds();
       if (status == AttendanceStatus.ABWESEND) {
-        unexcused += seconds;
+        long covered = excusedSeconds(excusals, cursor, end);
+        unexcused += seconds - covered;
+        excused += covered;
       } else if (excused(status)) {
         excused += seconds;
       }
     }
-    return new Contribution(unexcused / 60, excused / 60);
+    return new Contribution(unexcused, excused);
+  }
+
+  /** Zählt die gemeinsame Abdeckung eines Abschnitts durch die sortierten Entschuldigungen */
+  private static long excusedSeconds(List<Audit> excusals, Instant start, Instant end) {
+    long covered = 0;
+    var cursor = start;
+    for (Audit excusal : excusals) {
+      var from = excusal.occurredAt().toInstant(ZoneOffset.UTC);
+      if (!from.isBefore(end)) {
+        break;
+      }
+      var until = excusal.excusalEndsAt().toInstant(ZoneOffset.UTC);
+      var overlapStart = from.isAfter(cursor) ? from : cursor;
+      var overlapEnd = until.isBefore(end) ? until : end;
+      if (overlapEnd.isAfter(overlapStart)) {
+        covered += Duration.between(overlapStart, overlapEnd).getSeconds();
+        cursor = overlapEnd;
+      }
+    }
+    return covered;
   }
 
   /** Prüft, ob der Status zum entschuldigten Minutenkonto beiträgt */
@@ -1199,7 +1552,15 @@ public class AttendanceAccountingService {
   }
 
   /** Enthält die berechneten unentschuldigten und entschuldigten Tagesminuten */
-  record Contribution(long unexcused, long excused) {}
+  record Contribution(long unexcusedSeconds, long excusedSeconds) {
+    long unexcused() {
+      return unexcusedSeconds / 60;
+    }
+
+    long excused() {
+      return excusedSeconds / 60;
+    }
+  }
 
   /**
    * Enthält Tagesanwesenheiten, deren Änderungsprotokolle und den Berliner Tag des letzten
@@ -1229,6 +1590,11 @@ public class AttendanceAccountingService {
     List<Audit> timeline() {
       return includePlannedStatuses(audits, plannedStatuses);
     }
+
+    Day withAccount(Account updated) {
+      return new Day(
+          plan, updated, date, deletionDateId, slots, attendance, audits, plannedStatuses, now);
+    }
   }
 
   /**
@@ -1241,11 +1607,24 @@ public class AttendanceAccountingService {
       AttendanceStatus after,
       LocalDateTime at,
       Long staffId,
-      Integer terminalId) {}
+      Integer terminalId,
+      ExcusalWindow excusal) {
+    Change(
+        AuditEventType type,
+        AttendanceStatus before,
+        AttendanceStatus after,
+        LocalDateTime at,
+        Long staffId,
+        Integer terminalId) {
+      this(type, before, after, at, staffId, terminalId, null);
+    }
+  }
 
   /**
    * Enthält die resultierenden Fehlminutenkonten und gibt an, ob ein Änderungsprotokoll geschrieben
    * wurde
    */
+  private record ExcusalWindow(LocalDateTime end, AttendanceStatus status, String reason) {}
+
   private record Booking(Account account, boolean changed) {}
 }

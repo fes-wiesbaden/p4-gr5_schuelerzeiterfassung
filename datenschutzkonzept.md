@@ -39,6 +39,8 @@ Jede automatische, terminalbasierte oder manuelle Anwesenheits- und Minutenände
 
 ## Entwicklung und Betrieb
 
+Der Codex-Chat ist als optionale Entwicklungsdemo mit fiktiven Testdaten vorgesehen. Bei aktivierter Demo wird die Texteingabe mit einem kurzen Chatverlauf zur Verarbeitung an OpenAI gesendet. Klassenlisten, Vorschauen und die Buchung bestätigter Entschuldigungen verarbeitet die Anwendung über ihr eigenes Backend. Eine später zugestellte gültige Anwesenheitsbuchung kann den Umfang einer befristeten Entschuldigung im Änderungsprotokoll korrigieren.
+
 Während der Entwicklung verwenden wir ausschließlich fiktive Testdaten. Echte Schülerdaten, RFID-UIDs, Zugangsdaten und sensible Screenshots gehören nicht in Quellcode, Git, Tickets oder Dokumentation. Jede neue Schnittstelle und Anzeige wird darauf geprüft, nur die für ihre Aufgabe notwendigen Daten bereitzustellen.<br><br>
 
 

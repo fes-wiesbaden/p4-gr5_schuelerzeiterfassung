@@ -39,6 +39,13 @@ public class TimetableRepository {
     return !jdbc.queryForList("SELECT id FROM room WHERE id = ?", Long.class, roomId).isEmpty();
   }
 
+  /** Prüft, ob Personal mit Lehrkraftrolle für den Unterricht ausgewählt wurde. */
+  public boolean teacherExists(Long teacherId) {
+    return !jdbc.queryForList(
+            "SELECT id FROM staff WHERE id = ? AND role = 'LEHRKRAFT'", Long.class, teacherId)
+        .isEmpty();
+  }
+
   /**
    * Prüft, ob der Stundenplan am angegebenen Wochentag bereits einen zeitlich überlappenden Slot
    * enthält
@@ -103,7 +110,8 @@ public class TimetableRepository {
     return jdbc
         .query(
             """
-            SELECT id, series_id, weekday, start_time, valid_from, valid_until FROM timetable_slot
+            SELECT id, series_id, weekday, start_time, valid_from, valid_until, learning_field, teacher_id
+            FROM timetable_slot
             WHERE id = ? AND timetable_id = ? AND valid_until IS NULL FOR UPDATE
             """,
             this::slotVersion,
@@ -117,7 +125,8 @@ public class TimetableRepository {
   public List<SlotVersion> lockPredecessors(Long timetableId, Long seriesId, LocalDate today) {
     return jdbc.query(
         """
-        SELECT id, series_id, weekday, start_time, valid_from, valid_until FROM timetable_slot
+        SELECT id, series_id, weekday, start_time, valid_from, valid_until, learning_field, teacher_id
+            FROM timetable_slot
         WHERE timetable_id = ? AND (id = ? OR series_id = ?) AND valid_until > ?
         ORDER BY id FOR UPDATE
         """,
@@ -137,7 +146,9 @@ public class TimetableRepository {
         Weekday.valueOf(row.getString("weekday")),
         row.getObject("start_time", LocalTime.class),
         row.getObject("valid_from", LocalDate.class),
-        row.getObject("valid_until", LocalDate.class));
+        row.getObject("valid_until", LocalDate.class),
+        row.getString("learning_field"),
+        row.getObject("teacher_id", Long.class));
   }
 
   /** Entfernt die angegebene Slotfassung */
@@ -161,15 +172,17 @@ public class TimetableRepository {
       LocalTime startsAt,
       LocalTime endsAt,
       LocalDate validFrom,
-      Long seriesId) {
+      Long seriesId,
+      String learningField,
+      Long teacherId) {
     var key = new GeneratedKeyHolder();
     jdbc.update(
         connection -> {
           var insert =
               connection.prepareStatement(
                   "INSERT INTO timetable_slot"
-                      + " (timetable_id, room_id, weekday, start_time, end_time, valid_from, series_id)"
-                      + " VALUES (?, ?, ?, ?, ?, ?, ?)",
+                      + " (timetable_id, room_id, weekday, start_time, end_time, valid_from, series_id,"
+                      + " learning_field, teacher_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                   Statement.RETURN_GENERATED_KEYS);
           insert.setLong(1, timetableId);
           insert.setLong(2, roomId);
@@ -178,6 +191,8 @@ public class TimetableRepository {
           insert.setObject(5, endsAt);
           insert.setObject(6, validFrom);
           insert.setObject(7, seriesId);
+          insert.setString(8, learningField);
+          insert.setObject(9, teacherId);
           return insert;
         },
         key);
@@ -191,7 +206,9 @@ public class TimetableRepository {
       Weekday weekday,
       LocalTime startsAt,
       LocalDate validFrom,
-      LocalDate validUntil) {}
+      LocalDate validUntil,
+      String learningField,
+      Long teacherId) {}
 
   /** Enthält die Terminmerkmale einer möglichen Raumüberschneidung */
   public record RoomOverlap(Weekday weekday, LocalDate startsOn, LocalDate endsOn) {}

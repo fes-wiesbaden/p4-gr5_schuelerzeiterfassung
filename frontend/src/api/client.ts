@@ -54,8 +54,8 @@ export function deleteResource(url: string): Promise<Response> {
   })
 }
 
-export function getJson(url: string): Promise<Response> {
-  return request(url, {})
+export function getJson(url: string, signal?: AbortSignal): Promise<Response> {
+  return request(url, { signal })
 }
 
 export async function changeData(
@@ -87,8 +87,11 @@ export async function changeData(
     )
 }
 
-export async function loadData<T>(url: string): Promise<T> {
-  const response = await getJson(url)
+export async function loadData<T>(
+  url: string,
+  signal?: AbortSignal
+): Promise<T> {
+  const response = await getJson(url, signal)
   if (!response.ok) throw new Error('Daten konnten nicht geladen werden.')
   return response.json()
 }

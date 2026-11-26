@@ -20,7 +20,10 @@ import org.springframework.stereotype.Repository;
 public class StudentRepository {
   private static final String STUDENT_COLUMNS =
       "SELECT id, first_name, last_name, birth_date, school_class_id,"
-          + " unexcused_minutes_account, excused_minutes_account FROM student";
+          + " unexcused_minutes_account, excused_minutes_account,"
+          + " unexcused_days_account, excused_days_account,"
+          + " (unexcused_minutes_account - full_unexcused_minutes_account) DIV 45 AS unexcused_hours,"
+          + " (excused_minutes_account - full_excused_minutes_account) DIV 45 AS excused_hours FROM student";
 
   private final JdbcTemplate jdbc;
 
@@ -154,7 +157,11 @@ public class StudentRepository {
         row.getDate("birth_date").toLocalDate(),
         row.getLong("school_class_id"),
         row.getInt("unexcused_minutes_account"),
-        row.getInt("excused_minutes_account"));
+        row.getInt("excused_minutes_account"),
+        row.getInt("unexcused_days_account"),
+        row.getInt("excused_days_account"),
+        row.getInt("unexcused_hours"),
+        row.getInt("excused_hours"));
   }
 
   /** Enthält Schülerstammdaten, Klasse und Minutenkonten ohne Kartenkennung */
@@ -165,7 +172,11 @@ public class StudentRepository {
       LocalDate birthDate,
       Long classId,
       int unexcusedMinutes,
-      int excusedMinutes) {}
+      int excusedMinutes,
+      int unexcusedDays,
+      int excusedDays,
+      int unexcusedHours,
+      int excusedHours) {}
 
   /** Enthält die Schülerdaten für die Zuordnung zur Tagesanwesenheit */
   public record AttendanceStudent(

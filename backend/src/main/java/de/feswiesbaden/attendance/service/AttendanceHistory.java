@@ -6,6 +6,7 @@ import de.feswiesbaden.attendance.enums.AttendanceStatus;
 import de.feswiesbaden.attendance.repository.AttendanceAccountingRepository.Audit;
 import de.feswiesbaden.attendance.repository.AttendanceAccountingRepository.Slot;
 import de.feswiesbaden.attendance.service.AttendanceAccountingService.AbsenceLevel;
+import de.feswiesbaden.attendance.service.AttendanceAccountingService.ExcusalView;
 import de.feswiesbaden.attendance.service.AttendanceAccountingService.HistoryDay;
 import de.feswiesbaden.attendance.service.AttendanceAccountingService.PlannedStatusView;
 import java.time.Duration;
@@ -27,13 +28,16 @@ final class AttendanceHistory {
       LocalDateTime now,
       boolean editable,
       boolean canCorrectStatus,
-      List<PlannedStatusView> preview) {
+      List<PlannedStatusView> preview,
+      AttendanceStatus storedFullAbsence,
+      List<ExcusalView> excusals) {
     var presence = firstPresence(audits);
     long manual = AttendanceAccountingService.manualAbsenceMinutes(audits);
     if (slots.isEmpty()) {
       if (audits.isEmpty()) {
         return new HistoryDay(
-            date, null, null, null, false, null, false, false, 0, false, false, List.of());
+            date, null, null, null, false, null, false, false, 0, false, false, List.of(), null,
+            false, false, excusals);
       }
       long unexcused = audits.stream().mapToLong(Audit::unexcusedDelta).sum();
       long excused = audits.stream().mapToLong(Audit::excusedDelta).sum();
@@ -49,18 +53,21 @@ final class AttendanceHistory {
           manual,
           false,
           false,
-          List.of());
+          List.of(),
+          storedFullAbsence,
+          AttendanceAccountingService.wasPresent(audits),
+          false,
+          excusals);
     }
 
     var teaching = teachingWindows(date, slots);
-    var absences = openAbsences(teaching, audits);
+    var minutes = AttendanceAccountingService.calculate(date, slots, audits, now);
     long plannedSeconds = teaching.stream().mapToLong(Window::seconds).sum();
-    long unexcusedSeconds = absences.stream().mapToLong(OpenAbsence::seconds).sum();
+    long unexcusedSeconds = minutes.unexcusedSeconds();
     var level =
         unexcusedSeconds == 0 && manual == 0
             ? null
             : unexcusedSeconds == plannedSeconds ? AbsenceLevel.FULL : AbsenceLevel.PARTIAL;
-    var minutes = AttendanceAccountingService.calculate(date, slots, audits, now);
     Long lateMinutes =
         presence == null
             ? null
@@ -72,12 +79,16 @@ final class AttendanceHistory {
         lateMinutes,
         presence == null,
         level,
-        editable && !absences.isEmpty(),
+        editable && unexcusedSeconds > 0,
         editable,
         manual,
         canCorrectStatus,
         false,
-        preview);
+        preview,
+        AttendanceAccountingService.fullAbsenceStatus(date, slots, audits, minutes, now),
+        AttendanceAccountingService.wasPresent(audits),
+        editable || (canCorrectStatus && AttendanceAccountingService.wasPresent(audits)),
+        excusals);
   }
 
   static List<OpenAbsence> openAbsences(LocalDate date, List<Slot> slots, List<Audit> audits) {

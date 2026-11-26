@@ -1,0 +1,320 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "kind": {
+      "type": "string",
+      "enum": [
+        "answer",
+        "navigate",
+        "excusal",
+        "command"
+      ]
+    },
+    "answer": {
+      "type": "string"
+    },
+    "route": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "enum": [
+        null,
+        "live-anwesenheit",
+        "klassen",
+        "schueler",
+        "planung",
+        "raeume",
+        "personal"
+      ]
+    },
+    "studentName": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "classCode": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "date": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "startsAt": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "endsAt": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "scope": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "enum": [
+        "time",
+        "day",
+        "range",
+        null
+      ]
+    },
+    "endDate": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "status": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "enum": [
+        "ENTSCHULDIGT",
+        "BETRIEBLICH_ENTSCHULDIGT",
+        "MIT_ATTEST_ENTSCHULDIGT",
+        null
+      ]
+    },
+    "reason": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "command": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "key": {
+          "type": "string",
+          "enum": [
+            "read_student",
+            "read_attendance",
+            "read_timetable",
+            "create_student",
+            "update_student",
+            "delete_student",
+            "add_absence_minutes",
+            "excuse_open",
+            "excuse_school_day",
+            "correct_status",
+            "correct_period",
+            "create_class",
+            "update_class",
+            "delete_class",
+            "change_block_plan",
+            "reset_accounts",
+            "create_timetable",
+            "add_slot",
+            "update_slot",
+            "delete_slot",
+            "create_block_plan",
+            "add_block",
+            "assign_block",
+            "create_room",
+            "update_room",
+            "delete_room",
+            "create_teacher",
+            "update_teacher",
+            "delete_teacher",
+            "assign_rfid",
+            "remove_rfid",
+            "read_week",
+            "read_history"
+          ]
+        },
+        "fields": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "studentName": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "classCode": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "firstName": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "lastName": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "birthDate": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "date": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "endDate": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "startsAt": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "endsAt": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "status": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "minutes": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "name": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "weekday": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "timetable": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "slot": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "room": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "blockPlan": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "block": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "teacher": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "username": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "learningField": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "studentName",
+            "classCode",
+            "firstName",
+            "lastName",
+            "birthDate",
+            "date",
+            "endDate",
+            "startsAt",
+            "endsAt",
+            "status",
+            "minutes",
+            "name",
+            "weekday",
+            "timetable",
+            "slot",
+            "room",
+            "blockPlan",
+            "block",
+            "teacher",
+            "username",
+            "learningField"
+          ]
+        }
+      },
+      "required": [
+        "key",
+        "fields"
+      ]
+    }
+  },
+  "required": [
+    "kind",
+    "answer",
+    "route",
+    "studentName",
+    "classCode",
+    "date",
+    "startsAt",
+    "endsAt",
+    "scope",
+    "endDate",
+    "status",
+    "reason",
+    "command"
+  ]
+}

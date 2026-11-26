@@ -7,6 +7,9 @@ import DataTable from 'primevue/datatable'
 import DatePicker from 'primevue/datepicker'
 import InputText from 'primevue/inputtext'
 import Tag from 'primevue/tag'
+import GermanTimeInput from './GermanTimeInput.vue'
+import { STATUS_LABELS } from '@/api/attendance'
+import { toCalendarDate } from '@/dateTime'
 import {
   addManualAbsence,
   correctStatusPeriod,
@@ -17,7 +20,11 @@ import {
   type HistoryWeek
 } from '@/api/attendanceHistory'
 
-const props = defineProps<{ studentId: number }>()
+const props = defineProps<{
+  studentId: number
+  initialDate?: string
+  revision?: number
+}>()
 const emit = defineEmits<{ corrected: [] }>()
 
 const berlinDate = new Intl.DateTimeFormat('sv-SE', {
@@ -41,7 +48,12 @@ const berlinClock = new Intl.DateTimeFormat('de-DE', {
 })
 
 function canSelectDay(entry: HistoryDay) {
-  return entry.editable || entry.canCorrectStatus || entry.canPlanStatus
+  return (
+    entry.editable ||
+    entry.canBookMinutes ||
+    entry.canCorrectStatus ||
+    entry.canPlanStatus
+  )
 }
 
 const today = new Date(`${berlinDate.format(new Date())}T12:00:00`)
@@ -49,7 +61,16 @@ const lastPreview = new Date(today)
 const daysUntilSunday = (7 - today.getDay()) % 7
 lastPreview.setDate(today.getDate() + daysUntilSunday + 14)
 
-const selectedDate = ref<Date | null>(today)
+const selectedDate = ref<Date | null>(
+  toCalendarDate(props.initialDate ?? '') ?? today
+)
+watch(
+  () => props.initialDate,
+  (initialDate) => {
+    const requested = toCalendarDate(initialDate ?? '')
+    if (requested) selectedDate.value = requested
+  }
+)
 const week = ref<HistoryWeek>()
 const loadingWeek = ref(false)
 const saving = ref(false)
@@ -72,17 +93,18 @@ const day = computed(() =>
 watch(
   () => day.value?.canExcuseOpenAbsences,
   (canExcuse) => {
-    if (!canExcuse && action.value === 'excuse') action.value = 'minutes'
+    if (!canExcuse && action.value === 'excuse')
+      action.value = canAddMinutes(day.value) ? 'minutes' : 'status'
   }
 )
-const statuses = [
-  { value: 'ANWESEND', label: 'Anwesend' },
-  { value: 'ABWESEND', label: 'Abwesend' },
-  { value: 'ENTSCHULDIGT', label: 'Entschuldigt' },
-  { value: 'MIT_ATTEST_ENTSCHULDIGT', label: 'Mit Attest entschuldigt' },
-  { value: 'BETRIEBLICH_ENTSCHULDIGT', label: 'Betrieblich entschuldigt' },
-  { value: 'BETRIEB', label: 'Betrieb' }
-]
+const statuses = Object.entries(STATUS_LABELS).map(([value, label]) => ({
+  value,
+  label
+}))
+
+function canAddMinutes(entry?: HistoryDay) {
+  return Boolean(entry?.canBookMinutes ?? entry?.editable)
+}
 
 const futureStatuses = new Set(['ENTSCHULDIGT', 'BETRIEBLICH_ENTSCHULDIGT'])
 const planningStatus = computed(() => {
@@ -110,13 +132,15 @@ const submitLabel = computed(() => {
   return planningStatus.value ? 'Status vormerken' : 'Status speichern'
 })
 const statusOptions = computed(() =>
-  planningStatus.value
-    ? statuses.filter((item) => futureStatuses.has(item.value))
-    : statuses
+  statuses.filter(
+    ({ value }) =>
+      (!planningStatus.value || futureStatuses.has(value)) &&
+      (value !== 'ABWESEND' || !day.value?.wasPresent)
+  )
 )
 
-watch(planningStatus, (planning) => {
-  if (planning && !futureStatuses.has(status.value)) {
+watch(statusOptions, (options) => {
+  if (!options.some(({ value }) => value === status.value)) {
     status.value = 'BETRIEBLICH_ENTSCHULDIGT'
   }
 })
@@ -133,7 +157,7 @@ function selectDay(entry: HistoryDay) {
   if (!canSelectDay(entry) || saving.value || selectedDay.value === entry.date)
     return
   selectedDay.value = entry.date
-  action.value = entry.editable ? 'minutes' : 'status'
+  action.value = canAddMinutes(entry) ? 'minutes' : 'status'
   status.value = 'BETRIEBLICH_ENTSCHULDIGT'
   minutes.value = ''
   wholeSchoolDay.value = false
@@ -159,7 +183,8 @@ function noPlannedLessons(entry: HistoryDay) {
   return (
     entry.date > dateString(today) &&
     !entry.canPlanStatus &&
-    !entry.plannedStatuses?.length
+    !entry.plannedStatuses?.length &&
+    !entry.excusals?.length
   )
 }
 
@@ -172,6 +197,7 @@ function formatMinutes(minutes: number | null) {
 }
 
 function formatTotal(day: HistoryDay) {
+  if (day.fullAbsence) return '1 Tag'
   if (day.unexcusedMinutes === null || day.excusedMinutes === null) return '—'
   return formatMinutes(day.unexcusedMinutes + day.excusedMinutes)
 }
@@ -197,7 +223,7 @@ function rowClass(entry: HistoryDay) {
 }
 
 watch(
-  [() => props.studentId, selectedDate],
+  [() => props.studentId, selectedDate, () => props.revision],
   async ([id, date], _, onCleanup) => {
     let current = true
     onCleanup(() => (current = false))
@@ -231,6 +257,7 @@ async function submitDay() {
   let send: () => Promise<Response>
   let requestKey: string | undefined
   if (action.value === 'minutes') {
+    if (!canAddMinutes(entry)) return
     const count = Number(minutes.value)
     if (!Number.isInteger(count) || count < 1 || count > 2147483647) return
     if (
@@ -274,7 +301,9 @@ async function submitDay() {
       fail(
         problem.code === 'OVERLAPPING_PLANNED_ATTENDANCE_STATUS'
           ? 'Für einen Teil dieses Zeitraums ist bereits ein Status vorgemerkt.'
-          : 'Der Tag wurde geändert oder ist gesperrt.'
+          : problem.code === 'ATTENDANCE_ALREADY_PRESENT'
+            ? 'Für diesen Tag wurde bereits Anwesenheit erfasst. Du kannst Fehlminuten hinzufügen.'
+            : 'Der Tag wurde geändert oder ist gesperrt.'
       )
     } else if (!response.ok) {
       fail(
@@ -345,7 +374,7 @@ async function submitDay() {
           <label>
             Aktion
             <select v-model="action">
-              <option v-if="day.editable" value="minutes">
+              <option v-if="canAddMinutes(day)" value="minutes">
                 Fehlminuten hinzufügen
               </option>
               <option v-if="day.canExcuseOpenAbsences" value="excuse">
@@ -366,7 +395,11 @@ async function submitDay() {
             />
           </label>
           <label v-if="action === 'status'" class="whole-school-day">
-            <Checkbox v-model="wholeSchoolDay" binary />
+            <Checkbox
+              v-model="wholeSchoolDay"
+              binary
+              input-id="whole-school-day"
+            />
             <span>Ganzen Schultag entschuldigen</span>
           </label>
           <template v-if="action === 'status' && !wholeSchoolDay">
@@ -384,11 +417,11 @@ async function submitDay() {
             </label>
             <label>
               <span>Von</span>
-              <InputText v-model="startsAt" type="time" required />
+              <GermanTimeInput v-model="startsAt" label="Von" required />
             </label>
             <label>
               <span>Bis</span>
-              <InputText v-model="endsAt" type="time" required />
+              <GermanTimeInput v-model="endsAt" label="Bis" required />
             </label>
           </template>
           <Button
@@ -456,6 +489,20 @@ async function submitDay() {
                 ·
                 {{ statusLabel(planned.status) }}
               </small>
+              <small
+                v-for="(excusal, index) in data.excusals"
+                :key="index"
+                class="planned-status"
+              >
+                {{ statusLabel(excusal.status) }} ·
+                {{ formatPlannedTime(excusal.startsAt) }}–{{
+                  formatPlannedTime(excusal.endsAt)
+                }}
+                Uhr
+                <span v-if="excusal.reason" class="excusal-reason">{{
+                  excusal.reason
+                }}</span>
+              </small>
               <small v-if="noPlannedLessons(data)" class="planned-status">
                 Kein Unterricht geplant
               </small>
@@ -469,14 +516,27 @@ async function submitDay() {
           </Column>
           <Column header="Entschuldigt">
             <template #body="{ data }">
-              <span>{{ formatMinutes(data.excusedMinutes) }}</span>
+              <span>{{
+                data.fullAbsence
+                  ? data.fullAbsence === 'ENTSCHULDIGT'
+                    ? '1 Tag'
+                    : '—'
+                  : formatMinutes(data.excusedMinutes)
+              }}</span>
             </template>
           </Column>
           <Column header="Unentschuldigt">
             <template #body="{ data }">
-              <span>{{ formatMinutes(data.unexcusedMinutes) }}</span>
+              <span>{{
+                data.fullAbsence
+                  ? data.fullAbsence === 'ABWESEND'
+                    ? '1 Tag'
+                    : '—'
+                  : formatMinutes(data.unexcusedMinutes)
+              }}</span>
               <small v-if="data.manualAbsenceMinutes" class="manual-minutes">
-                Davon manuell: {{ formatMinutes(data.manualAbsenceMinutes) }}
+                Zusätzlich erfasst:
+                {{ formatMinutes(data.manualAbsenceMinutes) }}
               </small>
             </template>
           </Column>
@@ -504,8 +564,21 @@ async function submitDay() {
   gap: 0.5rem 1rem;
 }
 
+.attendance-history {
+  min-width: 0;
+}
+
+.attendance-history h2 {
+  margin: 0 0 12px;
+  font-size: 1.35rem;
+}
+
 .history-toolbar {
   align-items: start;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
 }
 
 .history-actions {
@@ -518,6 +591,11 @@ async function submitDay() {
   padding: 0;
   margin: 0;
   min-width: 0;
+}
+
+.history-actions legend {
+  margin-bottom: 6px;
+  font-weight: 650;
 }
 
 .history-actions label {
@@ -543,8 +621,9 @@ async function submitDay() {
 
 .day-select {
   font: inherit;
-  color: var(--accent);
+  color: var(--accent-ink);
   text-decoration: underline;
+  text-underline-offset: 3px;
   background: transparent;
   cursor: pointer;
   border: 0;
@@ -556,8 +635,13 @@ async function submitDay() {
   display: block;
 }
 
-.history-table :deep(.history-selected > td:first-child) {
-  box-shadow: inset 3px 0 var(--accent);
+.history-table :deep(.history-selected .day-select) {
+  color: var(--accent-ink);
+  font-weight: 700;
+}
+
+.history-table :deep(.history-selected > td) {
+  background: var(--accent-soft);
 }
 
 .week-navigation {
@@ -579,10 +663,18 @@ async function submitDay() {
 
 .history-table {
   overflow-x: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
 }
 
 .history-table :deep(td) {
   white-space: nowrap;
+}
+
+.history-table :deep(td:first-child) {
+  min-width: 10rem;
+  max-width: 15rem;
+  white-space: normal;
 }
 
 .history-table p[role='alert'] {
@@ -625,5 +717,9 @@ async function submitDay() {
 h3 {
   margin-top: 1rem;
   font-size: 1.125rem;
+}
+.excusal-reason {
+  display: block;
+  overflow-wrap: anywhere;
 }
 </style>

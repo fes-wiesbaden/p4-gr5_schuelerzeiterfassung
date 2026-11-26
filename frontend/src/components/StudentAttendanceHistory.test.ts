@@ -178,8 +178,8 @@ it('blättert zwei Kalenderwochen vor und merkt nur die erlaubten Status vor', a
   ).toEqual(['status'])
   expect(
     status?.findAll('option').map((option) => option.element.value)
-  ).toEqual(['ENTSCHULDIGT', 'BETRIEBLICH_ENTSCHULDIGT'])
-  const [start, end] = wrapper.findAll('form input[type="time"]')
+  ).toEqual(['BETRIEBLICH_ENTSCHULDIGT', 'ENTSCHULDIGT'])
+  const [start, end] = wrapper.findAll('form input.german-time')
   await start?.setValue('09:30')
   await end?.setValue('11:00')
   await wrapper.get('form').trigger('submit')
@@ -197,7 +197,7 @@ it('blättert zwei Kalenderwochen vor und merkt nur die erlaubten Status vor', a
     'Geplant 09:30–11:00 · Betrieblich entschuldigt'
   )
   await wrapper.get('form input[type="checkbox"]').setValue(true)
-  expect(wrapper.find('form input[type="time"]').exists()).toBe(false)
+  expect(wrapper.find('form input.german-time').exists()).toBe(false)
   expect(wrapper.get('form button[type="submit"]').text()).toBe(
     'Schultag vormerken'
   )

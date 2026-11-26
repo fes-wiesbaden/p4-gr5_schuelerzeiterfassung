@@ -6,6 +6,10 @@ export interface Student {
   classId: number
   excusedMinutes: number
   unexcusedMinutes: number
+  excusedDays: number
+  unexcusedDays: number
+  excusedHours: number
+  unexcusedHours: number
 }
 
 export interface StudentClass {
@@ -16,4 +20,8 @@ export interface StudentClass {
 
 export function studentLabel(student: Student) {
   return `${student.lastName}, ${student.firstName}`
+}
+
+export function formatAbsenceTotals(days = 0, hours = 0) {
+  return `${days} ${days === 1 ? 'Tag' : 'Tage'} · ${hours} ${hours === 1 ? 'Stunde' : 'Stunden'}`
 }
