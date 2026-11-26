@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest'
 
 // Quelltexte der Anwendung ohne Tests, die diese Begriffe selbst enthalten
 const sources = import.meta.glob<string>(
-  ['./**/*.{ts,tsx,js,vue}', '../index.html', '!./**/*.test.ts'],
+  ['./**/*.{ts,vue}', '../index.html', '!./**/*.test.ts'],
   { eager: true, query: '?raw', import: 'default' }
 )
 

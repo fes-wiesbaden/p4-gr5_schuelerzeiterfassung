@@ -45,11 +45,12 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 /**
  * Prüft die Rechte der Lehrkraft bei vergangenen Tagen über HTTP (Issue #45). Bereits anderswo
  * geprüft und hier nicht wiederholt: Klassenliste in Issue23IntegrationTest und
- * AttendanceAccountingIntegrationTest; Ablehnung des heutigen Tages fremder Klassen sowie Korrektur
- * am selben Tag mit anschließendem REST-Abruf in AttendanceAccountingIntegrationTest; Tagesabruf
- * ohne Anmeldung in Issue22IntegrationTest; Vorauswahl nur zugänglicher Klassen in
- * Issue43IntegrationTest; Polling-Verhalten aus #43 in LiveAttendanceView.test.ts und
- * EventSource-Freiheit des Frontends in noServerSentEvents.test.ts
+ * AttendanceAccountingIntegrationTest; Ablehnung des heutigen Tages fremder Klassen, Korrektur am
+ * selben Tag mit anschließendem REST-Abruf, Wahl der Löschfrist und Statuscode der Sperre nach dem
+ * Kontenreset in AttendanceAccountingIntegrationTest; Tagesabruf ohne Anmeldung in
+ * Issue22IntegrationTest; Vorauswahl nur zugänglicher Klassen in Issue43IntegrationTest;
+ * Polling-Verhalten aus #43 in LiveAttendanceView.test.ts und EventSource-Freiheit des Frontends in
+ * noServerSentEvents.test.ts
  */
 @SpringBootTest
 @AutoConfigureMockMvc
@@ -64,6 +65,11 @@ class Issue45IntegrationTest {
   private static final String EXCUSE =
       """
       {"status":"ENTSCHULDIGT","occurredAt":"2026-09-14T05:45:00Z"}
+      """;
+
+  private static final String PRESENT =
+      """
+      {"status":"ANWESEND","occurredAt":"2026-09-14T05:45:00Z"}
       """;
 
   @Container @ServiceConnection static MySQLContainer<?> mysql = new MySQLContainer<>("mysql:8.0");
@@ -111,18 +117,20 @@ class Issue45IntegrationTest {
   }
 
   /**
-   * Der Abruf eines vergangenen Tages und die rückwirkende Statuskorrektur am Folgetag in einer
-   * fremden Klasse werden abgelehnt und ändern weder Anwesenheit, Protokoll noch Minutenkonten
+   * Abruf des Vortags und rückwirkende Statuskorrektur in einer fremden Klasse werden abgelehnt und
+   * ändern weder Anwesenheit, Protokoll noch Minutenkonten. Die Gegenprobe mit Lehrkraft A zeigt,
+   * dass der Vortag Daten enthält und die Ablehnung allein an der Klassenzuordnung liegt
    */
   @Test
   void rejectsDirectAccessToForeignClassesWithoutSideEffects() throws Exception {
     var teacher = staffSession("test.teacher.b");
     var before = history();
-    String pastDay = "/api/classes/1/attendance?date=2026-09-11";
-    mvc.perform(get(pastDay).session(teacher))
+    mvc.perform(get(CLASS_DAY).session(teacher))
         .andExpect(status().isNotFound())
         .andExpect(content().json("{\"code\":\"NOT_FOUND\"}"));
-    mvc.perform(get(pastDay).session(staffSession("test.teacher.a"))).andExpect(status().isOk());
+    mvc.perform(get(CLASS_DAY).session(staffSession("test.teacher.a")))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$[0].studentId").value(1));
 
     write(post(CORRECTION), teacher, EXCUSE)
         .andExpect(status().isNotFound())
@@ -132,16 +140,14 @@ class Issue45IntegrationTest {
 
   /**
    * Die rückwirkende Korrektur der Lehrkraft am Folgetag wird mit der Mitarbeiter-ID der Sitzung,
-   * Zeitpunkten, Status, Löschfrist und Minutendeltas protokolliert und ist beim nächsten
-   * REST-Abruf mit neu berechneten Minuten sichtbar. Weitere Löschfristen stellen sicher, dass die
-   * zum Blockplan passende Frist gewählt wird
+   * Zeitpunkten, Status, Löschfrist und Minutendeltas protokolliert. Der nächste REST-Abruf zeigt
+   * Status und neu berechnete Tagesminuten, die Schüleransicht die gebuchten Minutenkonten
    */
   @Test
   void auditsRetroactiveTeacherCorrectionCompletelyAndShowsItOnTheNextRestRead() throws Exception {
-    jdbc.update("UPDATE deletion_date SET delete_after = '2026-12-31' WHERE id = 1");
-    jdbc.update(
-        "INSERT INTO deletion_date (id, delete_after) VALUES (2, '2027-06-30'), (3, '2027-12-31')");
     var teacher = staffSession("test.teacher.a");
+    long teacherId =
+        jdbc.queryForObject("SELECT id FROM staff WHERE username = 'test.teacher.a'", Long.class);
     mvc.perform(get(CLASS_DAY).session(teacher))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$[0].studentId").value(1))
@@ -158,9 +164,9 @@ class Issue45IntegrationTest {
             "attendance_id",
             jdbc.queryForObject("SELECT id FROM attendance WHERE student_id = 1", Long.class))
         .containsEntry("event_type", "STATUS_CHANGE")
-        .containsEntry("changed_by_staff_id", 1L)
+        .containsEntry("changed_by_staff_id", teacherId)
         .containsEntry("terminal_id", null)
-        .containsEntry("deletion_date_id", 2L)
+        .containsEntry("deletion_date_id", 1L)
         .containsEntry("old_status", "ABWESEND")
         .containsEntry("new_status", "ENTSCHULDIGT")
         .containsEntry("occurred_at", LocalDateTime.of(2026, 9, 14, 5, 45))
@@ -173,12 +179,17 @@ class Issue45IntegrationTest {
         .andExpect(jsonPath("$[0].studentId").value(1))
         .andExpect(jsonPath("$[0].status").value("ENTSCHULDIGT"))
         .andExpect(jsonPath("$[0].unexcusedMinutes").value(15));
+    mvc.perform(get("/api/students/1").session(teacher))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.unexcusedMinutes").value(15))
+        .andExpect(jsonPath("$.excusedMinutes").value(165));
   }
 
   /**
    * Vor dem Kontenreset ist die rückwirkende Korrektur möglich, danach ist der Tag gesperrt. Die
-   * weitere Korrektur der Lehrkraft wird abgelehnt und ändert weder Anwesenheit, Protokoll noch
-   * Minutenkonten
+   * weitere Korrektur der Lehrkraft wird mit Fehlercode abgelehnt und ändert weder Anwesenheit,
+   * Protokoll noch Minutenkonten. Die vorherige erfolgreiche Korrektur belegt, dass die Ablehnung
+   * vom Reset kommt
    */
   @Test
   void rejectsCorrectionOfADayLockedByTheAccountReset() throws Exception {
@@ -191,10 +202,7 @@ class Issue45IntegrationTest {
         .andExpect(status().isOk());
     var before = history();
 
-    write(
-            post(CORRECTION),
-            teacher,
-            "{\"status\":\"ANWESEND\",\"occurredAt\":\"2026-09-14T05:45:00Z\"}")
+    write(post(CORRECTION), teacher, PRESENT)
         .andExpect(status().isConflict())
         .andExpect(content().json("{\"code\":\"ATTENDANCE_DAY_LOCKED_OR_UNPLANNED\"}"));
     assertThat(history()).isEqualTo(before);
@@ -222,7 +230,9 @@ class Issue45IntegrationTest {
       var sources =
           Stream.concat(files.filter(Files::isRegularFile), Stream.of(module.resolve("pom.xml")))
               .toList();
-      assertThat(sources).hasSizeGreaterThan(1);
+      assertThat(sources)
+          .anyMatch(file -> file.endsWith("api/StaffController.java"))
+          .contains(module.resolve("pom.xml"));
       for (var file : sources) {
         assertThat(Files.readString(file))
             .as(file.toString())
@@ -231,7 +241,7 @@ class Issue45IntegrationTest {
                 "ServerSentEvent",
                 "ResponseBodyEmitter",
                 "StreamingResponseBody",
-                "Flux",
+                "reactor.core",
                 "webflux",
                 "TEXT_EVENT_STREAM",
                 "text/event-stream");
