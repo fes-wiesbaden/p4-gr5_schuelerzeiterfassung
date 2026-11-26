@@ -172,6 +172,7 @@ public class SecurityConfig {
                         "/api/classes",
                         "/api/classes/{classId}/students",
                         "/api/classes/{classId}/attendance",
+                        "/api/attendance/current-class",
                         "/api/students/rfid-uids",
                         "/api/students/{studentId}")
                     .authenticated()

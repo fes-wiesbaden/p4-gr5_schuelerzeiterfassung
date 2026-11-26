@@ -101,7 +101,11 @@ const ERROR_MESSAGES: Record<string, string> = {
     'Die Planung wurde gleichzeitig geändert. Bitte die Seite neu laden und erneut versuchen.',
   ADMINISTRATOR_REQUIRED: 'Diese Aktion ist Administratoren vorbehalten.',
   CLASS_MANAGEMENT_DENIED: 'Nur die Klassenleitung darf den Plan wechseln.',
-  NOT_FOUND: 'Der Datensatz wurde nicht gefunden.'
+  NOT_FOUND: 'Der Datensatz wurde nicht gefunden.',
+  ATTENDANCE_DAY_LOCKED_OR_UNPLANNED:
+    'Für diesen Tag ist keine Änderung möglich: kein Unterricht geplant oder Tag bereits abgeschlossen.',
+  INVALID_STATUS_TIME:
+    'Die Uhrzeit muss am heutigen Tag und nicht in der Zukunft liegen.'
 }
 
 export function errorMessage(code: string | undefined): string {
@@ -112,7 +116,7 @@ export function errorMessage(code: string | undefined): string {
 }
 
 // Wirft bei einer fehlgeschlagenen Antwort einen Fehler mit deutschem Hinweistext
-async function expectOk(response: Response): Promise<Response> {
+export async function expectOk(response: Response): Promise<Response> {
   if (response.ok) {
     return response
   }
