@@ -15,6 +15,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import de.feswiesbaden.attendance.config.AttendanceJobs;
 import de.feswiesbaden.attendance.dtos.RawScanDTO;
 import de.feswiesbaden.attendance.enums.AttendanceStatus;
 import de.feswiesbaden.attendance.enums.ScanResult;
@@ -71,12 +72,17 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
 /** Prüft Tagesstatus, Minutenabrechnung und unveränderliche Audits mit MySQL */
-@SpringBootTest
+@SpringBootTest(
+    properties =
+        "attendance.terminal.proxy-token=" + AttendanceAccountingIntegrationTest.PROXY_TOKEN)
 @AutoConfigureMockMvc
 @Testcontainers
 @Sql("/fixtures/attendance.sql")
 @ExtendWith(OutputCaptureExtension.class)
 class AttendanceAccountingIntegrationTest {
+  static final String PROXY_TOKEN =
+      "0000000000000000000000000000000000000000000000000000000000000000";
+
   private static final LocalDate MONDAY = LocalDate.of(2026, 9, 14);
 
   private static final String CLASS_DAY = "/api/classes/1/attendance?date=2026-09-14";
@@ -517,7 +523,7 @@ class AttendanceAccountingIntegrationTest {
         .doesNotContain("TEST-UID-007", "TEST-UID-005");
   }
 
-  /** Prüft Administratorrechte, Planbindung, wiederholte Resets und erhaltene Tageswerte */
+  /** Prüft Planbindung, Resets ausgewählter Klassen und erhaltene Tageswerte */
   @Test
   void resetsAccountsThroughHttpAndKeepsDailyMinutes() throws Exception {
     var admin = staffSession("test.admin");
@@ -528,32 +534,49 @@ class AttendanceAccountingIntegrationTest {
     write(post(RESET), admin, "{\"expectedBlockPlanId\":999}")
         .andExpect(status().isConflict())
         .andExpect(jsonPath("$.code").value("CLASS_PLAN_CHANGED"));
-    for (int reset = 0; reset < 2; reset++) {
-      write(post(RESET), admin, plan)
-          .andExpect(status().isOk())
-          .andExpect(jsonPath("$.resetCount").value(6));
-    }
+    var deadlines = jdbc.queryForList("SELECT * FROM deletion_date ORDER BY id");
+    write(post(RESET), admin, plan)
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.resetCount").value(6));
+    assertAccount(7, 0, 0);
+    write(post("/api/classes/2/account-resets"), admin, plan)
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.resetCount").value(1));
+    assertAccount(7, 0, 0);
+    write(post(RESET), admin, plan)
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.resetCount").value(6));
+    assertThat(jdbc.queryForList("SELECT * FROM deletion_date ORDER BY id")).isEqualTo(deadlines);
+    var resets =
+        jdbc.queryForList(
+            "SELECT * FROM attendance_audit WHERE event_type = 'ACCOUNT_RESET' ORDER BY id");
+    assertThat(resets)
+        .allSatisfy(
+            audit ->
+                assertThat(audit)
+                    .containsEntry("changed_by_staff_id", 3L)
+                    .containsEntry("deletion_date_id", 1L)
+                    .containsEntry("attendance_id", null))
+        .extracting(audit -> audit.get("student_id"))
+        .containsExactly(1L, 2L, 3L, 4L, 5L, 6L, 7L, 1L, 2L, 3L, 4L, 5L, 6L);
+    assertThat(resets.get(6))
+        .containsEntry("unexcused_minutes_delta", -180)
+        .containsEntry("excused_minutes_delta", 0);
+    assertThat(
+            jdbc.queryForList(
+                """
+                SELECT student_id FROM attendance_audit
+                WHERE event_type = 'ACCOUNT_RESET' AND unexcused_minutes_delta = 0
+                  AND excused_minutes_delta = 0
+                ORDER BY student_id
+                """,
+                Long.class))
+        .containsExactly(1L, 2L, 3L, 4L, 5L, 6L);
     jdbc.update("DELETE FROM student WHERE id = 8");
     setTime("2026-09-21T06:00:00Z");
     write(post("/api/classes/3/account-resets"), admin, plan)
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.resetCount").value(0));
-    assertThat(
-            jdbc.queryForObject(
-                """
-        SELECT COUNT(*) FROM attendance_audit WHERE event_type = 'ACCOUNT_RESET'
-        AND changed_by_staff_id = 3 AND deletion_date_id = 1 AND attendance_id IS NULL
-        """,
-                Integer.class))
-        .isEqualTo(12);
-    assertThat(
-            jdbc.queryForObject(
-                """
-                SELECT COUNT(*) FROM attendance_audit
-                WHERE event_type = 'ACCOUNT_RESET' AND unexcused_minutes_delta = 0
-                """,
-                Integer.class))
-        .isEqualTo(6);
     assertAccount(1, 0, 0);
     write(post(CORRECTION), teacher, EXCUSE).andExpect(status().isConflict());
     mvc.perform(get(CLASS_DAY).session(teacher))
@@ -677,25 +700,51 @@ class AttendanceAccountingIntegrationTest {
     assertThat(jdbc.queryForList("SELECT * FROM attendance_audit ORDER BY id")).isEqualTo(audits);
   }
 
-  /** Prüft den Abschluss geplanter Tage und die Wiederholung ohne zusätzliche Buchungen */
+  /** Prüft Tagesabschluss ohne Scan, nachträgliche Korrektur und erneuten Abschluss */
   @Test
-  void closesOnlyExpectedDaysAndRepeatsWithoutAnyNewBooking() {
+  void closesOnlyExpectedDaysAndDoesNotDoubleBookAfterCorrection() throws Exception {
+    var attendanceJobs = new AttendanceJobs(accounting);
     assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM attendance", Integer.class)).isZero();
-    assertThat(accounting.closeDueDays()).isEqualTo(7);
+    setTime("2026-09-14T22:15:00Z");
+    attendanceJobs.closeDays();
+    assertThat(
+            jdbc.queryForList(
+                "SELECT student_id FROM attendance"
+                    + " WHERE attendance_date = ? AND status = 'ABWESEND' ORDER BY student_id",
+                Long.class,
+                MONDAY))
+        .containsExactly(1L, 2L, 3L, 4L, 5L, 6L, 7L);
+    assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM attendance", Integer.class)).isEqualTo(7);
     for (int student = 1; student <= 7; student++) {
       assertAccount(student, 180, 0);
     }
     assertAccount(8, 0, 0);
     assertThat(
             jdbc.queryForObject(
-                "SELECT COUNT(*) FROM attendance_audit WHERE event_type = 'DAILY_CLOSE'"
-                    + " AND changed_by_staff_id IS NULL AND terminal_id IS NULL AND old_status IS NULL"
-                    + " AND new_status IS NULL AND deletion_date_id = 1",
+                """
+                SELECT COUNT(*) FROM attendance_audit audit
+                JOIN attendance day ON day.id = audit.attendance_id AND day.student_id = audit.student_id
+                WHERE audit.event_type = 'DAILY_CLOSE' AND audit.changed_by_staff_id IS NULL
+                  AND audit.terminal_id IS NULL AND audit.old_status IS NULL AND audit.new_status IS NULL
+                  AND audit.deletion_date_id = 1 AND audit.unexcused_minutes_delta = 180
+                  AND audit.excused_minutes_delta = 0
+                """,
                 Integer.class))
         .isEqualTo(7);
+    setTime("2026-09-14T22:30:00Z");
+    write(post(CORRECTION), staffSession("test.teacher.a"), EXCUSE)
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.changed").value(true));
+    assertAccount(1, 15, 165);
+    assertThat(
+            jdbc.queryForMap(
+                "SELECT * FROM attendance_audit WHERE student_id = 1 AND event_type = 'STATUS_CHANGE'"))
+        .containsEntry("unexcused_minutes_delta", -165)
+        .containsEntry("excused_minutes_delta", 165);
     var audits = jdbc.queryForList("SELECT * FROM attendance_audit ORDER BY id");
-    assertThat(accounting.closeDueDays()).isZero();
+    attendanceJobs.closeDays();
     assertThat(jdbc.queryForList("SELECT * FROM attendance_audit ORDER BY id")).isEqualTo(audits);
+    assertAccount(1, 15, 165);
   }
 
   /** Prüft, dass nur vergangene Slotanteile und keine Pausen gebucht werden */
@@ -815,6 +864,33 @@ class AttendanceAccountingIntegrationTest {
     assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM attendance", Integer.class)).isZero();
     assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM attendance_audit", Integer.class))
         .isZero();
+  }
+
+  /** Prüft Scans paralleler Klassen und den Klassenwechsel im selben Raum beim Folgeblock */
+  @Test
+  void scansUseTheAssignedClassAndTimetableAtCaptureTime() throws Exception {
+    setTime("2026-09-21T06:00:00Z");
+    postScan("TEST-UID-001", 9001, "2026-09-14T05:30:00Z").andExpect(status().isNoContent());
+    postScan("TEST-UID-007", 9001, "2026-09-14T05:30:00Z").andExpect(status().isBadRequest());
+    postScan("TEST-UID-007", 9002, "2026-09-14T05:30:00Z").andExpect(status().isNoContent());
+    postScan("TEST-UID-001", 9001, "2026-09-21T05:30:00Z").andExpect(status().isBadRequest());
+    postScan("TEST-UID-008", 9001, "2026-09-21T05:30:00Z").andExpect(status().isNoContent());
+
+    assertThat(
+            jdbc.query(
+                """
+                SELECT day.student_id, day.attendance_date, audit.terminal_id FROM attendance day
+                JOIN attendance_audit audit ON audit.attendance_id = day.id
+                WHERE audit.event_type = 'SCAN' AND day.status = 'ANWESEND'
+                ORDER BY day.student_id
+                """,
+                (row, index) ->
+                    List.of(row.getInt(1), row.getObject(2, LocalDate.class), row.getInt(3))))
+        .containsExactly(
+            List.of(1, MONDAY, 9001),
+            List.of(7, MONDAY, 9002),
+            List.of(8, MONDAY.plusWeeks(1), 9001));
+    assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM attendance", Integer.class)).isEqualTo(3);
   }
 
   /**
@@ -1149,6 +1225,21 @@ class AttendanceAccountingIntegrationTest {
             new RawScanDTO(UUID.randomUUID(), rfidUid, 9001, Instant.parse(at)),
             clock.instant())
         .equals(ScanResult.SUCCESS);
+  }
+
+  /** Sendet einen Testscan an den Spring-Endpunkt mit der vom Proxy bestätigten Identität */
+  private ResultActions postScan(String rfidUid, int terminal, String at) throws Exception {
+    return mvc.perform(
+        post("/api/scans")
+            .header("X-Terminal-Proxy-Token", PROXY_TOKEN)
+            .header("X-Terminal-Client-Verify", "SUCCESS")
+            .header("X-Terminal-Client-Subject", "CN=terminal-" + terminal)
+            .contentType(MediaType.APPLICATION_JSON)
+            .content(
+                """
+                {"scanId":"%s","rfidUid":"%s","terminalNumber":%d,"capturedAt":"%s"}
+                """
+                    .formatted(UUID.randomUUID(), rfidUid, terminal, at)));
   }
 
   /**
