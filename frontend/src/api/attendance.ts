@@ -14,7 +14,7 @@ export const ATTENDANCE_STATUSES = Object.keys(
   STATUS_LABELS
 ) as AttendanceStatus[]
 
-export type DailyStudent = {
+export interface DailyStudent {
   studentId: number
   firstName: string
   lastName: string

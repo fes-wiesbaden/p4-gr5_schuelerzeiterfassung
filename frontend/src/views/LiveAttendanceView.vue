@@ -64,7 +64,9 @@ async function load() {
   if (classId.value === undefined) return
   // Bleibt die Seite über Mitternacht offen, wechselt die Ansicht auf den neuen
   // Tag. Anzeige und Eingaben wechseln erst mit der erfolgreichen Antwort
-  const day = berlinDate(serverNow())
+  // Tag, vorbelegte Uhrzeit und Stand stammen aus demselben Zeitpunkt
+  const now = serverNow()
+  const day = berlinDate(now)
   const request = ++latestRequest
   try {
     const students = await loadData<DailyStudent[]>(
@@ -85,12 +87,12 @@ async function load() {
       if (!drafts[student.studentId]?.touched) {
         drafts[student.studentId] = {
           status: student.status,
-          time: berlinTime(serverNow()),
+          time: berlinTime(now),
           touched: false
         }
       }
     }
-    updatedAt.value = serverNow().toLocaleTimeString('de-DE', {
+    updatedAt.value = now.toLocaleTimeString('de-DE', {
       timeZone: BERLIN
     })
     loaded.value = true

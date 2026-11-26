@@ -100,7 +100,6 @@ class Issue43IntegrationTest {
   /** Ohne Anmeldung liefert der Endpunkt keine Klasse */
   @Test
   void requiresAuthentication() throws Exception {
-    when(clock.instant()).thenReturn(Instant.parse("2026-09-14T06:00:00Z"));
     mvc.perform(get(CURRENT_CLASS)).andExpect(status().isUnauthorized());
   }
 
