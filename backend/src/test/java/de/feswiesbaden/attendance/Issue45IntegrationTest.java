@@ -18,11 +18,11 @@ import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.util.List;
+import java.util.Map;
+import java.util.stream.Stream;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -43,11 +43,12 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
 /**
- * Prüft die Rechte der Lehrkraft in der aktuellen Anwesenheitsansicht und bei vergangenen Tagen
- * über HTTP (Issue #45). Bereits anderswo geprüft und hier nicht wiederholt: Klassenliste und
- * Ablehnung des heutigen Tages fremder Klassen in Issue23IntegrationTest und
- * AttendanceAccountingIntegrationTest, Vorauswahl nur zugänglicher Klassen in
- * Issue43IntegrationTest, Polling-Verhalten aus #43 in LiveAttendanceView.test.ts und
+ * Prüft die Rechte der Lehrkraft bei vergangenen Tagen über HTTP (Issue #45). Bereits anderswo
+ * geprüft und hier nicht wiederholt: Klassenliste in Issue23IntegrationTest und
+ * AttendanceAccountingIntegrationTest; Ablehnung des heutigen Tages fremder Klassen sowie Korrektur
+ * am selben Tag mit anschließendem REST-Abruf in AttendanceAccountingIntegrationTest; Tagesabruf
+ * ohne Anmeldung in Issue22IntegrationTest; Vorauswahl nur zugänglicher Klassen in
+ * Issue43IntegrationTest; Polling-Verhalten aus #43 in LiveAttendanceView.test.ts und
  * EventSource-Freiheit des Frontends in noServerSentEvents.test.ts
  */
 @SpringBootTest
@@ -73,15 +74,14 @@ class Issue45IntegrationTest {
 
   @MockitoBean Clock clock;
 
-  /**
-   * Leert die Tagesabrechnung und setzt die Testuhr nach dem Unterrichtsende am Montag, 14.09.2026
-   */
+  /** Leert die Tagesabrechnung und setzt die Testuhr auf Dienstag, 15.09.2026, nach Montag */
   @BeforeEach
   void prepare() {
     jdbc.update("DELETE FROM attendance_audit");
     jdbc.update("DELETE FROM attendance");
     jdbc.update("UPDATE student SET unexcused_minutes_account = 0, excused_minutes_account = 0");
-    setTime("2026-09-14T08:45:00Z");
+    when(clock.instant()).thenReturn(Instant.parse("2026-09-15T06:00:00Z"));
+    when(clock.getZone()).thenReturn(ZoneOffset.UTC);
     when(clock.withZone(any()))
         .thenAnswer(invocation -> Clock.fixed(clock.instant(), invocation.getArgument(0)));
   }
@@ -116,28 +116,28 @@ class Issue45IntegrationTest {
    */
   @Test
   void rejectsDirectAccessToForeignClassesWithoutSideEffects() throws Exception {
-    setTime("2026-09-15T06:00:00Z");
     var teacher = staffSession("test.teacher.b");
+    var before = history();
     String pastDay = "/api/classes/1/attendance?date=2026-09-11";
     mvc.perform(get(pastDay).session(teacher))
         .andExpect(status().isNotFound())
         .andExpect(content().json("{\"code\":\"NOT_FOUND\"}"));
     mvc.perform(get(pastDay).session(staffSession("test.teacher.a"))).andExpect(status().isOk());
 
-    write(post(CORRECTION), teacher, EXCUSE).andExpect(status().isNotFound());
-    assertNoAttendanceBooked();
+    write(post(CORRECTION), teacher, EXCUSE)
+        .andExpect(status().isNotFound())
+        .andExpect(content().json("{\"code\":\"NOT_FOUND\"}"));
+    assertThat(history()).isEqualTo(before);
   }
 
   /**
-   * Die Korrektur der Lehrkraft wird am selben Tag und rückwirkend am Folgetag mit Mitarbeiter,
+   * Die rückwirkende Korrektur der Lehrkraft am Folgetag wird mit der Mitarbeiter-ID der Sitzung,
    * Zeitpunkten, Status, Löschfrist und Minutendeltas protokolliert und ist beim nächsten
    * REST-Abruf mit neu berechneten Minuten sichtbar. Weitere Löschfristen stellen sicher, dass die
    * zum Blockplan passende Frist gewählt wird
    */
-  @ParameterizedTest
-  @ValueSource(strings = {"2026-09-14T08:45:00Z", "2026-09-15T06:00:00Z"})
-  void auditsTeacherCorrectionCompletelyAndShowsItOnTheNextRestRead(String now) throws Exception {
-    setTime(now);
+  @Test
+  void auditsRetroactiveTeacherCorrectionCompletelyAndShowsItOnTheNextRestRead() throws Exception {
     jdbc.update("UPDATE deletion_date SET delete_after = '2026-12-31' WHERE id = 1");
     jdbc.update(
         "INSERT INTO deletion_date (id, delete_after) VALUES (2, '2027-06-30'), (3, '2027-12-31')");
@@ -169,83 +169,84 @@ class Issue45IntegrationTest {
         .containsEntry("excused_minutes_delta", 165);
 
     mvc.perform(get(CLASS_DAY).session(teacher))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$[0].studentId").value(1))
         .andExpect(jsonPath("$[0].status").value("ENTSCHULDIGT"))
         .andExpect(jsonPath("$[0].unexcusedMinutes").value(15));
   }
 
   /**
-   * Nach dem Kontenreset ist der Tag gesperrt. Die rückwirkende Korrektur der Lehrkraft wird
-   * abgelehnt und ändert weder Anwesenheit, Protokoll noch Minutenkonten
+   * Vor dem Kontenreset ist die rückwirkende Korrektur möglich, danach ist der Tag gesperrt. Die
+   * weitere Korrektur der Lehrkraft wird abgelehnt und ändert weder Anwesenheit, Protokoll noch
+   * Minutenkonten
    */
   @Test
   void rejectsCorrectionOfADayLockedByTheAccountReset() throws Exception {
-    setTime("2026-09-15T06:00:00Z");
+    var teacher = staffSession("test.teacher.a");
+    write(post(CORRECTION), teacher, EXCUSE).andExpect(status().isOk());
     write(
             post("/api/classes/1/account-resets"),
             staffSession("test.admin"),
             "{\"expectedBlockPlanId\":1}")
         .andExpect(status().isOk());
-    var history =
-        List.of(
-            jdbc.queryForList("SELECT * FROM attendance ORDER BY id"),
-            jdbc.queryForList("SELECT * FROM attendance_audit ORDER BY id"),
-            jdbc.queryForList("SELECT * FROM student ORDER BY id"));
+    var before = history();
 
-    write(post(CORRECTION), staffSession("test.teacher.a"), EXCUSE)
+    write(
+            post(CORRECTION),
+            teacher,
+            "{\"status\":\"ANWESEND\",\"occurredAt\":\"2026-09-14T05:45:00Z\"}")
         .andExpect(status().isConflict())
         .andExpect(content().json("{\"code\":\"ATTENDANCE_DAY_LOCKED_OR_UNPLANNED\"}"));
-    assertThat(
-            List.of(
-                jdbc.queryForList("SELECT * FROM attendance ORDER BY id"),
-                jdbc.queryForList("SELECT * FROM attendance_audit ORDER BY id"),
-                jdbc.queryForList("SELECT * FROM student ORDER BY id")))
-        .isEqualTo(history);
+    assertThat(history()).isEqualTo(before);
   }
 
-  /** Tagesstatus und Korrektur sind nur mit Anmeldung erreichbar */
+  /** Die Statuskorrektur ist nur mit Anmeldung erreichbar */
   @Test
-  void requiresAuthenticationForLiveAttendance() throws Exception {
-    mvc.perform(get(CLASS_DAY)).andExpect(status().isUnauthorized());
+  void requiresAuthenticationForCorrections() throws Exception {
     write(post(CORRECTION), new MockHttpSession(), EXCUSE).andExpect(status().isUnauthorized());
-    assertNoAttendanceBooked();
   }
 
   /**
-   * Der Produktionscode enthält keine SSE-Infrastruktur, auch nicht als ResponseEntity-Generic oder
-   * manuell gesetzten Content-Type. Der Quellpfad wird aus target/test-classes abgeleitet, damit
-   * der Test unabhängig vom Arbeitsverzeichnis läuft
+   * Produktionscode und Abhängigkeiten enthalten keine Streaming- oder SSE-Infrastruktur, auch
+   * nicht als ResponseEntity-Generic, manuell gesetzten Content-Type oder WebFlux. Das
+   * Modulverzeichnis wird aus target/test-classes abgeleitet, damit der Test unabhängig vom
+   * Arbeitsverzeichnis läuft
    */
   @Test
   void usesNoServerSentEvents() throws Exception {
-    var testClasses =
-        Path.of(getClass().getProtectionDomain().getCodeSource().getLocation().toURI());
-    try (var files = Files.walk(testClasses.resolve("../../src/main").normalize())) {
-      var sources = files.filter(Files::isRegularFile).toList();
-      assertThat(sources).isNotEmpty();
+    var module =
+        Path.of(getClass().getProtectionDomain().getCodeSource().getLocation().toURI())
+            .resolve("../..")
+            .normalize();
+    try (var files = Files.walk(module.resolve("src/main"))) {
+      var sources =
+          Stream.concat(files.filter(Files::isRegularFile), Stream.of(module.resolve("pom.xml")))
+              .toList();
+      assertThat(sources).hasSizeGreaterThan(1);
       for (var file : sources) {
         assertThat(Files.readString(file))
             .as(file.toString())
             .doesNotContain(
-                "SseEmitter", "ServerSentEvent", "TEXT_EVENT_STREAM", "text/event-stream");
+                "SseEmitter",
+                "ServerSentEvent",
+                "ResponseBodyEmitter",
+                "StreamingResponseBody",
+                "Flux",
+                "webflux",
+                "TEXT_EVENT_STREAM",
+                "text/event-stream");
       }
     }
   }
 
-  /** Stellt sicher, dass weder Anwesenheit noch Protokoll noch Minutenkonten geändert wurden */
-  private void assertNoAttendanceBooked() {
-    assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM attendance", Integer.class)).isZero();
-    assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM attendance_audit", Integer.class))
-        .isZero();
-    assertThat(
-            jdbc.queryForObject(
-                "SELECT SUM(unexcused_minutes_account + excused_minutes_account) FROM student",
-                Integer.class))
-        .isZero();
-  }
-
-  /** Setzt die Testuhr auf den angegebenen UTC-Zeitpunkt */
-  private void setTime(String now) {
-    when(clock.instant()).thenReturn(Instant.parse(now));
+  /**
+   * Liefert Anwesenheiten, Protokoll und Schüler mit Minutenkonten für Vorher-nachher-Vergleiche
+   */
+  private List<List<Map<String, Object>>> history() {
+    return List.of(
+        jdbc.queryForList("SELECT * FROM attendance ORDER BY id"),
+        jdbc.queryForList("SELECT * FROM attendance_audit ORDER BY id"),
+        jdbc.queryForList("SELECT * FROM student ORDER BY id"));
   }
 
   /** Erstellt eine Sitzung des angegebenen Testmitarbeiters */
