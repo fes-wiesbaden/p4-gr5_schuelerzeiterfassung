@@ -9,7 +9,6 @@ import de.feswiesbaden.attendance.login.StaffPrincipal;
 import de.feswiesbaden.attendance.service.BlockPlanService;
 import de.feswiesbaden.attendance.service.SchoolClassService;
 import de.feswiesbaden.attendance.service.TimetableService;
-import de.feswiesbaden.attendance.service.TimetableService.LessonDetails;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.LocalDate;
@@ -83,40 +82,6 @@ class Issue40IntegrationTest {
             "deletion_date")) {
       jdbc.update("DELETE FROM " + table);
     }
-  }
-
-  @Test
-  void preservesLessonDetailsForLegacyUpdatesAndAllowsExplicitClearing() {
-    jdbc.update("UPDATE timetable_slot SET learning_field = 'LF 1', teacher_id = 1 WHERE id = 1");
-    when(clock.instant()).thenReturn(Instant.parse("2026-09-14T08:50:00Z"));
-    var effectiveOn =
-        timetables.updateSlot(
-            1L, 1L, Weekday.MONTAG, LocalTime.of(7, 30), LocalTime.of(9, 0), 1L, null);
-    assertThat(effectiveOn).isEqualTo(LocalDate.of(2026, 9, 21));
-    var future =
-        jdbc.queryForMap(
-            "SELECT id, learning_field, teacher_id FROM timetable_slot"
-                + " WHERE timetable_id = 1 AND series_id = 1 AND valid_until IS NULL");
-    assertThat(future).containsEntry("learning_field", "LF 1").containsEntry("teacher_id", 1L);
-
-    timetables.updateSlot(
-        1L,
-        (Long) future.get("id"),
-        Weekday.MONTAG,
-        LocalTime.of(7, 30),
-        LocalTime.of(9, 0),
-        1L,
-        new LessonDetails(null, null));
-    assertThat(
-            jdbc.queryForMap(
-                "SELECT learning_field, teacher_id FROM timetable_slot"
-                    + " WHERE timetable_id = 1 AND series_id = 1 AND valid_until IS NULL"))
-        .containsEntry("learning_field", null)
-        .containsEntry("teacher_id", null);
-    assertThat(
-            jdbc.queryForList(
-                "SELECT learning_field FROM timetable_slot WHERE id = 1", String.class))
-        .containsExactly("LF 1");
   }
 
   /**

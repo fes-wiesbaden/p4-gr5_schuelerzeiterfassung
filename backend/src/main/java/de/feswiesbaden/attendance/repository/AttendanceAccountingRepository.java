@@ -106,11 +106,10 @@ public class AttendanceAccountingRepository {
   /** Lädt die Unterrichtszeiten nach Beginn sortiert und verwendet bei Bedarf eine Lesesperre */
   public List<Slot> findSlots(Long timetableId, boolean lock) {
     return jdbc.query(
-        "SELECT s.weekday, s.start_time, s.end_time, s.room_id, s.valid_from, s.valid_until,"
-            + " s.learning_field, TRIM(CONCAT(t.first_name, ' ', t.last_name)) AS teacher_name"
-            + " FROM timetable_slot s LEFT JOIN staff t ON t.id = s.teacher_id"
-            + " WHERE s.timetable_id = ? AND s.start_time < s.end_time ORDER BY s.start_time, s.id"
-            + (lock ? " FOR SHARE OF s" : ""),
+        "SELECT weekday, start_time, end_time, room_id, valid_from, valid_until"
+            + " FROM timetable_slot"
+            + " WHERE timetable_id = ? AND start_time < end_time ORDER BY start_time, id"
+            + (lock ? " FOR SHARE" : ""),
         (row, index) ->
             new Slot(
                 Weekday.valueOf(row.getString("weekday")).dayOfWeek(),
@@ -118,9 +117,7 @@ public class AttendanceAccountingRepository {
                 row.getTime("end_time").toLocalTime(),
                 row.getLong("room_id"),
                 row.getObject("valid_from", LocalDate.class),
-                row.getObject("valid_until", LocalDate.class),
-                row.getString("learning_field"),
-                row.getString("teacher_name")),
+                row.getObject("valid_until", LocalDate.class)),
         timetableId);
   }
 
@@ -535,9 +532,7 @@ public class AttendanceAccountingRepository {
       LocalTime endsAt,
       long roomId,
       LocalDate validFrom,
-      LocalDate validUntil,
-      String learningField,
-      String teacherName) {
+      LocalDate validUntil) {
     /** Prüft Wochentag und Gültigkeit dieser Fassung für einen Kalendertag */
     public boolean occursOn(LocalDate date) {
       return weekday == date.getDayOfWeek()

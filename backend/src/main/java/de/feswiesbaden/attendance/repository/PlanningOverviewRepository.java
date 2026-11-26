@@ -43,10 +43,8 @@ public class PlanningOverviewRepository {
     return jdbc.query(
         """
         SELECT s.id, s.timetable_id, s.weekday, s.start_time, s.end_time, s.room_id, r.room_number,
-               s.valid_from, s.learning_field, s.teacher_id,
-               TRIM(CONCAT(t.first_name, ' ', t.last_name)) AS teacher_name
+               s.valid_from
         FROM timetable_slot s JOIN room r ON r.id = s.room_id
-        LEFT JOIN staff t ON t.id = s.teacher_id
         WHERE s.valid_until IS NULL
         ORDER BY s.timetable_id, s.weekday, s.start_time
         """,
@@ -59,10 +57,7 @@ public class PlanningOverviewRepository {
                 row.getObject("end_time", LocalTime.class),
                 row.getLong("room_id"),
                 row.getString("room_number"),
-                row.getObject("valid_from", LocalDate.class),
-                row.getString("learning_field"),
-                row.getObject("teacher_id", Long.class),
-                row.getString("teacher_name")));
+                row.getObject("valid_from", LocalDate.class)));
   }
 
   /** Liefert alle Blockpläne, die neuesten zuerst */
@@ -105,19 +100,6 @@ public class PlanningOverviewRepository {
         (row, index) -> new RoomRow(row.getLong("id"), row.getString("room_number")));
   }
 
-  /** Liefert die für Unterrichtszeiten auswählbaren Lehrkräfte. */
-  public List<TeacherRow> findTeachers() {
-    return jdbc.query(
-        """
-        SELECT id, TRIM(CONCAT(first_name, ' ', last_name)) AS name
-        FROM staff WHERE role = 'LEHRKRAFT' ORDER BY last_name, first_name, id
-        """,
-        (row, index) -> new TeacherRow(row.getLong("id"), row.getString("name")));
-  }
-
-  /** Enthält ID und Namen einer Lehrkraft. */
-  public record TeacherRow(Long id, String name) {}
-
   /** Enthält ID und Namen eines Stundenplans */
   public record TimetableRow(Long id, String name) {}
 
@@ -136,10 +118,7 @@ public class PlanningOverviewRepository {
       LocalTime endsAt,
       Long roomId,
       String roomNumber,
-      LocalDate validFrom,
-      String learningField,
-      Long teacherId,
-      String teacherName) {}
+      LocalDate validFrom) {}
 
   /** Enthält Name und Zeitraum eines Blockplans */
   public record BlockPlanRow(Long id, String name, LocalDate startsOn, LocalDate endsOn) {}

@@ -5,7 +5,7 @@ Die Anwesenheitserfassung beschreibt, wer im geplanten Unterricht anwesend war u
 ## Fachbegriffe
 
 **Stundenplan**:
-Das wiederkehrende Wochenraster einer Klasse für ein **Schuljahr** mit Unterrichtszeiten, Lernfeldern, Lehrkräften und Räumen.
+Das wiederkehrende Wochenraster einer Klasse für ein **Schuljahr** mit Unterrichtszeiten und Räumen.
 
 **Schuljahr**:
 Der Zeitraum vom 1. August bis zum 31. Juli des Folgejahres.

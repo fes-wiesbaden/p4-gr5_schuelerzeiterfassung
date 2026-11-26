@@ -60,17 +60,6 @@ function showRoom(roomNumber: string) {
   return roomNumber && roomNumber !== room.value?.name
 }
 
-function colorGroup(lesson: Entry) {
-  return lesson.teacherName || lesson.learningField || 'Unterricht'
-}
-
-const tones = computed(() => {
-  const groups = [...new Set(allLessons.value.map(colorGroup))].sort(
-    (left, right) => left.localeCompare(right, 'de')
-  )
-  return new Map(groups.map((key, index) => [key, index % 9]))
-})
-
 const days = computed(() => props.days.map((day, index) => ({ ...day, index })))
 const visibleDays = computed(() =>
   mobile.value
@@ -100,35 +89,6 @@ function clockLabel(seconds: number) {
   )
 }
 
-type TimedLesson = { entry: Entry; start: number; end: number }
-
-function combineAcrossBreaks(
-  lessons: TimedLesson[],
-  periods: { start: number; end: number }[]
-) {
-  const blocks: TimedLesson[] = []
-  for (const lesson of lessons) {
-    const previous = blocks.at(-1)
-    if (
-      previous &&
-      !previous.entry.slot &&
-      !lesson.entry.slot &&
-      previous.end < lesson.start &&
-      !periods.some(
-        (period) => period.start < lesson.start && period.end > previous.end
-      ) &&
-      previous.entry.learningField === lesson.entry.learningField &&
-      previous.entry.teacherName === lesson.entry.teacherName &&
-      previous.entry.roomNumber === lesson.entry.roomNumber
-    ) {
-      previous.end = lesson.end
-    } else {
-      blocks.push({ ...lesson })
-    }
-  }
-  return blocks
-}
-
 // Ohne hinterlegte Stundentafel ergibt sich das Raster aus den Unterrichtszeiten.
 const rows = computed(() => {
   const periods = (props.periods ?? []).map((period) => ({
@@ -154,9 +114,6 @@ const rows = computed(() => {
           periods.some((period) => period.start === lesson.start) &&
           periods.some((period) => period.end === lesson.end)
       )
-  const displayWeek = usePeriods
-    ? week.map((lessons) => combineAcrossBreaks(lessons, periods))
-    : week
   const timepoints = new Set<number>()
   if (usePeriods) {
     for (const { start, end } of periods) {
@@ -196,7 +153,7 @@ const rows = computed(() => {
       displayPeriod,
       pause: usePeriods ? period === null : !active,
       cells: visibleDays.value.map((day) => {
-        const lesson = displayWeek[day.index]?.find(
+        const lesson = week[day.index]?.find(
           (item) => item.start <= start && start < item.end
         )
         return {
@@ -277,9 +234,6 @@ const rows = computed(() => {
               <td
                 v-if="!cell.covered"
                 :rowspan="cell.span"
-                :data-tone="
-                  cell.entry ? tones.get(colorGroup(cell.entry)) : undefined
-                "
                 :class="{
                   'week-grid__filled': cell.entry,
                   'week-grid__last-column':
@@ -287,11 +241,7 @@ const rows = computed(() => {
                 }"
               >
                 <div v-if="cell.entry" class="week-grid__lesson">
-                  <strong v-text="cell.entry.learningField || 'Unterricht'" />
-                  <span
-                    v-if="cell.entry.teacherName"
-                    v-text="cell.entry.teacherName"
-                  />
+                  <strong>Unterricht</strong>
                   <small v-if="showRoom(cell.entry.roomNumber)">
                     Raum {{ cell.entry.roomNumber }}
                   </small>
@@ -493,61 +443,9 @@ td {
 }
 
 .week-grid__filled {
-  background: var(--lesson-paper, var(--surface));
-}
-
-[data-tone='0'] {
-  --lesson-paper: #e8efda;
+  background: #e8efda;
   --lesson-ink: #354b21;
   --lesson-muted: #485939;
-}
-
-[data-tone='1'] {
-  --lesson-paper: #e4f1ec;
-  --lesson-ink: #185548;
-  --lesson-muted: #355f52;
-}
-
-[data-tone='2'] {
-  --lesson-paper: #f9eed9;
-  --lesson-ink: #684714;
-  --lesson-muted: #685437;
-}
-
-[data-tone='3'] {
-  --lesson-paper: #e5edfa;
-  --lesson-ink: #25487d;
-  --lesson-muted: #455d79;
-}
-
-[data-tone='4'] {
-  --lesson-paper: #f8e8ed;
-  --lesson-ink: #742e4e;
-  --lesson-muted: #704654;
-}
-
-[data-tone='5'] {
-  --lesson-paper: #e4f1f5;
-  --lesson-ink: #1c525e;
-  --lesson-muted: #365d63;
-}
-
-[data-tone='6'] {
-  --lesson-paper: #e8e9f5;
-  --lesson-ink: #444574;
-  --lesson-muted: #55567b;
-}
-
-[data-tone='7'] {
-  --lesson-paper: #ede7f9;
-  --lesson-ink: #4b2e7d;
-  --lesson-muted: #593f76;
-}
-
-[data-tone='8'] {
-  --lesson-paper: #f6ebe0;
-  --lesson-ink: #773b25;
-  --lesson-muted: #714d3e;
 }
 
 .week-grid__lesson {
@@ -563,13 +461,8 @@ td {
   color: var(--lesson-ink, var(--accent-ink));
 }
 
-.week-grid__lesson span,
 .week-grid__lesson small {
   color: var(--lesson-muted, var(--muted));
-  font-size: 0.79rem;
-}
-
-.week-grid__lesson small {
   font-size: 0.72rem;
 }
 

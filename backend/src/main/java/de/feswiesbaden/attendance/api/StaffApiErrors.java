@@ -93,7 +93,6 @@ class StaffApiErrors {
               "INVALID_STUDENT",
               "INVALID_TIMETABLE",
               "INVALID_TIMETABLE_SLOT",
-              "INVALID_LESSON_DETAILS",
               "INVALID_BLOCK_PLAN",
               "INVALID_BLOCK_ASSIGNMENT",
               "INVALID_ASSISTANT_MESSAGE",

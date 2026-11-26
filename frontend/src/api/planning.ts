@@ -22,13 +22,11 @@ interface SlotInput {
   startsAt: string
   endsAt: string
   roomId: number
-  lessonDetails?: { learningField: string | null; teacherId: number | null }
 }
 
 export interface Slot extends SlotInput, ScheduledLesson {
   id: number
   validFrom: string | null
-  teacherId?: number | null
 }
 
 export interface Timetable {
@@ -76,7 +74,6 @@ export interface PlanningOverview {
   timetables: Timetable[]
   blockPlans: BlockPlan[]
   rooms: Room[]
-  teachers?: { id: number; name: string }[]
   classes: PlanningClass[]
 }
 
@@ -84,7 +81,6 @@ export interface PlanningOverview {
 const ERROR_MESSAGES: Record<string, string> = {
   INVALID_REQUEST: 'Die Eingaben sind unvollständig oder ungültig.',
   INVALID_TIMETABLE: 'Bitte einen Namen mit höchstens 150 Zeichen angeben.',
-  INVALID_LESSON_DETAILS: 'Prüfe das Lernfeld und die ausgewählte Lehrkraft.',
   INVALID_TIMETABLE_SLOT:
     'Der Beginn muss vor dem Ende liegen und ein Raum muss gewählt sein.',
   INVALID_BLOCK_PLAN:
@@ -260,8 +256,6 @@ export interface ScheduledLesson {
   startsAt: string
   endsAt: string
   roomNumber: string
-  learningField?: string | null
-  teacherName?: string | null
 }
 
 export interface ClassWeekDay {

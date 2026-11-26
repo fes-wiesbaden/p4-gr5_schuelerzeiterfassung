@@ -7,7 +7,6 @@ import de.feswiesbaden.attendance.repository.PlanningOverviewRepository.ClassBlo
 import de.feswiesbaden.attendance.repository.PlanningOverviewRepository.PeriodRow;
 import de.feswiesbaden.attendance.repository.PlanningOverviewRepository.RoomRow;
 import de.feswiesbaden.attendance.repository.PlanningOverviewRepository.SlotRow;
-import de.feswiesbaden.attendance.repository.PlanningOverviewRepository.TeacherRow;
 import de.feswiesbaden.attendance.repository.SchoolClassRepository;
 import java.time.DayOfWeek;
 import java.time.LocalDate;
@@ -98,7 +97,6 @@ public class PlanningService {
                         blocksByPlan.getOrDefault(plan.id(), List.of())))
             .toList(),
         overview.findRooms(),
-        overview.findTeachers(),
         classes.findAccessible(actor.id(), true).stream()
             .map(
                 schoolClass ->
@@ -174,12 +172,7 @@ public class PlanningService {
   }
 
   private static Lesson lesson(Slot slot, Map<Long, String> rooms) {
-    return new Lesson(
-        slot.startsAt(),
-        slot.endsAt(),
-        rooms.get(slot.roomId()),
-        slot.learningField(),
-        slot.teacherName());
+    return new Lesson(slot.startsAt(), slot.endsAt(), rooms.get(slot.roomId()));
   }
 
   public record ClassSchedule(
@@ -194,19 +187,13 @@ public class PlanningService {
 
   public record WeekDay(LocalDate date, List<Lesson> lessons, List<PeriodRow> periods) {}
 
-  public record Lesson(
-      LocalTime startsAt,
-      LocalTime endsAt,
-      String roomNumber,
-      String learningField,
-      String teacherName) {}
+  public record Lesson(LocalTime startsAt, LocalTime endsAt, String roomNumber) {}
 
   /** Enthält alle Daten der Planungsansicht */
   public record Overview(
       List<TimetableView> timetables,
       List<BlockPlanView> blockPlans,
       List<RoomRow> rooms,
-      List<TeacherRow> teachers,
       List<ClassPlanView> classes) {}
 
   /** Enthält einen Stundenplan mit seinen Slots */

@@ -112,9 +112,7 @@ function setDefaults(override = false) {
             weekday: lesson.weekday,
             startsAt: lesson.startsAt,
             endsAt: lesson.endsAt,
-            room: String(lesson.roomId),
-            learningField: lesson.learningField ?? '',
-            teacher: lesson.teacherId ? String(lesson.teacherId) : ''
+            room: String(lesson.roomId)
           }
         : {}
       break

@@ -123,9 +123,8 @@ public class CodexAssistantService {
         erfundenen Einträge. Namen, Klassencodes und Raumnummern so wiedergeben wie genannt.
         firstName, lastName und birthDate sind bei Änderungen die neuen Werte. studentName ist
         der bisherige Name. Bei einer Änderung im Stundenplan ist slot die bisherige Unterrichtszeit
-        als „Montag 08:00“. weekday/startsAt/endsAt/room/learningField/teacher sind neue Werte.
-        Zu Unterrichtszeiten gehören Lernfeld oder Fach und zuständige Lehrkraft. Steht in einer
-        Woche bei allen Stunden derselbe Raum, steht er einmal über dem Raster.
+        als „Montag 08:00“. weekday/startsAt/endsAt/room sind neue Werte.
+        Steht in einer Woche bei allen Stunden derselbe Raum, steht er einmal über dem Raster.
         Bei block ist date
         der Blockbeginn; gib ihn für assign_block im Feld block als YYYY-MM-DD aus.
         Bei Umbenennungen steht name für den neuen Namen, room/classCode für das bisherige Ziel.

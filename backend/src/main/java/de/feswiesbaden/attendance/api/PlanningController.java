@@ -9,7 +9,6 @@ import de.feswiesbaden.attendance.service.PlanningService.Overview;
 import de.feswiesbaden.attendance.service.PlanningService.WeekDay;
 import de.feswiesbaden.attendance.service.SchoolClassService;
 import de.feswiesbaden.attendance.service.TimetableService;
-import de.feswiesbaden.attendance.service.TimetableService.LessonDetails;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Positive;
@@ -93,8 +92,7 @@ public class PlanningController {
             request.weekday(),
             request.startsAt(),
             request.endsAt(),
-            request.roomId(),
-            request.lessonDetails()));
+            request.roomId()));
   }
 
   /** Ändert einen Slot ab einem zukünftigen Termin */
@@ -108,8 +106,7 @@ public class PlanningController {
             request.weekday(),
             request.startsAt(),
             request.endsAt(),
-            request.roomId(),
-            request.lessonDetails()));
+            request.roomId()));
   }
 
   /** Löscht die zukünftigen Termine des Slots */
@@ -152,12 +149,7 @@ public class PlanningController {
   public record NameRequest(String name) {}
 
   /** Enthält Wochentag, Beginn, Ende und Raum eines Slots */
-  public record SlotRequest(
-      Weekday weekday,
-      LocalTime startsAt,
-      LocalTime endsAt,
-      Long roomId,
-      LessonDetails lessonDetails) {}
+  public record SlotRequest(Weekday weekday, LocalTime startsAt, LocalTime endsAt, Long roomId) {}
 
   /** Enthält das Datum des ersten geänderten oder gelöschten Termins */
   public record SlotChange(LocalDate effectiveOn) {}

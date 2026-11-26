@@ -191,20 +191,7 @@ const teacher = (label = 'Klassenleitung') =>
       aliases: [`${item.firstName} ${item.lastName}`, item.username]
     }))
   )
-const lessonTeacher = choice('teacher', 'Zuständige Lehrkraft', (ctx) =>
-  (ctx.planning?.teachers ?? []).map((item) => ({
-    value: String(item.id),
-    label: item.name
-  }))
-)
-const slotFields = [
-  weekday,
-  startsAt,
-  endsAt,
-  room(),
-  { ...text('learningField', 'Lernfeld oder Fach'), optional: true },
-  { ...lessonTeacher, optional: true }
-]
+const slotFields = [weekday, startsAt, endsAt, room()]
 const result = (text: string): CommandResult => ({ text })
 const currentClass = (values: Values, ctx: CommandContext) =>
   ctx.classes.find((c) => c.id === Number(values.classCode))!
@@ -219,26 +206,18 @@ const details = (v: Values) => ({
   firstName: v.firstName,
   lastName: v.lastName
 })
-function slotBody(v: Values, current?: Slot) {
-  const learningField = v.learningField?.trim() || null
-  const teacherId = v.teacher ? Number(v.teacher) : null
-  const unchanged =
-    learningField === (current?.learningField ?? null) &&
-    teacherId === (current?.teacherId ?? null)
+function slotBody(v: Values) {
   return {
     weekday: v.weekday as Weekday,
     startsAt: v.startsAt!,
     endsAt: v.endsAt!,
-    roomId: Number(v.room),
-    ...(unchanged ? {} : { lessonDetails: { learningField, teacherId } })
+    roomId: Number(v.room)
   }
 }
 
 function lessonSummary(lesson: ScheduledLesson) {
   return [
     `${formatTime(lesson.startsAt)}–${formatTime(lesson.endsAt)} Uhr`,
-    lesson.learningField,
-    lesson.teacherName,
     lesson.roomNumber ? `Raum ${lesson.roomNumber}` : null
   ]
     .filter(Boolean)
@@ -589,9 +568,9 @@ ${entries.join('\n') || 'Für diese Woche liegen keine Tagesdaten vor.'}`,
     fields: [timetable, currentSlot, ...slotFields],
     needs: ['planning'],
     note: 'Die Änderung gilt ab einem Unterrichtstermin, der noch nicht begonnen hat.',
-    run: async (v, ctx) =>
+    run: async (v) =>
       result(
-        `Unterrichtszeit geändert ab ${formatDate(await updateSlot(Number(v.timetable), Number(v.slot), slotBody(v, selectedSlot(v, ctx))))}.`
+        `Unterrichtszeit geändert ab ${formatDate(await updateSlot(Number(v.timetable), Number(v.slot), slotBody(v)))}.`
       )
   },
   delete_slot: {

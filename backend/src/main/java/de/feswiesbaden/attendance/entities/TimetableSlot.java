@@ -57,13 +57,6 @@ public class TimetableSlot {
   @Column(name = "end_time", nullable = false)
   private LocalTime endTime;
 
-  @Column(name = "learning_field", length = 100)
-  private String learningField;
-
-  @ManyToOne(fetch = FetchType.LAZY)
-  @JoinColumn(name = "teacher_id")
-  private Staff teacher;
-
   @Column(name = "created_at", insertable = false, updatable = false, nullable = false)
   private LocalDateTime createdAt;
 

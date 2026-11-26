@@ -14,3 +14,14 @@ CREATE TABLE planned_attendance_status (
     CONSTRAINT fk_planned_attendance_deletion_date FOREIGN KEY (deletion_date_id) REFERENCES deletion_date(id),
     INDEX idx_planned_attendance_student_date (student_id, attendance_date, starts_at)
 );
+
+CREATE TABLE timetable_period (
+    timetable_id BIGINT NOT NULL,
+    period_number SMALLINT UNSIGNED NOT NULL,
+    starts_at TIME NOT NULL,
+    ends_at TIME NOT NULL,
+    PRIMARY KEY (timetable_id, period_number),
+    CONSTRAINT fk_timetable_period_timetable
+        FOREIGN KEY (timetable_id) REFERENCES timetable(id) ON DELETE CASCADE,
+    CONSTRAINT chk_timetable_period_times CHECK (starts_at < ends_at)
+);

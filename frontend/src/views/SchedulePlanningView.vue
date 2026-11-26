@@ -53,9 +53,7 @@ const slotForm = reactive({
   weekday: 'MONTAG' as Weekday,
   startsAt: '',
   endsAt: '',
-  roomId: null as number | null,
-  learningField: '',
-  teacherId: null as number | null
+  roomId: null as number | null
 })
 const blockPlanForm = reactive({ name: '', startsOn: '', endsOn: '' })
 const blockForm = reactive({ startsOn: '', endsOn: '' })
@@ -175,26 +173,15 @@ async function submitSlot() {
         endsAt: slotForm.endsAt,
         roomId
       }
-      const current = selectedTimetable.value?.slots.find(
-        (item) => item.id === editingSlotId.value
-      )
-      const learningField = slotForm.learningField.trim() || null
-      const teacherId = slotForm.teacherId
-      const detailsChanged =
-        learningField !== (current?.learningField ?? null) ||
-        teacherId !== (current?.teacherId ?? null)
-      const payload = detailsChanged
-        ? { ...slot, lessonDetails: { learningField, teacherId } }
-        : slot
       if (editingSlotId.value !== null) {
         const effectiveOn = await updateSlot(
           timetableId,
           editingSlotId.value,
-          payload
+          slot
         )
         return `Unterrichtszeit geändert ab ${formatDate(effectiveOn)}.`
       }
-      await addSlot(timetableId, payload)
+      await addSlot(timetableId, slot)
       return 'Unterrichtszeit hinzugefügt.'
     })
   ) {
@@ -208,9 +195,7 @@ async function editSlot(slot: Slot) {
     weekday: slot.weekday,
     startsAt: slot.startsAt,
     endsAt: slot.endsAt,
-    roomId: slot.roomId,
-    learningField: slot.learningField ?? '',
-    teacherId: slot.teacherId ?? null
+    roomId: slot.roomId
   })
   await nextTick()
   slotWeekday.value?.focus()
@@ -220,8 +205,6 @@ function resetSlotForm() {
   editingSlotId.value = null
   slotForm.startsAt = ''
   slotForm.endsAt = ''
-  slotForm.learningField = ''
-  slotForm.teacherId = null
 }
 
 async function removeSlot(slot: Slot) {
@@ -453,23 +436,6 @@ onUnmounted(() => window.removeEventListener('management:changed', refresh))
                   :value="room.id"
                 >
                   {{ room.roomNumber }}
-                </option>
-              </select>
-            </label>
-            <label>
-              <span>Lernfeld oder Fach</span>
-              <InputText v-model="slotForm.learningField" maxlength="100" />
-            </label>
-            <label>
-              <span>Zuständige Lehrkraft</span>
-              <select v-model="slotForm.teacherId">
-                <option :value="null">Ohne Zuordnung</option>
-                <option
-                  v-for="teacher in overview.teachers ?? []"
-                  :key="teacher.id"
-                  :value="teacher.id"
-                >
-                  {{ teacher.name }}
                 </option>
               </select>
             </label>

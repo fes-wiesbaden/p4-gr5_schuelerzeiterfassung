@@ -263,12 +263,6 @@
                 "string",
                 "null"
               ]
-            },
-            "learningField": {
-              "type": [
-                "string",
-                "null"
-              ]
             }
           },
           "required": [
@@ -291,8 +285,7 @@
             "blockPlan",
             "block",
             "teacher",
-            "username",
-            "learningField"
+            "username"
           ]
         }
       },

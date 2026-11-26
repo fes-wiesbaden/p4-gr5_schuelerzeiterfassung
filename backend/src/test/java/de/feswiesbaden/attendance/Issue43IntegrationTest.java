@@ -109,14 +109,12 @@ class Issue43IntegrationTest {
     jdbc.update(
         "INSERT INTO timetable_period (timetable_id, period_number, starts_at, ends_at)"
             + " VALUES (1, 1, '07:30:00', '08:15:00'), (1, 2, '08:15:00', '09:00:00')");
-    jdbc.update(
-        "UPDATE timetable_slot SET valid_until = '2026-09-16', learning_field = 'LF 1',"
-            + " teacher_id = 1 WHERE id = 1");
+    jdbc.update("UPDATE timetable_slot SET valid_until = '2026-09-16' WHERE id = 1");
     jdbc.update(
         """
         INSERT INTO timetable_slot
-          (timetable_id, room_id, weekday, start_time, end_time, valid_from, learning_field, teacher_id)
-        VALUES (1, 2, 'MONTAG', '08:15:00', '09:00:00', '2026-09-16', 'LF 2', 2)
+          (timetable_id, room_id, weekday, start_time, end_time, valid_from)
+        VALUES (1, 2, 'MONTAG', '08:15:00', '09:00:00', '2026-09-16')
         """);
     var teacher = staffSession("test.teacher.a");
     mvc.perform(get("/api/planning/classes/1/week?date=2026-09-16"))
@@ -130,15 +128,11 @@ class Issue43IntegrationTest {
         .andExpect(jsonPath("$[0].periods[1].startsAt").value("08:15:00"))
         .andExpect(jsonPath("$[0].lessons[0].startsAt").value("07:30:00"))
         .andExpect(jsonPath("$[0].lessons[0].roomNumber").value("TEST-R01"))
-        .andExpect(jsonPath("$[0].lessons[0].learningField").value("LF 1"))
-        .andExpect(jsonPath("$[0].lessons[0].teacherName").isNotEmpty())
         .andExpect(jsonPath("$[1].lessons").isEmpty());
     mvc.perform(get("/api/planning/classes/3/week?date=2026-09-21").session(teacher))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$[0].lessons[0].startsAt").value("08:15:00"))
-        .andExpect(jsonPath("$[0].lessons[0].roomNumber").value("TEST-R02"))
-        .andExpect(jsonPath("$[0].lessons[0].learningField").value("LF 2"))
-        .andExpect(jsonPath("$[0].lessons[0].teacherName").isNotEmpty());
+        .andExpect(jsonPath("$[0].lessons[0].roomNumber").value("TEST-R02"));
   }
 
   @Test

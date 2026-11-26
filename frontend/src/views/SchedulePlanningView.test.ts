@@ -113,9 +113,7 @@ describe('SchedulePlanningView', () => {
               {
                 startsAt: '07:30:00',
                 endsAt: '09:00:00',
-                roomNumber: 'R01',
-                learningField: 'LF 5 · Software entwickeln',
-                teacherName: 'Lehrkraft Muster'
+                roomNumber: 'R01'
               }
             ]
           },
@@ -136,8 +134,7 @@ describe('SchedulePlanningView', () => {
     const table = wrapper.get('table')
     expect(table.text()).toContain('Montag')
     expect(table.text()).toContain('Freitag')
-    expect(table.text()).toContain('LF 5 · Software entwickeln')
-    expect(table.text()).toContain('Lehrkraft Muster')
+    expect(table.text()).toContain('Unterricht')
     expect(table.find('td[rowspan="2"]').exists()).toBe(true)
     expect(table.text()).not.toContain('Raum R01')
     expect(wrapper.text()).toContain('Raum R01')
@@ -147,13 +144,11 @@ describe('SchedulePlanningView', () => {
     wrapper.unmount()
   })
 
-  it('zeigt nummerierte Freistunden und verbindet gleiche Unterrichtsblöcke über kurze Pausen', async () => {
+  it('zeigt nummerierte Freistunden und trennt Unterrichtszeiten durch Pausen', async () => {
     const firstLesson = {
       startsAt: '07:30',
       endsAt: '08:15',
-      roomNumber: 'A 213',
-      learningField: 'LF',
-      teacherName: 'Lehrkraft Beispiel'
+      roomNumber: 'A 213'
     }
     fetchMock
       .mockResolvedValueOnce(respond(200, [{ id: 1, classCode: 'KL-TEST' }]))
@@ -188,10 +183,8 @@ describe('SchedulePlanningView', () => {
     const wrapper = mountAs('lehrkraft')
     try {
       await flushPromises()
-      expect(wrapper.get('td[rowspan="3"]').text()).toContain(
-        'Lehrkraft Beispiel'
-      )
-      expect(wrapper.findAll('.week-grid__lesson')).toHaveLength(1)
+      expect(wrapper.findAll('.week-grid__lesson')).toHaveLength(2)
+      expect(wrapper.get('table').text()).toContain('Pause')
       expect(
         wrapper.findAll('.week-grid__period').map((period) => period.text())
       ).toEqual(['1', '2', '3'])
@@ -206,9 +199,7 @@ describe('SchedulePlanningView', () => {
       {
         startsAt: '07:30',
         endsAt: '09:00',
-        roomNumber: 'A 213',
-        learningField: 'LF',
-        teacherName: 'Lehrkraft Beispiel'
+        roomNumber: 'A 213'
       }
     ]
     fetchMock
@@ -232,7 +223,7 @@ describe('SchedulePlanningView', () => {
       const mode = wrapper.get('.class-week__views button:last-child')
       await mode.trigger('click')
       expect(mode.attributes('aria-pressed')).toBe('true')
-      expect(wrapper.get('table').text()).toContain('Lehrkraft Beispiel')
+      expect(wrapper.get('table').text()).toContain('Unterricht')
       await wrapper.get('.class-week__controls select').setValue('2026-09-28')
       await flushPromises()
       expect(fetchMock.mock.lastCall?.[0]).toBe(
