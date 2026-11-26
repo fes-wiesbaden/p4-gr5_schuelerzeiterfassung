@@ -181,6 +181,36 @@ describe('LiveAttendanceView', () => {
     expect(wrapper.find('form.correction').exists()).toBe(true)
   })
 
+  it('pollt nicht weiter, wenn die Seite vor Ende des ersten Ladens verlassen wird', async () => {
+    let finishClasses: (response: Response) => void = () => {}
+    fetchMock.mockImplementationOnce(
+      () => new Promise<Response>((resolve) => (finishClasses = resolve))
+    )
+    const wrapper = mount(LiveAttendanceView, {
+      global: { plugins: [PrimeVue] }
+    })
+
+    wrapper.unmount()
+    finishClasses(respond(200, classes))
+    await flushPromises()
+    const calls = fetchMock.mock.calls.length
+    await vi.advanceTimersByTimeAsync(90_000)
+
+    expect(fetchMock.mock.calls.length).toBe(calls)
+  })
+
+  it('meldet einen Verbindungsabbruch bei der Statusänderung', async () => {
+    const wrapper = await mountView()
+    fetchMock.mockImplementationOnce(async () => {
+      throw new TypeError('Failed to fetch')
+    })
+
+    await wrapper.find('form.correction').trigger('submit')
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('Bitte Verbindung prüfen')
+  })
+
   it('lädt bei manuellem Aktualisieren sofort neu', async () => {
     const wrapper = await mountView()
 

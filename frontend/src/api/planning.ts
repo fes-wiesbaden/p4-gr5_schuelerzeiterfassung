@@ -116,7 +116,7 @@ export function errorMessage(code: string | undefined): string {
 }
 
 // Wirft bei einer fehlgeschlagenen Antwort einen Fehler mit deutschem Hinweistext
-async function expectOk(response: Response): Promise<Response> {
+export async function expectOk(response: Response): Promise<Response> {
   if (response.ok) {
     return response
   }

@@ -136,7 +136,7 @@ public class StaffController {
     return attendance.readDay(classId, date);
   }
 
-  /** Liefert den heutigen Berliner Tag und die nach Stundenplan vorausgewählte Klasse */
+  /** Liefert die nach Stundenplan vorausgewählte Klasse und die aktuelle Serverzeit */
   @GetMapping("/attendance/current-class")
   public CurrentClass currentClass() {
     return attendance.findCurrentClass();

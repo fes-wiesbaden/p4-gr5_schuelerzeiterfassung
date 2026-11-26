@@ -14,7 +14,7 @@ import {
   type DailyStudent
 } from '@/api/attendance'
 import { loadData, postJson } from '@/api/client'
-import { errorMessage } from '@/api/planning'
+import { expectOk } from '@/api/planning'
 import AppDataTable, {
   type DataTableColumn
 } from '@/components/AppDataTable.vue'
@@ -116,18 +116,19 @@ async function correct(row: Row) {
   const occurredAt = berlinInstant(date.value, draft.time)
   let changed: boolean
   try {
-    const response = await postJson(
-      `/api/students/${row.studentId}/attendance/${date.value}/status-corrections`,
-      { status: draft.status, occurredAt }
+    const response = await expectOk(
+      await postJson(
+        `/api/students/${row.studentId}/attendance/${date.value}/status-corrections`,
+        { status: draft.status, occurredAt }
+      )
     )
-    const body = await response.json().catch(() => ({}))
-    if (!response.ok) {
-      message.value = errorMessage(body.code)
-      return
-    }
-    changed = body.changed === true
-  } catch {
-    message.value = 'Statusänderung fehlgeschlagen. Bitte Verbindung prüfen.'
+    changed = ((await response.json()) as { changed: boolean }).changed
+  } catch (failure) {
+    // fetch meldet Netzwerkfehler als TypeError, expectOk abgelehnte Anfragen mit Hinweistext
+    message.value =
+      failure instanceof TypeError
+        ? 'Statusänderung fehlgeschlagen. Bitte Verbindung prüfen.'
+        : (failure as Error).message
     return
   }
   message.value = changed
@@ -164,12 +165,14 @@ async function initialize() {
   }
 }
 
-onMounted(async () => {
-  await initialize()
+onMounted(() => {
+  // Das Intervall startet vor dem ersten Abruf, damit onUnmounted es auch
+  // während eines noch laufenden Ladevorgangs beendet
   timer = setInterval(
     () => (initialized.value ? load() : initialize()),
     POLL_INTERVAL_MS
   )
+  initialize()
 })
 
 onUnmounted(() => clearInterval(timer))
