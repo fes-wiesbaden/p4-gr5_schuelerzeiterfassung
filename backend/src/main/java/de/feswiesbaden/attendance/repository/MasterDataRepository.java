@@ -20,7 +20,12 @@ public class MasterDataRepository {
   }
 
   public List<Map<String, Object>> rooms() {
-    return jdbc.queryForList("SELECT id,room_number AS roomNumber FROM room ORDER BY room_number");
+    return jdbc.queryForList(
+        """
+        SELECT r.id, r.room_number AS roomNumber, t.terminal_id AS terminalId
+        FROM room r LEFT JOIN terminal t ON t.room_id = r.id
+        ORDER BY r.room_number
+        """);
   }
 
   public void saveRoom(Long id, String number) {

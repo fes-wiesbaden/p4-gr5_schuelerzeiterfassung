@@ -950,7 +950,8 @@ class AttendanceAccountingIntegrationTest {
     String entry = "$[?(@.id == " + id + ")]";
     mvc.perform(get("/api/rooms").session(admin))
         .andExpect(status().isOk())
-        .andExpect(jsonPath(entry + ".roomNumber", contains("A104")));
+        .andExpect(jsonPath(entry + ".roomNumber", contains("A104")))
+        .andExpect(jsonPath("$[?(@.roomNumber=='TEST-R01')].terminalId", contains(9001)));
     write(put(item), admin, "{\"roomNumber\":\"A105\"}").andExpect(status().isNoContent());
     mvc.perform(get("/api/rooms").session(admin))
         .andExpect(status().isOk())
