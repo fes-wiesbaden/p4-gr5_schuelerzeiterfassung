@@ -1,0 +1,196 @@
+import { flushPromises, mount } from '@vue/test-utils'
+import PrimeVue from 'primevue/config'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+
+import LiveAttendanceView from './LiveAttendanceView.vue'
+
+const classes = [
+  { id: 1, classCode: 'KL-A' },
+  { id: 2, classCode: 'KL-B' }
+]
+
+const day = [
+  {
+    studentId: 7,
+    firstName: 'Erika',
+    lastName: 'Beispiel',
+    status: 'ABWESEND',
+    unexcusedMinutes: 30
+  }
+]
+
+function respond(status: number, body: unknown): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { 'Content-Type': 'application/json' }
+  })
+}
+
+function attendanceCalls(fetchMock: ReturnType<typeof vi.fn>) {
+  return fetchMock.mock.calls
+    .map(([url]) => url as string)
+    .filter((url) => url.includes('/attendance?date='))
+}
+
+describe('LiveAttendanceView', () => {
+  const fetchMock = vi.fn()
+
+  beforeEach(() => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-09-14T08:00:00'))
+    vi.stubGlobal('fetch', fetchMock)
+    fetchMock.mockImplementation(async (url: string, options: RequestInit) => {
+      if (url === '/api/classes') return respond(200, classes)
+      if (url === '/api/attendance/current-class')
+        return respond(200, { classId: 2, date: '2026-09-14' })
+      if (options?.method === 'POST') return respond(200, { changed: true })
+      return respond(200, day)
+    })
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+    vi.unstubAllGlobals()
+    fetchMock.mockReset()
+  })
+
+  async function mountView() {
+    const wrapper = mount(LiveAttendanceView, {
+      global: { plugins: [PrimeVue] }
+    })
+    await flushPromises()
+    return wrapper
+  }
+
+  it('wählt die Klasse nach Stundenplan vor und zeigt deren Tagesstatus', async () => {
+    const wrapper = await mountView()
+
+    expect(
+      (wrapper.find('.class-filter select').element as HTMLSelectElement).value
+    ).toBe('2')
+    expect(attendanceCalls(fetchMock)).toEqual([
+      '/api/classes/2/attendance?date=2026-09-14'
+    ])
+    expect(wrapper.text()).toContain('Beispiel, Erika')
+    expect(wrapper.text()).toContain('Abwesend')
+    expect(wrapper.text()).toContain('30')
+  })
+
+  it('fällt ohne laufenden Unterricht auf die erste Klasse zurück', async () => {
+    fetchMock.mockImplementation(async (url: string) =>
+      url === '/api/classes'
+        ? respond(200, classes)
+        : url === '/api/attendance/current-class'
+          ? respond(200, { classId: null, date: '2026-09-14' })
+          : respond(200, day)
+    )
+    await mountView()
+
+    expect(attendanceCalls(fetchMock)).toEqual([
+      '/api/classes/1/attendance?date=2026-09-14'
+    ])
+  })
+
+  it('lädt alle 30 Sekunden per REST neu und stoppt beim Verlassen', async () => {
+    const wrapper = await mountView()
+
+    await vi.advanceTimersByTimeAsync(29_000)
+    expect(attendanceCalls(fetchMock)).toHaveLength(1)
+    await vi.advanceTimersByTimeAsync(1_000)
+    expect(attendanceCalls(fetchMock)).toHaveLength(2)
+
+    wrapper.unmount()
+    await vi.advanceTimersByTimeAsync(60_000)
+    expect(attendanceCalls(fetchMock)).toHaveLength(2)
+  })
+
+  it('übernimmt beim Polling neuen Status und aktuelle Uhrzeit in unbearbeitete Eingaben', async () => {
+    const wrapper = await mountView()
+    fetchMock.mockImplementation(async () =>
+      respond(200, [{ ...day[0], status: 'ANWESEND' }])
+    )
+
+    await vi.advanceTimersByTimeAsync(30 * 60_000)
+
+    const form = wrapper.find('form.correction')
+    expect((form.find('select').element as HTMLSelectElement).value).toBe(
+      'ANWESEND'
+    )
+    expect(
+      (form.find('input[type="time"]').element as HTMLInputElement).value
+    ).toBe('08:30')
+  })
+
+  it('behält bearbeitete Eingaben beim Polling', async () => {
+    const wrapper = await mountView()
+    const form = wrapper.find('form.correction')
+    await form.find('select').setValue('ENTSCHULDIGT')
+
+    await vi.advanceTimersByTimeAsync(30_000)
+
+    expect((form.find('select').element as HTMLSelectElement).value).toBe(
+      'ENTSCHULDIGT'
+    )
+  })
+
+  it('lädt bei manuellem Aktualisieren sofort neu', async () => {
+    const wrapper = await mountView()
+
+    await wrapper
+      .findAll('button')
+      .find((button) => button.text().includes('Aktualisieren'))!
+      .trigger('click')
+    await flushPromises()
+
+    expect(attendanceCalls(fetchMock)).toHaveLength(2)
+  })
+
+  it('lädt nach Klassenwechsel die gewählte Klasse', async () => {
+    const wrapper = await mountView()
+
+    await wrapper.find('.class-filter select').setValue('1')
+    await flushPromises()
+
+    expect(attendanceCalls(fetchMock).at(-1)).toBe(
+      '/api/classes/1/attendance?date=2026-09-14'
+    )
+  })
+
+  it('sendet eine Statusänderung ab der gewählten Uhrzeit und lädt die Minuten neu', async () => {
+    const wrapper = await mountView()
+
+    const form = wrapper.find('form.correction')
+    await form.find('select').setValue('ENTSCHULDIGT')
+    await form.find('input[type="time"]').setValue('07:45')
+    await form.trigger('submit')
+    await flushPromises()
+
+    const post = fetchMock.mock.calls.find(
+      ([, options]) => options?.method === 'POST'
+    )!
+    expect(post[0]).toBe(
+      '/api/students/7/attendance/2026-09-14/status-corrections'
+    )
+    expect(JSON.parse(post[1].body)).toEqual({
+      status: 'ENTSCHULDIGT',
+      occurredAt: new Date('2026-09-14T07:45:00').toISOString()
+    })
+    expect(attendanceCalls(fetchMock)).toHaveLength(2)
+    expect(wrapper.text()).toContain('Status von Beispiel, Erika gespeichert.')
+  })
+
+  it('zeigt eine abgelehnte Statusänderung verständlich an', async () => {
+    const wrapper = await mountView()
+    fetchMock.mockImplementationOnce(async () =>
+      respond(409, { code: 'ATTENDANCE_DAY_LOCKED_OR_UNPLANNED' })
+    )
+
+    await wrapper.find('form.correction').trigger('submit')
+    await flushPromises()
+
+    expect(wrapper.text()).toContain(
+      'Für diesen Tag ist keine Änderung möglich'
+    )
+    expect(attendanceCalls(fetchMock)).toHaveLength(1)
+  })
+})
