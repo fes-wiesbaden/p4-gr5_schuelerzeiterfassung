@@ -17,6 +17,7 @@ const props = defineProps<{
   itemUrl?: string
   editable: boolean
   canCreate?: boolean
+  createUrl?: string | null
   title: string
   label: (row: T) => string
 }>()
@@ -133,13 +134,16 @@ async function submit(method: 'POST' | 'PUT' | 'DELETE', body?: unknown) {
   const source = props.url
   const version = loadVersion
   const rowId = selected.value?.id
+  const url =
+    method === 'POST'
+      ? props.createUrl
+      : (props.itemUrl ?? source) + '/' + rowId
+  if (url === null) return false
   busy.value = true
   error.value = ''
   let saved = false
   try {
-    const url =
-      method === 'POST' ? source : (props.itemUrl ?? source) + '/' + rowId
-    await changeData(url, method, body)
+    await changeData(url ?? source, method, body)
     saved = true
     if (!isCurrentLoad(source, version)) return true
     emit('saved')
@@ -210,7 +214,11 @@ onUnmounted(() =>
       <form @submit.prevent="save">
         <slot name="form" :row="selected" />
         <div class="form-actions">
-          <button class="primary" type="submit">
+          <button
+            class="primary"
+            type="submit"
+            :disabled="!selected && createUrl === null"
+          >
             {{ busy ? 'Wird gespeichert …' : 'Speichern' }}
           </button>
           <button type="button" @click="cancelEdit">Abbrechen</button>

@@ -39,12 +39,23 @@ const rosterUrl = computed(() =>
     ? `/api/classes/${selection.value.id}/students`
     : '/api/students'
 )
-const canCreate = computed(() =>
-  Boolean(
-    selection.value &&
-    (auth.isAdmin || selection.value.classTeacherId === staffId.value)
+const managedClasses = computed(() =>
+  classes.value.filter(
+    (entry) => auth.isAdmin || entry.classTeacherId === staffId.value
   )
 )
+const canCreate = computed(() =>
+  selection.value
+    ? managedClasses.value.some((entry) => entry.id === selection.value?.id)
+    : managedClasses.value.length > 0
+)
+const createClassId = ref<number>()
+const createUrl = computed(() => {
+  const classId = selection.value?.id ?? createClassId.value
+  return managedClasses.value.some((entry) => entry.id === classId)
+    ? `/api/classes/${classId}/students`
+    : null
+})
 const classPage = computed(() => props.classId !== undefined)
 const title = computed(() =>
   classPage.value && selection.value ? selection.value.classCode : 'Schüler'
@@ -113,10 +124,12 @@ onMounted(async () => {
     :url="rosterUrl"
     :editable="false"
     :can-create="canCreate"
+    :create-url="createUrl"
     :title="title"
     column-title="Name"
     :columns="columns"
     :label="studentLabel"
+    @saved="createClassId = undefined"
   >
     <template #filter="{ saving }">
       <div v-if="!classPage" class="class-filter">
@@ -141,6 +154,19 @@ onMounted(async () => {
       </RouterLink>
     </template>
     <template #form>
+      <label v-if="!selection">
+        Klasse
+        <select v-model="createClassId" required>
+          <option :value="undefined" disabled>Klasse auswählen</option>
+          <option
+            v-for="entry in managedClasses"
+            :key="entry.id"
+            :value="entry.id"
+          >
+            {{ entry.classCode }}
+          </option>
+        </select>
+      </label>
       <StudentFormFields />
     </template>
   </MasterDataList>
