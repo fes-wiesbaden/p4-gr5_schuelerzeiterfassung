@@ -19,6 +19,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.LocalTime;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.time.temporal.ChronoUnit;
@@ -227,6 +228,47 @@ public class AttendanceAccountingService {
     }
     return result;
   }
+
+  /**
+   * Ermittelt den heutigen Berliner Tag und die zugängliche Klasse, deren Slot gerade läuft. Ohne
+   * laufenden Slot gilt die Klasse mit dem nächsten heutigen Slot, sonst keine Klasse. Klassen mit
+   * planfremder Blockzuordnung werden übersprungen
+   */
+  @Transactional(readOnly = true)
+  public CurrentClass findCurrentClass() {
+    var actor = authorization.currentStaff();
+    var now = now();
+    var today = berlinDate(now);
+    var time = now.atOffset(ZoneOffset.UTC).atZoneSameInstant(BERLIN).toLocalTime();
+    Long nextClassId = null;
+    LocalTime nextStart = null;
+    for (var schoolClass : classes.findAccessible(actor.id(), actor.administrator())) {
+      var plan = classes.findPlan(schoolClass.id(), false).orElse(null);
+      if (plan == null) {
+        continue;
+      }
+      List<Slot> slots;
+      try {
+        slots = readDaySlots(plan, today, now);
+      } catch (InvalidClassBlockAssignmentException dataProblem) {
+        continue;
+      }
+      for (var slot : slots) {
+        if (!time.isBefore(slot.startsAt()) && time.isBefore(slot.endsAt())) {
+          return new CurrentClass(schoolClass.id(), today);
+        }
+        if (slot.startsAt().isAfter(time)
+            && (nextStart == null || slot.startsAt().isBefore(nextStart))) {
+          nextStart = slot.startsAt();
+          nextClassId = schoolClass.id();
+        }
+      }
+    }
+    return new CurrentClass(nextClassId, today);
+  }
+
+  /** Enthält den heutigen Berliner Tag und die vorausgewählte Klasse oder null */
+  public record CurrentClass(Long classId, LocalDate date) {}
 
   /** Liefert geplante Slots des Tages, solange die Aufbewahrungsfrist des Plans läuft */
   private List<Slot> readDaySlots(ClassPlan plan, LocalDate date, LocalDateTime now) {
