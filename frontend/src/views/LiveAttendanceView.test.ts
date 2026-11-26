@@ -211,6 +211,16 @@ describe('LiveAttendanceView', () => {
     expect(wrapper.text()).toContain('Bitte Verbindung prüfen')
   })
 
+  it('behält eine bearbeitete Uhrzeit beim Polling', async () => {
+    const wrapper = await mountView()
+    const time = wrapper.find('form.correction input')
+    await time.setValue('07:45')
+
+    await vi.advanceTimersByTimeAsync(30 * 60_000)
+
+    expect((time.element as HTMLInputElement).value).toBe('07:45')
+  })
+
   it('lädt bei manuellem Aktualisieren sofort neu', async () => {
     const wrapper = await mountView()
 
