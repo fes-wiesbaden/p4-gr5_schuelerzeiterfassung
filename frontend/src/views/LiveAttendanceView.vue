@@ -111,7 +111,6 @@ async function correct(row: Row) {
   const draft = drafts[row.studentId]
   message.value = ''
   const occurredAt = berlinInstant(date.value, draft.time)
-  let changed: boolean
   try {
     const response = await expectOk(
       await postJson(
@@ -119,7 +118,10 @@ async function correct(row: Row) {
         { status: draft.status, occurredAt }
       )
     )
-    changed = ((await response.json()) as { changed: boolean }).changed
+    const { changed } = (await response.json()) as { changed: boolean }
+    message.value = changed
+      ? `Status von ${row.name} gespeichert.`
+      : `Keine Änderung: ${row.name} hatte ab dieser Uhrzeit bereits diesen Status.`
   } catch (failure) {
     // fetch meldet Netzwerkfehler als TypeError, expectOk abgelehnte Anfragen mit Hinweistext
     message.value =
@@ -128,9 +130,6 @@ async function correct(row: Row) {
         : (failure as Error).message
     return
   }
-  message.value = changed
-    ? `Status von ${row.name} gespeichert.`
-    : `Keine Änderung: ${row.name} hatte ab dieser Uhrzeit bereits diesen Status.`
   // Die Eingabe bleibt sichtbar und übernimmt beim nächsten Abruf den neuen Status
   draft.touched = false
   await load()

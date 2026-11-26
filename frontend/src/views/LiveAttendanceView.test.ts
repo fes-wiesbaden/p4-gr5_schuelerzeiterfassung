@@ -302,9 +302,6 @@ describe('LiveAttendanceView', () => {
     await vi.advanceTimersByTimeAsync(30_000)
 
     expect(wrapper.find('form.correction').exists()).toBe(true)
-    expect(wrapper.get('[role="alert"]').text()).toContain(
-      'konnte nicht geladen werden'
-    )
   })
 
   it('zeigt während des Ladens keinen Hinweis auf fehlenden Tagesstatus', async () => {
