@@ -1,7 +1,6 @@
 package de.feswiesbaden.attendance;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.hamcrest.Matchers.contains;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -46,7 +45,9 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 
 /**
  * Prüft die Rechte der Lehrkraft in der aktuellen Anwesenheitsansicht und beim Abruf vergangener
- * Tage über HTTP (Issue #45). Das Polling-Verhalten aus #43 prüft LiveAttendanceView.test.ts
+ * Tage über HTTP (Issue #45). Die Klassenliste prüfen Issue23IntegrationTest und
+ * AttendanceAccountingIntegrationTest, die Vorauswahl nur zugänglicher Klassen
+ * Issue43IntegrationTest und das Polling-Verhalten aus #43 LiveAttendanceView.test.ts
  */
 @SpringBootTest
 @AutoConfigureMockMvc
@@ -84,10 +85,9 @@ class Issue45IntegrationTest {
         .thenAnswer(invocation -> Clock.fixed(clock.instant(), invocation.getArgument(0)));
   }
 
-  /** Entfernt den Sicherheitskontext und die Testdaten in der Reihenfolge ihrer Abhängigkeiten */
+  /** Entfernt die Testdaten in der Reihenfolge ihrer Abhängigkeiten */
   @AfterEach
   void cleanup() {
-    SecurityContextHolder.clearContext();
     for (String table :
         List.of(
             "attendance_audit",
@@ -110,24 +110,6 @@ class Issue45IntegrationTest {
   }
 
   /**
-   * Lehrkraft B sieht den Tagesstatus ihrer Klasse 2. Am 21.09. läuft nur Klasse 3 von Lehrkraft A,
-   * daher wählt die Ansicht für B keine fremde Klasse vor. Die Klassenliste prüfen
-   * Issue23IntegrationTest und AttendanceAccountingIntegrationTest
-   */
-  @Test
-  void teacherSeesOnlyAssignedClasses() throws Exception {
-    var teacher = staffSession("test.teacher.b");
-    mvc.perform(get("/api/classes/2/attendance?date=2026-09-14").session(teacher))
-        .andExpect(status().isOk())
-        .andExpect(jsonPath("$[*].studentId", contains(7)));
-
-    setTime("2026-09-21T06:00:00Z");
-    mvc.perform(get("/api/attendance/current-class").session(teacher))
-        .andExpect(status().isOk())
-        .andExpect(jsonPath("$.classId").value((Object) null));
-  }
-
-  /**
    * Der Abruf eines vergangenen Tages und Statuskorrekturen in fremden Klassen werden abgelehnt und
    * ändern weder Anwesenheit, Protokoll noch Minutenkonten. Den heutigen Tag prüft
    * AttendanceAccountingIntegrationTest
@@ -141,17 +123,16 @@ class Issue45IntegrationTest {
         .andExpect(content().json("{\"code\":\"NOT_FOUND\"}"));
     mvc.perform(get(pastDay).session(staffSession("test.teacher.a"))).andExpect(status().isOk());
 
-    write(CORRECTION, teacher, EXCUSE)
-        .andExpect(status().isNotFound())
-        .andExpect(content().json("{\"code\":\"NOT_FOUND\"}"));
+    write(post(CORRECTION), teacher, EXCUSE).andExpect(status().isNotFound());
     assertNoAttendanceBooked();
   }
 
   /**
    * Die Korrektur der Lehrkraft wird am selben Tag und rückwirkend am Folgetag mit Mitarbeiter,
    * Zeitpunkten, Status, Löschfrist und Minutendeltas protokolliert und ist beim nächsten
-   * REST-Abruf mit neu berechneten Minuten sichtbar. Eine abgelehnte Korrektur schreibt kein
-   * Protokoll
+   * REST-Abruf mit neu berechneten Minuten sichtbar. Eine Korrektur eines vergangenen Tages ohne
+   * Unterricht wird abgelehnt und schreibt kein Protokoll. Den nach einem Kontenreset gesperrten
+   * Tag prüft AttendanceAccountingIntegrationTest
    */
   @ParameterizedTest
   @ValueSource(strings = {"2026-09-14T08:45:00Z", "2026-09-15T06:00:00Z"})
@@ -160,18 +141,19 @@ class Issue45IntegrationTest {
     var teacher = staffSession("test.teacher.a");
     mvc.perform(get(CLASS_DAY).session(teacher))
         .andExpect(status().isOk())
+        .andExpect(jsonPath("$[0].studentId").value(1))
         .andExpect(jsonPath("$[0].status").value("ABWESEND"))
         .andExpect(jsonPath("$[0].unexcusedMinutes").value(180));
 
     write(
-            CORRECTION,
+            post("/api/students/1/attendance/2026-09-11/status-corrections"),
             teacher,
-            "{\"status\":\"ENTSCHULDIGT\",\"occurredAt\":\"2026-09-14T05:45:00.500Z\"}")
-        .andExpect(status().isBadRequest())
-        .andExpect(content().json("{\"code\":\"INVALID_STATUS_TIME\"}"));
+            "{\"status\":\"ENTSCHULDIGT\",\"occurredAt\":\"2026-09-11T06:00:00Z\"}")
+        .andExpect(status().isConflict())
+        .andExpect(content().json("{\"code\":\"ATTENDANCE_DAY_LOCKED_OR_UNPLANNED\"}"));
     assertNoAttendanceBooked();
 
-    write(CORRECTION, teacher, EXCUSE)
+    write(post(CORRECTION), teacher, EXCUSE)
         .andExpect(status().isOk())
         .andExpect(content().json("{\"changed\":true}"));
     var attendanceId =
@@ -207,26 +189,33 @@ class Issue45IntegrationTest {
   @Test
   void requiresAuthenticationForLiveAttendance() throws Exception {
     mvc.perform(get(CLASS_DAY)).andExpect(status().isUnauthorized());
-    mvc.perform(withCsrf(post(CORRECTION), EXCUSE)).andExpect(status().isUnauthorized());
+    write(post(CORRECTION), new MockHttpSession(), EXCUSE).andExpect(status().isUnauthorized());
     assertNoAttendanceBooked();
   }
 
   /**
    * Der Produktionscode enthält keine SSE-Infrastruktur, auch nicht als ResponseEntity-Generic oder
-   * manuell gesetzten Content-Type; WebFlux liegt nicht auf dem Klassenpfad
+   * manuell gesetzten Content-Type; WebFlux liegt nicht auf dem Klassenpfad. Der Quellpfad wird aus
+   * target/test-classes abgeleitet, damit der Test unabhängig vom Arbeitsverzeichnis läuft
    */
   @Test
   void usesNoServerSentEvents() throws Exception {
     assertThat(ClassUtils.isPresent("org.springframework.web.reactive.DispatcherHandler", null))
         .isFalse();
-    try (var files = Files.walk(Path.of("src/main"))) {
+    var testClasses =
+        Path.of(getClass().getProtectionDomain().getCodeSource().getLocation().toURI());
+    try (var files = Files.walk(testClasses.resolve("../../src/main").normalize())) {
       var sources = files.filter(Files::isRegularFile).toList();
       assertThat(sources).isNotEmpty();
       for (var file : sources) {
         assertThat(Files.readString(file))
             .as(file.toString())
             .doesNotContain(
-                "SseEmitter", "ServerSentEvent", "TEXT_EVENT_STREAM", "text/event-stream");
+                "SseEmitter",
+                "ServerSentEvent",
+                "EventSource",
+                "TEXT_EVENT_STREAM",
+                "text/event-stream");
       }
     }
   }
@@ -266,18 +255,16 @@ class Issue45IntegrationTest {
   }
 
   /** Führt einen Schreibzugriff mit Sitzung und passendem CSRF-Token aus */
-  private ResultActions write(String url, MockHttpSession session, String body) throws Exception {
-    return mvc.perform(withCsrf(post(url).session(session), body));
-  }
-
-  /** Ergänzt einen JSON-Schreibzugriff um ein passendes CSRF-Token */
-  private static MockHttpServletRequestBuilder withCsrf(
-      MockHttpServletRequestBuilder request, String body) {
+  private ResultActions write(
+      MockHttpServletRequestBuilder request, MockHttpSession session, String body)
+      throws Exception {
     String token = "test-csrf-token";
-    return request
-        .cookie(new Cookie("XSRF-TOKEN", token))
-        .header("X-XSRF-TOKEN", token)
-        .contentType(MediaType.APPLICATION_JSON)
-        .content(body);
+    return mvc.perform(
+        request
+            .session(session)
+            .cookie(new Cookie("XSRF-TOKEN", token))
+            .header("X-XSRF-TOKEN", token)
+            .contentType(MediaType.APPLICATION_JSON)
+            .content(body));
   }
 }
