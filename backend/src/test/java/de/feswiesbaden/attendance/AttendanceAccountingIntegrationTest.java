@@ -759,6 +759,45 @@ class AttendanceAccountingIntegrationTest {
   }
 
   @Test
+  void previewDoesNotWaitForClassWriteLock() throws Exception {
+    addTuesdayLesson();
+    setTime("2026-09-16T08:00:00Z");
+    var teacher = staffSession("test.teacher.a");
+    var request =
+        """
+        {"classId":1,"studentId":1,"date":"2026-09-14","endDate":"2026-09-16",
+         "status":"MIT_ATTEST_ENTSCHULDIGT"}
+        """;
+    var locked = new CompletableFuture<Void>();
+    var release = new CompletableFuture<Void>();
+    try (var workers = Executors.newFixedThreadPool(2)) {
+      var holder =
+          workers.submit(
+              () ->
+                  new TransactionTemplate(transactions)
+                      .execute(
+                          tx -> {
+                            jdbc.queryForObject(
+                                "SELECT id FROM school_class WHERE id = 1 FOR UPDATE", Long.class);
+                            jdbc.queryForObject(
+                                "SELECT id FROM deletion_date WHERE id = 1 FOR UPDATE", Long.class);
+                            locked.complete(null);
+                            release.join();
+                            return null;
+                          }));
+      try {
+        locked.get(10, TimeUnit.SECONDS);
+        var preview = workers.submit(() -> previewExcusal(teacher, request, 225));
+        preview.get(10, TimeUnit.SECONDS);
+        release.complete(null);
+        holder.get(10, TimeUnit.SECONDS);
+      } finally {
+        release.complete(null);
+      }
+    }
+  }
+
+  @Test
   void confirmsMultipleCompletedSchoolDaysAtomicallyAndKeepsTheirReason() throws Exception {
     addTuesdayLesson();
     setTime("2026-09-16T08:00:00Z");

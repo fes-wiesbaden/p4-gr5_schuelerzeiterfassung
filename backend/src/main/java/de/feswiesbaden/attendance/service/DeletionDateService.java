@@ -21,6 +21,10 @@ public class DeletionDateService {
     return deletionDates.getOrCreate(deletionDateFor(endsOn));
   }
 
+  public Long findId(LocalDate endsOn) {
+    return deletionDates.findId(deletionDateFor(endsOn));
+  }
+
   /** Berechnet das Löschdatum sechs Kalendermonate nach Planende */
   public static LocalDate deletionDateFor(LocalDate endsOn) {
     return endsOn.plusMonths(6);

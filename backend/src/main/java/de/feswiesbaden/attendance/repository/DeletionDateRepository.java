@@ -18,6 +18,13 @@ public class DeletionDateRepository {
     this.entityManager = entityManager;
   }
 
+  public Long findId(LocalDate deleteAfter) {
+    return jdbc.query(
+        "SELECT id FROM deletion_date WHERE delete_after = ?",
+        rows -> rows.next() ? rows.getLong(1) : null,
+        deleteAfter);
+  }
+
   /** Legt das Löschdatum bei Bedarf an und lädt die zugehörige Frist mit Schreibsperre */
   public DeletionDate getOrCreate(LocalDate deleteAfter) {
     jdbc.update(

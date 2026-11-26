@@ -455,15 +455,15 @@ public class AttendanceAccountingService {
   }
 
   /** Berechnet die Auswirkungen einer Entschuldigung ohne Buchung. */
-  @Transactional
+  @Transactional(readOnly = true)
   public ExcusalImpact previewExcusal(Excusal request) {
-    return excusalImpact(excusalBookings(request, authorization.currentStaff()));
+    return excusalImpact(excusalBookings(request, authorization.currentStaff(), false));
   }
 
   /** Prüft Vorschau und Rechte erneut und bucht alle bestätigten Schultage gemeinsam. */
   @Transactional
   public ExcusalImpact confirmExcusal(Excusal request, ExcusalImpact expected) {
-    var bookings = excusalBookings(request, authorization.currentStaff());
+    var bookings = excusalBookings(request, authorization.currentStaff(), true);
     var current = excusalImpact(bookings);
     if (!current.equals(expected) || !current.hasEffect()) {
       throw new IllegalStateException("EXCUSAL_PREVIEW_CHANGED");
@@ -502,14 +502,14 @@ public class AttendanceAccountingService {
 
   private record ExcusalBooking(Day day, Change change, ExcusalDay impact) {}
 
-  private List<ExcusalBooking> excusalBookings(Excusal request, StaffIdentity actor) {
+  private List<ExcusalBooking> excusalBookings(Excusal request, StaffIdentity actor, boolean lock) {
     authorization.requireClassAccess(request.classId(), actor);
     if (!request.classId().equals(requireStudentClassAccess(request.studentId(), actor))) {
       throw new IllegalArgumentException("STUDENT_NOT_FOUND");
     }
     var plan =
         classes
-            .lockPlan(request.classId())
+            .findPlan(request.classId(), lock)
             .orElseThrow(() -> new IllegalArgumentException("CLASS_NOT_FOUND"));
     var endDate = request.endDate() == null ? request.date() : request.endDate();
     var status = request.status() == null ? AttendanceStatus.ENTSCHULDIGT : request.status();
@@ -524,20 +524,50 @@ public class AttendanceAccountingService {
     if (request.date().isBefore(plan.startsOn()) || endDate.isAfter(plan.endsOn())) {
       throw new IllegalArgumentException("ATTENDANCE_DAY_LOCKED_OR_UNPLANNED");
     }
-    var periods = accounting.findPeriods(request.classId());
+    var periods = accounting.findPeriods(request.classId(), lock);
     requirePlanPeriods(plan, periods);
-    var slots = accounting.findSlots(plan.timetableId());
+    var slots = accounting.findSlots(plan.timetableId(), lock);
+    var now = now();
+    if (!retained(plan, now)) {
+      throw new IllegalArgumentException("ATTENDANCE_DAY_LOCKED_OR_UNPLANNED");
+    }
+    var deadlineId =
+        lock
+            ? deletionDates.getOrCreate(plan.endsOn()).getId()
+            : deletionDates.findId(plan.endsOn());
+    var account = accounting.findAccount(request.studentId(), request.classId(), lock).orElse(null);
+    now = now();
+    if (account == null || !retained(plan, now)) {
+      throw new IllegalArgumentException("ATTENDANCE_DAY_LOCKED_OR_UNPLANNED");
+    }
+    var history = history(plan, account, deadlineId, now, lock);
+    var planned =
+        plannedByDate(request.studentId(), request.date(), endDate, berlinDate(now), lock);
     var bookings = new ArrayList<ExcusalBooking>();
     boolean scheduled = false;
     for (var date = request.date(); !date.isAfter(endDate); date = date.plusDays(1)) {
-      if (slotsFor(plan, periods, slots, date).isEmpty()) {
+      var daySlots = slotsFor(plan, periods, slots, date);
+      if (daySlots.isEmpty()) {
         continue;
       }
       scheduled = true;
-      var day = lockEditableDay(request.studentId(), date);
-      if (!request.classId().equals(day.plan().classId())) {
-        throw new IllegalArgumentException("STUDENT_NOT_FOUND");
+      if (date.isBefore(berlinDate(account.createdAt()))
+          || !date.isAfter(history.resetDay())
+          || hasOverlappingSlots(daySlots)) {
+        throw new IllegalArgumentException("ATTENDANCE_DAY_LOCKED_OR_UNPLANNED");
       }
+      var attendance = history.attendances().get(date);
+      var day =
+          new Day(
+              plan,
+              account,
+              date,
+              deadlineId,
+              daySlots,
+              attendance,
+              history.dayAudits(attendance),
+              planned.getOrDefault(date, List.of()),
+              now);
       var start =
           timed
               ? excusalBoundary(date, request.startsAt())
@@ -1275,18 +1305,23 @@ public class AttendanceAccountingService {
    * dieses Plans sperrt seinen Berliner Tag und alle früheren Tage des Plans.
    */
   private History history(ClassPlan plan, Account account, Long deletionDateId, LocalDateTime now) {
+    return history(plan, account, deletionDateId, now, true);
+  }
+
+  private History history(
+      ClassPlan plan, Account account, Long deletionDateId, LocalDateTime now, boolean lock) {
     var attendances =
-        accounting.findAttendances(account.id()).stream()
+        accounting.findAttendances(account.id(), lock).stream()
             .filter(
                 day -> !day.date().isBefore(plan.startsOn()) && !day.date().isAfter(plan.endsOn()))
             .toList();
     var attendanceIds = attendances.stream().map(DayAttendance::id).collect(Collectors.toSet());
     var audits =
-        accounting.findAudits(account.id()).stream()
+        accounting.findAudits(account.id(), lock).stream()
             .filter(
                 audit ->
                     audit.attendanceId() == null
-                        ? deletionDateId.equals(audit.deletionDateId())
+                        ? deletionDateId != null && deletionDateId.equals(audit.deletionDateId())
                         : attendanceIds.contains(audit.attendanceId()))
             .toList();
     if (audits.stream()

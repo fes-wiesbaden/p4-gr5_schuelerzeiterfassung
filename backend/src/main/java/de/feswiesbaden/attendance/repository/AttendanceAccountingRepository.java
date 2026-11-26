@@ -48,10 +48,15 @@ public class AttendanceAccountingRepository {
 
   /** Lädt die Fehlminutenkonten und sperrt den Schüler, sofern er zur angegebenen Klasse gehört */
   public Optional<Account> lockAccount(Long studentId, Long classId) {
+    return findAccount(studentId, classId, true);
+  }
+
+  public Optional<Account> findAccount(Long studentId, Long classId, boolean lock) {
     return jdbc
         .query(
             "SELECT id, unexcused_minutes_account, excused_minutes_account, created_at"
-                + " FROM student WHERE id = ? AND school_class_id = ? FOR UPDATE",
+                + " FROM student WHERE id = ? AND school_class_id = ?"
+                + (lock ? " FOR UPDATE" : ""),
             this::account,
             studentId,
             classId)
@@ -154,11 +159,12 @@ public class AttendanceAccountingRepository {
         date);
   }
 
-  /** Lädt und sperrt alle Tagesanwesenheiten eines Schülers, nach Datum sortiert */
-  public List<DayAttendance> findAttendances(Long studentId) {
+  /** Lädt die Tagesanwesenheiten eines Schülers, bei Bedarf mit Sperre */
+  public List<DayAttendance> findAttendances(Long studentId, boolean lock) {
     return jdbc.query(
         "SELECT id, attendance_date, status, full_absence, full_unexcused_minutes, full_excused_minutes"
-            + " FROM attendance WHERE student_id = ? ORDER BY attendance_date FOR UPDATE",
+            + " FROM attendance WHERE student_id = ? ORDER BY attendance_date"
+            + (lock ? " FOR UPDATE" : ""),
         (row, index) ->
             new DayAttendance(
                 row.getLong("id"),
@@ -171,13 +177,14 @@ public class AttendanceAccountingRepository {
         studentId);
   }
 
-  /** Lädt und sperrt alle Änderungsprotokolle eines Schülers, nach Ereigniszeit und ID sortiert */
-  public List<Audit> findAudits(Long studentId) {
+  /** Lädt die Änderungsprotokolle eines Schülers, bei Bedarf mit Sperre */
+  public List<Audit> findAudits(Long studentId, boolean lock) {
     return jdbc.query(
         "SELECT id, attendance_id, deletion_date_id, event_type, occurred_at,"
             + " excusal_ends_at, excusal_status, excusal_reason, old_status, new_status,"
             + " unexcused_minutes_delta, excused_minutes_delta"
-            + " FROM attendance_audit WHERE student_id = ? ORDER BY occurred_at, id FOR UPDATE",
+            + " FROM attendance_audit WHERE student_id = ? ORDER BY occurred_at, id"
+            + (lock ? " FOR UPDATE" : ""),
         (row, index) -> audit(row),
         studentId);
   }
