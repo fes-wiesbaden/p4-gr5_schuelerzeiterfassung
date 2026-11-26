@@ -582,6 +582,54 @@ public class AttendanceAccountingService {
     PARTIAL
   }
 
+  /**
+   * Ermittelt die zugängliche Klasse, deren Slot am heutigen Berliner Tag gerade läuft. Ohne
+   * laufenden Slot gilt die Klasse mit dem nächsten heutigen Slot, sonst keine Klasse. Haben
+   * mehrere Klassen gleichzeitig Unterricht, etwa bei Administratoren, gewinnt die niedrigste
+   * Klassen-ID. Klassen mit planfremder Blockzuordnung werden protokolliert und übersprungen
+   */
+  @Transactional(readOnly = true)
+  public CurrentClass findCurrentClass() {
+    var actor = authorization.currentStaff();
+    var now = now();
+    var berlin = now.atOffset(ZoneOffset.UTC).atZoneSameInstant(BERLIN);
+    var today = berlin.toLocalDate();
+    var time = berlin.toLocalTime();
+    var serverTime = now.toInstant(ZoneOffset.UTC);
+    Long nextClassId = null;
+    LocalTime nextStart = null;
+    for (var schoolClass : classes.findAccessible(actor.id(), actor.administrator())) {
+      var plan = classes.findPlan(schoolClass.id(), false).orElse(null);
+      if (plan == null) {
+        continue;
+      }
+      List<Slot> slots;
+      try {
+        slots = readDaySlots(plan, today, now);
+      } catch (InvalidClassBlockAssignmentException dataProblem) {
+        LOG.warn("CURRENT_CLASS_SKIPPED_INVALID_BLOCK_ASSIGNMENT classId={}", schoolClass.id());
+        continue;
+      }
+      for (var slot : slots) {
+        if (!time.isBefore(slot.startsAt()) && time.isBefore(slot.endsAt())) {
+          return new CurrentClass(schoolClass.id(), serverTime);
+        }
+        if (slot.startsAt().isAfter(time)
+            && (nextStart == null || slot.startsAt().isBefore(nextStart))) {
+          nextStart = slot.startsAt();
+          nextClassId = schoolClass.id();
+        }
+      }
+    }
+    return new CurrentClass(nextClassId, serverTime);
+  }
+
+  /**
+   * Enthält die vorausgewählte Klasse oder null und die Serverzeit, an der die Ansicht Tag und
+   * Uhrzeit unabhängig von der Browseruhr ausrichtet
+   */
+  public record CurrentClass(Long classId, Instant serverTime) {}
+
   /** Liefert geplante Slots des Tages, solange die Aufbewahrungsfrist des Plans läuft */
   private List<Slot> readDaySlots(ClassPlan plan, LocalDate date, LocalDateTime now) {
     if (!retained(plan, now) || date.isBefore(plan.startsOn()) || date.isAfter(plan.endsOn())) {

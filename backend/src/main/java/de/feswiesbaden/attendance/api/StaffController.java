@@ -3,6 +3,7 @@ package de.feswiesbaden.attendance.api;
 import de.feswiesbaden.attendance.enums.AttendanceStatus;
 import de.feswiesbaden.attendance.repository.StudentRepository.RfidAssignment;
 import de.feswiesbaden.attendance.service.AttendanceAccountingService;
+import de.feswiesbaden.attendance.service.AttendanceAccountingService.CurrentClass;
 import de.feswiesbaden.attendance.service.AttendanceAccountingService.DailyStudent;
 import de.feswiesbaden.attendance.service.AttendanceAccountingService.HistoryWeek;
 import de.feswiesbaden.attendance.service.RfidUidService;
@@ -191,6 +192,12 @@ public class StaffController {
     return new CorrectionResult(
         attendance.correctStatusPeriod(
             studentId, date, status(request.status()), request.startsAt(), request.endsAt()));
+  }
+
+  /** Liefert die nach Stundenplan vorausgewählte Klasse und die aktuelle Serverzeit */
+  @GetMapping("/attendance/current-class")
+  public CurrentClass currentClass() {
+    return attendance.findCurrentClass();
   }
 
   /** Korrigiert den Status ab dem angegebenen Zeitpunkt im Berliner Kalendertag */

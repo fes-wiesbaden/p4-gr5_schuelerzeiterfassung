@@ -1,23 +1,20 @@
 <script setup lang="ts">
-export type AttendanceStatus = 'anwesend' | 'abwesend' | 'entschuldigt'
+import { STATUS_LABELS, type AttendanceStatus } from '@/api/attendance'
 
 const statusConfig: Record<
   AttendanceStatus,
-  { label: string; icon: string; modifier: string }
+  { icon: string; modifier: string }
 > = {
-  anwesend: {
-    label: 'Anwesend',
-    icon: 'pi-check',
-    modifier: 'status-badge--success'
-  },
-  abwesend: {
-    label: 'Abwesend',
-    icon: 'pi-times',
-    modifier: 'status-badge--danger'
-  },
-  entschuldigt: {
-    label: 'Entschuldigt',
+  ANWESEND: { icon: 'pi-check', modifier: 'status-badge--success' },
+  ABWESEND: { icon: 'pi-times', modifier: 'status-badge--danger' },
+  BETRIEB: { icon: 'pi-building', modifier: 'status-badge--success' },
+  BETRIEBLICH_ENTSCHULDIGT: {
     icon: 'pi-info-circle',
+    modifier: 'status-badge--info'
+  },
+  ENTSCHULDIGT: { icon: 'pi-info-circle', modifier: 'status-badge--info' },
+  MIT_ATTEST_ENTSCHULDIGT: {
+    icon: 'pi-file',
     modifier: 'status-badge--info'
   }
 }
@@ -28,7 +25,7 @@ const props = defineProps<{ status: AttendanceStatus }>()
 <template>
   <span class="status-badge" :class="statusConfig[props.status].modifier">
     <i class="pi" :class="statusConfig[props.status].icon" aria-hidden="true" />
-    {{ statusConfig[props.status].label }}
+    {{ STATUS_LABELS[props.status] }}
   </span>
 </template>
 

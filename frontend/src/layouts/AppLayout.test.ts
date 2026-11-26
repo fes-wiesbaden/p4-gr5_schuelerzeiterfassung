@@ -126,8 +126,10 @@ describe('AppLayout Navigation', () => {
       fetchMock.mockResolvedValueOnce(new Response(null, { status: 204 }))
       fetchMock.mockResolvedValueOnce(new Response(null, { status: 401 }))
       vi.stubGlobal('fetch', fetchMock)
+      // Die Seiteninhalte laden eigene Daten und würden die vorbereiteten
+      // Logout-Antworten verbrauchen
       const wrapper = mount(AppLayout, {
-        global: { plugins: [router, PrimeVue] }
+        global: { plugins: [router, PrimeVue], stubs: { RouterView: true } }
       })
       const logout = wrapper
         .findAll('button')

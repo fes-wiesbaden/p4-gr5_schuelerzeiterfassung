@@ -173,6 +173,7 @@ public class SecurityConfig {
                         "/api/classes/{classId}/students",
                         "/api/classes/{classId}/attendance",
                         "/api/students",
+                        "/api/attendance/current-class",
                         "/api/students/rfid-uids",
                         "/api/students/{studentId}/attendance/week",
                         "/api/students/{studentId}")
