@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import PageError from '@/components/PageError.vue'
 import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import Button from 'primevue/button'
@@ -97,7 +98,6 @@ async function fetchClasses() {
   if (initializing) return
   initializing = true
   classLoading.value = true
-  classError.value = false
   try {
     const [visible, current] = await Promise.all([
       loadClasses(classRequest.signal),
@@ -121,6 +121,7 @@ async function fetchClasses() {
       ({ id }) => String(id) === route?.query.klasse
     )
     classes.value = visible
+    classError.value = false
     selectedClass.value =
       requestedClass?.id ?? current.classId ?? visible[0]?.id
   } catch {
@@ -138,7 +139,6 @@ async function refreshAttendance(day = selectedDate.value) {
   const request = new AbortController()
   dayRequest = request
   dayLoading.value = true
-  dayError.value = false
 
   try {
     const query = new URLSearchParams({ date: day })
@@ -173,11 +173,22 @@ async function refreshAttendance(day = selectedDate.value) {
       }
     }
     lastUpdated.value = berlinTime(now)
+    dayError.value = false
   } catch {
     if (!request.signal.aborted) dayError.value = true
   } finally {
     if (!request.signal.aborted) dayLoading.value = false
   }
+}
+
+function retryClasses() {
+  classError.value = false
+  void fetchClasses()
+}
+
+function refreshSelectedDay() {
+  dayError.value = false
+  void refreshAttendance(historySelection ? selectedDate.value : today.value)
 }
 
 function refreshCurrentDay() {
@@ -275,21 +286,28 @@ onUnmounted(() => {
         outlined
         :loading="dayLoading"
         :disabled="!validDate"
-        @click="refreshAttendance(historySelection ? selectedDate : today)"
+        @click="refreshSelectedDay"
       />
     </div>
 
+    <PageError
+      v-if="classError"
+      message="Klassen konnten nicht geladen werden."
+    >
+      <Button
+        label="Erneut versuchen"
+        outlined
+        :disabled="classLoading"
+        @click="retryClasses"
+      />
+    </PageError>
     <p v-if="classLoading" class="attendance__notice" role="status">
       Klassen werden geladen …
     </p>
-    <div v-else-if="classError" class="attendance__notice">
-      <p role="alert">Klassen konnten nicht geladen werden.</p>
-      <Button label="Erneut versuchen" outlined @click="fetchClasses" />
-    </div>
-    <p v-else-if="!classes.length" class="attendance__notice">
+    <p v-else-if="!classError && !classes.length" class="attendance__notice">
       Es sind keine Klassen verfügbar.
     </p>
-    <template v-else>
+    <template v-else-if="!classError">
       <div class="attendance__filters">
         <label class="class-filter">
           Klasse
@@ -315,10 +333,10 @@ onUnmounted(() => {
       <p v-if="!validDate" class="attendance__notice">
         Wähle heute oder ein früheres Datum.
       </p>
-      <p v-if="dayError" class="attendance__error" role="alert">
-        Anwesenheit konnte nicht geladen werden. Versuch es über „Aktualisieren“
-        erneut.
-      </p>
+      <PageError
+        v-if="dayError"
+        message="Anwesenheit konnte nicht geladen werden. Versuch es über „Aktualisieren“ erneut."
+      />
       <p
         v-else-if="dayLoading && !rows"
         class="attendance__notice"
@@ -337,9 +355,7 @@ onUnmounted(() => {
       <p v-if="message" class="attendance__notice" role="status">
         {{ message }}
       </p>
-      <p v-if="correctionError" class="attendance__error" role="alert">
-        {{ correctionError }}
-      </p>
+      <PageError :message="correctionError" />
       <div v-if="rows?.length" class="attendance__register">
         <dl class="attendance__summary">
           <div>
@@ -485,23 +501,13 @@ onUnmounted(() => {
   text-underline-offset: 3px;
 }
 
-.attendance__notice,
-.attendance__error {
+.attendance__notice {
   margin: 0;
   padding: 18px 20px;
   border: 1px solid var(--line);
   border-radius: var(--radius);
   background: var(--surface);
   color: var(--muted);
-}
-
-.attendance__notice p {
-  margin: 0 0 12px;
-}
-
-.attendance__error {
-  background: #fff2f2;
-  color: #8c3038;
 }
 
 .attendance__register {

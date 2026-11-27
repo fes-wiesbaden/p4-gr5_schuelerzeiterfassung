@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import PageError from '@/components/PageError.vue'
 import { ref } from 'vue'
 import Button from 'primevue/button'
 import InputText from 'primevue/inputtext'
@@ -72,7 +73,7 @@ async function updateCard(remove: boolean) {
           @click="updateCard(true)"
         />
       </div>
-      <p v-if="error" role="alert">{{ error }}</p>
+      <PageError :message="error" />
       <p v-if="message" role="status">{{ message }}</p>
     </form>
   </section>

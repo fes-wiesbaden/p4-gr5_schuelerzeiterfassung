@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import PageError from '@/components/PageError.vue'
 import { computed, ref, watch } from 'vue'
 import Button from 'primevue/button'
 import Checkbox from 'primevue/checkbox'
@@ -443,7 +444,11 @@ async function submitDay() {
       </form>
     </div>
 
-    <p v-if="weekError" role="alert">{{ weekError }}</p>
+    <PageError
+      v-if="saveError"
+      :message="`${formatDate(saveError.date)}: ${saveError.message}`"
+    />
+    <PageError v-if="weekError" :message="weekError" />
     <p v-else-if="loadingWeek" role="status">Tagesdaten werden geladen …</p>
     <template v-if="week">
       <h3 id="history-week">
@@ -506,9 +511,6 @@ async function submitDay() {
               <small v-if="noPlannedLessons(data)" class="planned-status">
                 Kein Unterricht geplant
               </small>
-              <p v-if="saveError?.date === data.date" role="alert">
-                {{ saveError.message }}
-              </p>
             </template>
           </Column>
           <Column header="Gesamt">
@@ -674,11 +676,6 @@ async function submitDay() {
 .history-table :deep(td:first-child) {
   min-width: 10rem;
   max-width: 15rem;
-  white-space: normal;
-}
-
-.history-table p[role='alert'] {
-  margin-block: 0.375rem 0;
   white-space: normal;
 }
 

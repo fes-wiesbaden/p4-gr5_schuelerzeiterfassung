@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import PageError from '@/components/PageError.vue'
 import { onMounted, ref } from 'vue'
 import AppDataTable, { type DataTableColumn } from './AppDataTable.vue'
 import { loadData } from '@/api/client'
@@ -56,7 +57,7 @@ onMounted(async () => {
   <section class="card-assignments">
     <h2>Kartenzuordnungen</h2>
     <p v-if="loading" role="status">Kartenzuordnungen werden geladen …</p>
-    <p v-else-if="error" role="alert">{{ error }}</p>
+    <PageError v-else-if="error" :message="error" />
     <AppDataTable
       v-else-if="rows.length"
       :columns="columns"

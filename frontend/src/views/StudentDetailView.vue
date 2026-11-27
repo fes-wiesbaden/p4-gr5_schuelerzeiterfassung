@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import PageError from '@/components/PageError.vue'
 import {
   computed,
   defineAsyncComponent,
@@ -170,7 +171,8 @@ async function save(event: Event) {
     await changeData(`/api/students/${id}`, 'PUT', body)
     if (props.studentId === id) {
       await reloadStudent()
-      await closeEditor()
+      if (actionError.value) editing.value = false
+      else await closeEditor()
     }
   } catch (e) {
     if (props.studentId === id) {
@@ -223,7 +225,7 @@ async function remove() {
       }}
     </RouterLink>
     <p v-if="loading" role="status">Schülerdaten werden geladen …</p>
-    <p v-else-if="error" role="alert">{{ error }}</p>
+    <PageError v-else-if="error" :message="error" />
     <template v-else-if="student">
       <header class="profile-header">
         <div>
@@ -252,7 +254,7 @@ async function remove() {
           />
         </div>
       </header>
-      <p v-if="actionError" role="alert">{{ actionError }}</p>
+      <PageError :message="actionError" />
 
       <fieldset v-if="editing" ref="editor" :disabled="busy">
         <legend>Stammdaten bearbeiten</legend>
