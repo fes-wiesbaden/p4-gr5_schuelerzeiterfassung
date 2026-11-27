@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import PageError from '@/components/PageError.vue'
 import InputText from 'primevue/inputtext'
 import MasterDataList from '@/components/MasterDataList.vue'
 import { ref, onMounted } from 'vue'
@@ -30,7 +31,7 @@ function label(r: Row) {
 }
 </script>
 <template>
-  <p v-if="error" role="alert">{{ error }}</p>
+  <PageError :message="error" />
   <MasterDataList
     v-if="options"
     url="/api/classes"

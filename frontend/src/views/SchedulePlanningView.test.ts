@@ -64,11 +64,12 @@ function respond(status: number, body: unknown): Response {
   })
 }
 
-function mountAs(role: 'admin' | 'lehrkraft') {
+function mountAs(role: 'admin' | 'lehrkraft', attachTo?: HTMLElement) {
   const pinia = createPinia()
   setActivePinia(pinia)
   useAuthStore().user = { name: 'Test', role }
   return mount(SchedulePlanningView, {
+    attachTo,
     global: {
       plugins: [pinia, PrimeVue],
       stubs: { ClassTimetableWeek: role === 'admin' },
@@ -302,13 +303,14 @@ describe('SchedulePlanningView', () => {
     wrapper.unmount()
   })
 
-  it('zeigt den Konflikt des Backends als verständliche Meldung an', async () => {
+  it('fokussiert den Konflikt beim Speichern und springt nach oben', async () => {
+    const scrollTo = vi.spyOn(window, 'scrollTo').mockImplementation(() => {})
     fetchMock
       .mockResolvedValueOnce(respond(200, overview))
       .mockResolvedValueOnce(
         respond(409, { code: 'OVERLAPPING_TIMETABLE_SLOT' })
       )
-    const wrapper = mountAs('admin')
+    const wrapper = mountAs('admin', document.body)
     await flushPromises()
 
     const form = wrapper
@@ -335,11 +337,34 @@ describe('SchedulePlanningView', () => {
         })
       })
     )
-    expect(wrapper.find('[role="alert"]').text()).toBe(
+    const alert = wrapper.get('[role="alert"]')
+    expect(alert.text()).toBe(
       'Die Unterrichtszeit überschneidet sich mit einer vorhandenen Unterrichtszeit dieses Stundenplans.'
     )
+    expect(scrollTo).toHaveBeenCalledWith({ top: 0, behavior: 'instant' })
+    expect(document.activeElement).toBe(alert.element)
     expect(form.find('input[aria-label="Beginn"]').element.value).toBe('08:00')
     wrapper.unmount()
+  })
+
+  it('springt auch bei einem wiederholten Ladefehler nach oben', async () => {
+    const scrollTo = vi.spyOn(window, 'scrollTo').mockImplementation(() => {})
+    fetchMock.mockRejectedValue(
+      new Error('Die Planung konnte nicht geladen werden.')
+    )
+    const wrapper = mountAs('admin', document.body)
+    try {
+      await flushPromises()
+      const alert = wrapper.get('[role="alert"]')
+      expect(document.activeElement).toBe(alert.element)
+      expect(scrollTo).toHaveBeenCalledTimes(1)
+
+      window.dispatchEvent(new Event('management:changed'))
+      await flushPromises()
+      expect(scrollTo).toHaveBeenCalledTimes(2)
+    } finally {
+      wrapper.unmount()
+    }
   })
 
   it('füllt die Slotbearbeitung vor und zeigt den ersten geänderten Termin', async () => {

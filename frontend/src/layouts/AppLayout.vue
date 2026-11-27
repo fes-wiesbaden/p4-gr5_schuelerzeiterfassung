@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { computed, nextTick, ref, watch } from 'vue'
+import { computed, nextTick, provide, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import Button from 'primevue/button'
 
 import AttendanceAssistant from '@/components/AttendanceAssistant.vue'
+import PageError, { pageErrorTarget } from '@/components/PageError.vue'
 import { useAuthStore } from '@/stores/auth'
 import { administrationNavItems, mainNavItems } from './navigation'
 
@@ -14,6 +15,8 @@ const route = useRoute()
 const sidebarOpen = ref(false)
 const menuButton = ref<HTMLButtonElement>()
 const pageContent = ref<HTMLElement>()
+const pageErrors = ref<HTMLElement>()
+provide(pageErrorTarget, pageErrors)
 
 const roleLabel = computed(() => {
   switch (auth.user?.role) {
@@ -31,7 +34,9 @@ watch(
   async () => {
     sidebarOpen.value = false
     await nextTick()
-    pageContent.value?.focus()
+    if (!pageErrors.value?.contains(document.activeElement)) {
+      pageContent.value?.focus()
+    }
   }
 )
 
@@ -166,10 +171,11 @@ function handleSidebarKeydown(event: KeyboardEvent) {
         tabindex="-1"
         @focusin="revealFocus"
       >
-        <p v-if="auth.errorMessage" class="app-content__error" role="alert">
-          {{ auth.errorMessage }}
-        </p>
-        <div class="app-content__inner"><RouterView /></div>
+        <div class="app-content__inner">
+          <div ref="pageErrors" class="app-content__errors" />
+          <PageError :message="auth.errorMessage" />
+          <RouterView />
+        </div>
       </main>
     </div>
     <AttendanceAssistant />
@@ -325,12 +331,10 @@ function handleSidebarKeydown(event: KeyboardEvent) {
   margin-inline: auto;
 }
 
-.app-content__error {
-  margin: 0 0 16px;
-  padding: 10px 12px;
-  border-radius: 10px;
-  background: #fff2f2;
-  color: #8c3038;
+.app-content__errors:not(:empty) {
+  display: grid;
+  gap: 8px;
+  margin-block-end: 16px;
 }
 
 @media (max-width: 960px) {

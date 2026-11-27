@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import PageError from '@/components/PageError.vue'
 import {
   computed,
   nextTick,
@@ -47,8 +48,11 @@ const activeTab = ref('stundenplan')
 
 const overview = ref<PlanningOverview | null>(null)
 const loadError = ref('')
+const actionError = ref('')
+const errorMessage = computed(() => loadError.value || actionError.value)
+const errorRevision = ref(0)
 const busy = ref(false)
-const feedback = reactive({ text: '', error: false })
+const feedback = ref('')
 
 const selectedTimetableId = ref<number | null>(null)
 const selectedBlockPlanId = ref<number | null>(null)
@@ -132,23 +136,24 @@ async function refresh() {
       error instanceof Error
         ? error.message
         : 'Die Planung konnte nicht geladen werden.'
+    errorRevision.value += 1
   }
 }
 
 // Führt eine Änderung aus, lädt danach die Übersicht neu und zeigt das Ergebnis an
 async function run(action: () => Promise<string>): Promise<boolean> {
   busy.value = true
-  feedback.text = ''
+  feedback.value = ''
+  actionError.value = ''
   try {
-    feedback.text = await action()
-    feedback.error = false
+    feedback.value = await action()
     await refresh()
     window.dispatchEvent(new Event('planning:changed'))
     return true
   } catch (error) {
-    feedback.text =
+    actionError.value =
       error instanceof Error ? error.message : 'Die Aktion ist fehlgeschlagen.'
-    feedback.error = true
+    errorRevision.value += 1
     return false
   } finally {
     busy.value = false
@@ -355,28 +360,21 @@ onUnmounted(() => window.removeEventListener('management:changed', refresh))
         <Tab value="klassenplanung">Klassenplanung</Tab>
       </TabList>
 
-      <p
-        v-if="loadError"
-        class="planning__message planning__message--error"
-        role="alert"
-      >
-        {{ loadError }}
-      </p>
+      <PageError
+        v-if="errorMessage"
+        :key="errorRevision"
+        :message="errorMessage"
+      />
       <p v-else-if="!overview" class="planning__hint" role="status">
         Planung wird geladen …
       </p>
-      <p
-        v-else-if="feedback.text"
-        class="planning__message"
-        :class="{ 'planning__message--error': feedback.error }"
-        :role="feedback.error ? 'alert' : 'status'"
-      >
-        {{ feedback.text }}
+      <p v-else-if="feedback" class="planning__message" role="status">
+        {{ feedback }}
       </p>
 
       <TabPanels class="planning__panels">
         <TabPanel value="stundenplan" class="planning__panel">
-          <ClassTimetableWeek />
+          <ClassTimetableWeek :active="activeTab === 'stundenplan'" />
 
           <!-- Stundenpläne mit festen Slots -->
           <article v-if="overview && !loadError" class="planning__card">
@@ -932,12 +930,6 @@ onUnmounted(() => window.removeEventListener('management:changed', refresh))
   background: #f1f9f3;
   font-size: 0.9rem;
   color: #1f6a37;
-}
-
-.planning__message--error {
-  border-color: #f0b4b4;
-  background: #fdf2f2;
-  color: #a12525;
 }
 
 .planning__sr-only {

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import PageError from '@/components/PageError.vue'
 import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import MasterDataList from '@/components/MasterDataList.vue'
@@ -114,11 +115,12 @@ onMounted(async () => {
     Zur Klassenliste
   </RouterLink>
   <h1 v-if="loading || error || (classPage && !selection)">{{ title }}</h1>
-  <p v-if="error" role="alert">{{ error }}</p>
+  <PageError v-if="error" :message="error" />
   <p v-else-if="loading" role="status">Klassen werden geladen …</p>
-  <p v-else-if="classPage && !selection" role="alert">
-    Klasse nicht gefunden oder kein Zugriff.
-  </p>
+  <PageError
+    v-else-if="classPage && !selection"
+    message="Klasse nicht gefunden oder kein Zugriff."
+  />
   <MasterDataList
     v-else
     :url="rosterUrl"

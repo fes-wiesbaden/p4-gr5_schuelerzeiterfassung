@@ -10,6 +10,7 @@ import {
   watch
 } from 'vue'
 import { changeData, loadData } from '@/api/client'
+import PageError from '@/components/PageError.vue'
 const props = defineProps<{
   url: string
   columnTitle?: string
@@ -89,7 +90,7 @@ async function retryLoad(restoreFocus = false) {
       loadingList.value = false
       if (restoreFocus) {
         await nextTick()
-        if (isCurrentLoad(url, version)) focusListAction()
+        if (isCurrentLoad(url, version) && !error.value) focusListAction()
       }
     }
   }
@@ -113,24 +114,15 @@ async function edit(row?: T) {
 }
 async function save(event: Event) {
   const body = Object.fromEntries(new FormData(event.target as HTMLFormElement))
-  if (!(await submit(selected.value ? 'PUT' : 'POST', body))) {
-    editor.value
-      ?.querySelector<HTMLButtonElement>('button[type="submit"]')
-      ?.focus()
-  }
+  await submit(selected.value ? 'PUT' : 'POST', body)
 }
 async function remove(row: T) {
   if (!window.confirm(props.label(row) + ' wirklich löschen?')) return
   selected.value = row
-  if (!(await submit('DELETE'))) {
-    const deleteButton = list.value?.querySelector<HTMLButtonElement>(
-      `button[data-delete-id="${row.id}"]`
-    )
-    deleteButton?.focus()
-  }
+  await submit('DELETE')
 }
 async function submit(method: 'POST' | 'PUT' | 'DELETE', body?: unknown) {
-  if (busy.value || loadingList.value) return false
+  if (busy.value || loadingList.value) return
   const source = props.url
   const version = loadVersion
   const rowId = selected.value?.id
@@ -138,14 +130,14 @@ async function submit(method: 'POST' | 'PUT' | 'DELETE', body?: unknown) {
     method === 'POST'
       ? props.createUrl
       : (props.itemUrl ?? source) + '/' + rowId
-  if (url === null) return false
+  if (url === null) return
   busy.value = true
   error.value = ''
   let saved = false
   try {
     await changeData(url ?? source, method, body)
     saved = true
-    if (!isCurrentLoad(source, version)) return true
+    if (!isCurrentLoad(source, version)) return
     emit('saved')
     editing.value = false
     if (method === 'DELETE')
@@ -167,8 +159,7 @@ async function submit(method: 'POST' | 'PUT' | 'DELETE', body?: unknown) {
     busy.value = false
   }
   await nextTick()
-  if (saved && isCurrentLoad(source, version)) focusListAction()
-  return saved
+  if (saved && isCurrentLoad(source, version) && !error.value) focusListAction()
 }
 function refreshAfterCommand() {
   if (!editing.value && !busy.value) void retryLoad()
@@ -196,8 +187,7 @@ onUnmounted(() =>
       </button>
     </header>
 
-    <div v-if="error" role="alert">
-      <p>{{ error }}</p>
+    <PageError :message="error">
       <button
         v-if="!editing"
         ref="retryButton"
@@ -206,7 +196,7 @@ onUnmounted(() =>
       >
         Erneut laden
       </button>
-    </div>
+    </PageError>
     <fieldset v-if="editing" ref="editor" :disabled="busy">
       <legend>
         {{ selected ? label(selected) + ' bearbeiten' : 'Neuer Eintrag' }}
@@ -504,10 +494,6 @@ form {
   gap: 1rem;
   margin-bottom: 0.5rem;
 }
-[role='alert'] {
-  color: #972f20;
-}
-
 .form-actions {
   display: flex;
   flex-wrap: wrap;

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import PageError from '@/components/PageError.vue'
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import Button from 'primevue/button'
@@ -18,6 +19,7 @@ import {
 import GermanDateInput from './GermanDateInput.vue'
 import TimetableGrid from './TimetableGrid.vue'
 
+withDefaults(defineProps<{ active?: boolean }>(), { active: true })
 const route = useRoute()
 const classes = ref<SchoolClass[]>()
 const classId = ref<number>()
@@ -212,16 +214,18 @@ onUnmounted(() => {
         @click="date = todayInBerlin()"
       />
     </div>
-    <p v-if="scheduleError" role="status">{{ scheduleError }}</p>
-    <div v-if="classError || weekError" role="alert">
-      <p>{{ classError || weekError }}</p>
+    <PageError v-if="active" :message="scheduleError" />
+    <PageError
+      v-if="classError || weekError"
+      :message="active ? classError || weekError : ''"
+    >
       <Button
         type="button"
         label="Erneut laden"
         outlined
         @click="classError ? fetchClasses() : refreshWeek()"
       />
-    </div>
+    </PageError>
     <p v-else-if="!classes || loadingWeek" role="status">
       Wochenstundenplan wird geladen …
     </p>

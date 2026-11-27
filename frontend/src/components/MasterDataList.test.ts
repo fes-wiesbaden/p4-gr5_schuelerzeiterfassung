@@ -1,7 +1,9 @@
 import { flushPromises, mount } from '@vue/test-utils'
 import PrimeVue from 'primevue/config'
 import { afterEach, expect, it, vi } from 'vitest'
+import { ref } from 'vue'
 import MasterDataList from './MasterDataList.vue'
+import { pageErrorTarget } from './PageError.vue'
 
 type Row = { id: number; name: string }
 
@@ -14,6 +16,58 @@ function pendingResponse() {
 }
 
 afterEach(() => vi.unstubAllGlobals())
+
+it('zeigt wiederholte Speicherfehler am Seitenanfang und behält die Eingaben', async () => {
+  const scrollTo = vi.fn()
+  vi.stubGlobal('scrollTo', scrollTo)
+  vi.stubGlobal(
+    'fetch',
+    vi
+      .fn()
+      .mockResolvedValueOnce(Response.json([]))
+      .mockImplementation(() =>
+        Promise.resolve(
+          Response.json({ code: 'INVALID_REQUEST' }, { status: 400 })
+        )
+      )
+  )
+  const pageErrors = document.createElement('div')
+  document.body.append(pageErrors)
+  const wrapper = mount(MasterDataList, {
+    attachTo: document.body,
+    global: {
+      plugins: [PrimeVue],
+      provide: { [pageErrorTarget]: ref(pageErrors) }
+    },
+    props: {
+      url: '/api/rooms',
+      title: 'Räume',
+      editable: true,
+      label: (row: Row) => row.name
+    },
+    slots: { form: '<input name="roomNumber">' }
+  })
+  try {
+    await flushPromises()
+    await wrapper.get('button.primary').trigger('click')
+    const input = wrapper.get('input[name="roomNumber"]')
+    await input.setValue('R01')
+    const form = wrapper.get('form')
+
+    for (let attempt = 1; attempt <= 2; attempt += 1) {
+      await form.trigger('submit')
+      await flushPromises()
+      const alert = pageErrors.querySelector('[role="alert"]')
+      expect(alert?.textContent).toBeTruthy()
+      expect(alert === document.activeElement).toBe(true)
+      expect(scrollTo).toHaveBeenCalledTimes(attempt)
+      expect(input.element.value).toBe('R01')
+    }
+  } finally {
+    wrapper.unmount()
+    pageErrors.remove()
+  }
+})
 
 it('behält den Filter beim Klassenwechsel und ignoriert verspätete Antworten', async () => {
   const second = pendingResponse()
