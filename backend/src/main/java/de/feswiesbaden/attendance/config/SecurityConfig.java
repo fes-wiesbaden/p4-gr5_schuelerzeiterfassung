@@ -174,7 +174,9 @@ public class SecurityConfig {
                         "/api/classes/{classId}/attendance",
                         "/api/attendance/current-class",
                         "/api/students/rfid-uids",
-                        "/api/students/{studentId}")
+                        "/api/students/{studentId}",
+                        "/api/logs/raw-scans",
+                        "/api/logs/audits")
                     .authenticated()
                     .requestMatchers(
                         HttpMethod.POST,

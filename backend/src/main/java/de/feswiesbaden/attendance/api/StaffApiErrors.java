@@ -10,18 +10,25 @@ import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.method.annotation.HandlerMethodValidationException;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 
 /** Übersetzt bekannte Fehler der Mitarbeiter-API in HTTP-Status und feste Fehlercodes */
 @RestControllerAdvice(
-    assignableTypes = {StaffController.class, MasterDataController.class, PlanningController.class})
+    assignableTypes = {
+      StaffController.class,
+      MasterDataController.class,
+      PlanningController.class,
+      LogController.class
+    })
 class StaffApiErrors {
   /** Meldet ungültige Anfragen ohne Eingabewerte in der Antwort */
   @ExceptionHandler({
     HttpMessageNotReadableException.class,
     MethodArgumentNotValidException.class,
     MethodArgumentTypeMismatchException.class,
-    MissingServletRequestParameterException.class
+    MissingServletRequestParameterException.class,
+    HandlerMethodValidationException.class
   })
   ResponseEntity<Map<String, String>> invalidRequest() {
     return error(HttpStatus.BAD_REQUEST, "INVALID_REQUEST");
