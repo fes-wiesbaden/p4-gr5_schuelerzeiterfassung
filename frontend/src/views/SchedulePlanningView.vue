@@ -23,6 +23,8 @@ import TimetableGrid from '@/components/TimetableGrid.vue'
 import GermanDateInput from '@/components/GermanDateInput.vue'
 import GermanTimeInput from '@/components/GermanTimeInput.vue'
 import { formatDate } from '@/dateTime'
+import { confirmAction } from '@/confirm'
+import { showNotice } from '@/notice'
 import { useAuthStore } from '@/stores/auth'
 import {
   WEEKDAYS,
@@ -52,7 +54,6 @@ const actionError = ref('')
 const errorMessage = computed(() => loadError.value || actionError.value)
 const errorRevision = ref(0)
 const busy = ref(false)
-const feedback = ref('')
 let overviewRequest: AbortController | undefined
 
 const selectedTimetableId = ref<number | null>(null)
@@ -66,7 +67,9 @@ const slotForm = reactive({
   weekday: 'MONTAG' as Weekday,
   startsAt: '',
   endsAt: '',
-  roomId: null as number | null
+  roomId: null as number | null,
+  subject: '',
+  teacherId: null as number | null
 })
 const blockPlanForm = reactive({ name: '', startsOn: '', endsOn: '' })
 const blockForm = reactive({ startsOn: '', endsOn: '' })
@@ -179,10 +182,9 @@ async function refresh() {
 // Führt eine Änderung aus, lädt danach die Übersicht neu und zeigt das Ergebnis an
 async function run(action: () => Promise<string>): Promise<boolean> {
   busy.value = true
-  feedback.value = ''
   actionError.value = ''
   try {
-    feedback.value = await action()
+    showNotice(await action())
     await refresh()
     window.dispatchEvent(new Event('planning:changed'))
     return true
@@ -220,7 +222,9 @@ async function submitSlot() {
         weekday: slotForm.weekday,
         startsAt: slotForm.startsAt,
         endsAt: slotForm.endsAt,
-        roomId
+        roomId,
+        subject: slotForm.subject.trim() || null,
+        teacherId: slotForm.teacherId
       }
       if (editingSlotId.value !== null) {
         const effectiveOn = await updateSlot(
@@ -242,9 +246,11 @@ async function editSlot(slot: Slot) {
   editingSlotId.value = slot.id
   Object.assign(slotForm, {
     weekday: slot.weekday,
-    startsAt: slot.startsAt,
-    endsAt: slot.endsAt,
-    roomId: slot.roomId
+    startsAt: formatTime(slot.startsAt),
+    endsAt: formatTime(slot.endsAt),
+    roomId: slot.roomId,
+    subject: slot.subject ?? '',
+    teacherId: slot.teacherId ?? null
   })
   await nextTick()
   slotWeekday.value?.focus()
@@ -254,15 +260,20 @@ function resetSlotForm() {
   editingSlotId.value = null
   slotForm.startsAt = ''
   slotForm.endsAt = ''
+  slotForm.subject = ''
+  slotForm.teacherId = null
 }
 
 async function removeSlot(slot: Slot) {
   const timetableId = selectedTimetableId.value
   if (
     timetableId === null ||
-    !window.confirm(
-      `Die Unterrichtszeit am ${weekdayLabel(slot.weekday)} um ${formatTime(slot.startsAt)} Uhr für alle zukünftigen Termine löschen?`
-    )
+    !(await confirmAction({
+      title: 'Unterrichtszeit löschen?',
+      message: `Die Unterrichtszeit am ${weekdayLabel(slot.weekday)} um ${formatTime(slot.startsAt)} Uhr wird für alle zukünftigen Termine gelöscht.`,
+      confirmLabel: 'Löschen',
+      danger: true
+    }))
   ) {
     return
   }
@@ -325,15 +336,20 @@ async function submitReset() {
   const schoolClass = selectedClass.value
   if (
     !schoolClass ||
-    !window.confirm(
-      `Fehlminutenkonten aller Schüler der Klasse ${schoolClass.classCode} zurücksetzen?`
-    )
+    !(await confirmAction({
+      title: 'Fehlzeitenkonten zurücksetzen?',
+      message: `Die Fehlzeitenkonten aller Schüler der Klasse ${schoolClass.classCode} werden auf null gesetzt. Das lässt sich nicht rückgängig machen.`,
+      confirmLabel: 'Zurücksetzen',
+      danger: true
+    }))
   ) {
     return
   }
   await run(async () => {
     const count = await resetAccounts(schoolClass.id, schoolClass.blockPlanId)
-    return `Konten von ${count} Schülern zurückgesetzt.`
+    return count === 1
+      ? 'Konto von 1 Schüler zurückgesetzt.'
+      : `Konten von ${count} Schülern zurückgesetzt.`
   })
 }
 
@@ -343,9 +359,12 @@ async function submitPlanChange() {
   if (
     !schoolClass ||
     nextPlanId === null ||
-    !window.confirm(
-      `Für ${schoolClass.classCode} werden alle Konten abschließend zurückgesetzt und der Folgeplan aktiviert. Fortfahren?`
-    )
+    !(await confirmAction({
+      title: 'Blockplan wechseln?',
+      message: `Für ${schoolClass.classCode} werden alle Fehlzeitenkonten abschließend zurückgesetzt und der Folgeplan aktiviert. Das lässt sich nicht rückgängig machen.`,
+      confirmLabel: 'Plan wechseln',
+      danger: true
+    }))
   ) {
     return
   }
@@ -403,12 +422,17 @@ onUnmounted(() => {
         v-if="errorMessage"
         :key="errorRevision"
         :message="errorMessage"
-      />
+      >
+        <Button
+          v-if="loadError"
+          type="button"
+          label="Erneut versuchen"
+          outlined
+          @click="refresh"
+        />
+      </PageError>
       <p v-else-if="!overview" class="planning__hint" role="status">
         Planung wird geladen …
-      </p>
-      <p v-else-if="feedback" class="planning__message" role="status">
-        {{ feedback }}
       </p>
 
       <TabPanels class="planning__panels">
@@ -480,7 +504,6 @@ onUnmounted(() => {
                     <GermanTimeInput
                       v-model="slotForm.startsAt"
                       label="Beginn"
-                      seconds
                       required
                     />
                   </label>
@@ -489,11 +512,31 @@ onUnmounted(() => {
                     <GermanTimeInput
                       v-model="slotForm.endsAt"
                       label="Ende"
-                      seconds
                       required
                     />
                   </label>
                 </div>
+                <label>
+                  <span>Fach oder Lernfeld (optional)</span>
+                  <InputText
+                    v-model="slotForm.subject"
+                    maxlength="80"
+                    placeholder="z. B. LF 8 oder Deutsch"
+                  />
+                </label>
+                <label>
+                  <span>Lehrkraft (optional)</span>
+                  <select v-model="slotForm.teacherId">
+                    <option :value="null">Keine Angabe</option>
+                    <option
+                      v-for="teacher in overview.teachers ?? []"
+                      :key="teacher.id"
+                      :value="teacher.id"
+                    >
+                      {{ teacher.name }}
+                    </option>
+                  </select>
+                </label>
                 <label>
                   <span>Raum</span>
                   <select v-model="slotForm.roomId" required>
@@ -580,7 +623,7 @@ onUnmounted(() => {
 
             <div class="planning__table-scroll">
               <table class="planning__table">
-                <caption class="planning__sr-only">
+                <caption class="visually-hidden">
                   Blöcke des gewählten Blockplans
                 </caption>
                 <thead>
@@ -736,6 +779,13 @@ onUnmounted(() => {
                       </option>
                     </select>
                   </label>
+                  <p v-if="!blockOptions.length" class="planning__note">
+                    {{
+                      classPlan.blocks.length
+                        ? 'Die Klasse ist bereits allen Blöcken dieses Blockplans zugeordnet.'
+                        : 'Dieser Blockplan hat noch keine Blöcke. Lege sie im Reiter „Blockplan“ an.'
+                    }}
+                  </p>
                   <Button
                     type="submit"
                     label="Zuordnen"
@@ -746,9 +796,9 @@ onUnmounted(() => {
                 <form class="planning__form" @submit.prevent="submitPlanChange">
                   <h3>Blockplan wechseln</h3>
                   <p class="planning__note">
-                    Erst nach Ende aller Blöcke möglich. Die Konten werden dabei
-                    abschließend zurückgesetzt; Klasse und Schüler bleiben
-                    erhalten.
+                    Erst nach Ende aller Blöcke möglich. Die Fehlzeitenkonten
+                    werden dabei abschließend zurückgesetzt; Klasse und Schüler
+                    bleiben erhalten.
                   </p>
                   <label>
                     <span>Folgeplan</span>
@@ -766,6 +816,11 @@ onUnmounted(() => {
                       </option>
                     </select>
                   </label>
+                  <p v-if="!nextPlanCandidates.length" class="planning__note">
+                    Es gibt noch keinen Blockplan, der nach dem
+                    {{ formatDate(classPlan.endsOn) }} beginnt. Lege ihn im
+                    Reiter „Blockplan“ an.
+                  </p>
                   <div class="planning__actions">
                     <Button
                       type="submit"
@@ -776,7 +831,7 @@ onUnmounted(() => {
                     />
                     <Button
                       type="button"
-                      label="Nur Konten zurücksetzen"
+                      label="Nur Fehlzeitenkonten zurücksetzen"
                       severity="secondary"
                       :disabled="busy"
                       @click="submitReset"
@@ -963,25 +1018,6 @@ onUnmounted(() => {
 
 .planning__note {
   font-size: 0.8rem;
-}
-
-.planning__message {
-  margin: 0;
-  padding: 10px 12px;
-  border: 1px solid #b6d7c0;
-  border-radius: 6px;
-  background: #f1f9f3;
-  font-size: 0.9rem;
-  color: #1f6a37;
-}
-
-.planning__sr-only {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  overflow: hidden;
-  clip: rect(0 0 0 0);
-  white-space: nowrap;
 }
 
 @media (max-width: 480px) {

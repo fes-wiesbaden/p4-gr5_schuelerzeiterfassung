@@ -21,7 +21,14 @@ import {
 } from '@/api/assistant'
 import { loadClasses, todayInBerlin, type SchoolClass } from '@/api/attendance'
 import { loadData } from '@/api/client'
-import { formatDate, timePattern, toCalendarDate } from '@/dateTime'
+import {
+  classOfNamedStudent,
+  matchesName,
+  normalizeName,
+  studentLabel,
+  type Student as StudentRecord
+} from '@/api/students'
+import { formatDate, timePattern, toCalendarDate, toIsoDate } from '@/dateTime'
 
 const props = defineProps<{ hint: ExcusalHint }>()
 const emit = defineEmits<{
@@ -29,12 +36,10 @@ const emit = defineEmits<{
   cancel: []
 }>()
 
-type Student = {
-  id: number
-  firstName: string
-  lastName: string
-  birthDate: string
-}
+type Student = Pick<
+  StudentRecord,
+  'id' | 'firstName' | 'lastName' | 'birthDate'
+>
 
 const today = todayInBerlin()
 const clockTime = new RegExp(`^${timePattern}$`)
@@ -88,25 +93,67 @@ const previewPanel = ref<HTMLElement>()
 const selectedStudent = computed(() =>
   students.value.find(({ id }) => id === studentId.value)
 )
-const canPreview = computed(() =>
-  Boolean(
-    classId.value &&
-    studentId.value &&
-    date.value &&
-    (scope.value !== 'time' ||
-      (date.value <= today &&
-        clockTime.test(startsAt.value) &&
-        clockTime.test(endsAt.value) &&
-        startsAt.value < endsAt.value)) &&
-    (scope.value !== 'range' ||
-      (endDate.value > date.value &&
-        status.value === 'MIT_ATTEST_ENTSCHULDIGT'))
-  )
-)
+const timeHint = 'Gib die Uhrzeit im Format HH:MM ein, zum Beispiel 08:00.'
+// Erster Grund, der eine Vorschau verhindert. Leer bedeutet: alles vollständig
+const previewProblem = computed(() => {
+  if (!classId.value) return 'Wähle zuerst eine Klasse aus.'
+  if (!studentId.value) return 'Wähle eine Schülerin oder einen Schüler aus.'
+  const dateLabel = scope.value === 'range' ? 'Erster Tag' : 'Datum'
+  if (!date.value)
+    return `„${dateLabel}“: Gib ein gültiges Datum im Format TT.MM.JJJJ ein.`
+  if (scope.value === 'time') {
+    if (date.value > today)
+      return 'Bestimmte Uhrzeiten lassen sich nur für heute oder vergangene Tage entschuldigen. Wähle für kommende Tage den Umfang „Ganzer Schultag“.'
+    if (!clockTime.test(startsAt.value)) return `„Von“: ${timeHint}`
+    if (!clockTime.test(endsAt.value)) return `„Bis“: ${timeHint}`
+    if (startsAt.value >= endsAt.value)
+      return '„Bis“ muss nach „Von“ liegen. Prüfe die beiden Uhrzeiten.'
+  }
+  if (scope.value === 'range') {
+    if (!endDate.value)
+      return '„Letzter Tag“: Gib ein gültiges Datum im Format TT.MM.JJJJ ein.'
+    if (endDate.value <= date.value)
+      return 'Der letzte Tag muss nach dem ersten Tag liegen. Wähle für einen einzelnen Tag den Umfang „Ganzer Schultag“.'
+    if (status.value !== 'MIT_ATTEST_ENTSCHULDIGT')
+      return 'Mehrere Schultage lassen sich nur mit Attest entschuldigen. Setze den Haken bei „Ein Attest liegt vor“.'
+  }
+  return ''
+})
+// Montag bis Freitag im gewählten Zeitraum, für die die Vorschau nichts ändert.
+// Die Vorschaudaten nennen nur Tage mit Änderung; ob an den übrigen Tagen kein
+// Unterricht war oder nichts offen ist, lässt sich hier nicht unterscheiden
+const unchangedDays = computed(() => {
+  const first = toCalendarDate(date.value)
+  const last = toCalendarDate(endDate.value)
+  if (scope.value !== 'range' || !preview.value?.id || !first || !last)
+    return []
+  const changed = new Set(preview.value.impact.days.map((day) => day.date))
+  const result: string[] = []
+  for (
+    const day = new Date(first);
+    day <= last && result.length < 400;
+    day.setDate(day.getDate() + 1)
+  ) {
+    const iso = toIsoDate(day)
+    if (day.getDay() % 6 !== 0 && !changed.has(iso)) result.push(iso)
+  }
+  return result
+})
+const unchangedText =
+  'keine Änderung (keine offenen Fehlminuten oder kein Unterricht)'
+// Bis zu zehn unveränderte Tage stehen einzeln in der Liste, sonst als Summe
+const previewRows = computed(() => {
+  const rows: { date: string; day?: ExcusalDay }[] = (
+    preview.value?.impact.days ?? []
+  ).map((day) => ({ date: day.date, day }))
+  if (unchangedDays.value.length <= 10)
+    rows.push(...unchangedDays.value.map((iso) => ({ date: iso })))
+  return rows.sort((a, b) => a.date.localeCompare(b.date))
+})
 const nameCounts = computed(() => {
   const counts = new Map<string, number>()
   for (const student of students.value) {
-    const name = normalize(fullName(student))
+    const name = normalizeName(studentLabel(student))
     counts.set(name, (counts.get(name) ?? 0) + 1)
   }
   return counts
@@ -119,37 +166,40 @@ function previewLabel(day: ExcusalDay) {
   return `${day.excusedAdded} Min. entschuldigt`
 }
 
-function fullName(student: Student) {
-  return `${student.firstName} ${student.lastName}`
-}
-
-function normalize(value = '') {
-  return value
-    .normalize()
-    .trim()
-    .replace(/\s+/g, ' ')
-    .toLocaleLowerCase('de-DE')
-}
-
-function studentLabel(student: Student) {
-  const name = fullName(student)
-  return (nameCounts.value.get(normalize(name)) ?? 0) > 1
+// Gleichnamige Personen unterscheidet das Geburtsdatum
+function label(student: Student) {
+  const name = studentLabel(student)
+  return (nameCounts.value.get(normalizeName(name)) ?? 0) > 1
     ? `${name} · ${formatDate(student.birthDate)}`
     : name
+}
+
+// Ohne genannte Klasse wird sie über einen eindeutigen Namen gesucht
+async function classOfHintedStudent() {
+  if (props.hint.classCode || !props.hint.studentName) return undefined
+  const all = await loadData<StudentRecord[]>(
+    '/api/students',
+    classRequest.signal
+  ).catch(() => [])
+  return classOfNamedStudent(all, props.hint.studentName)
 }
 
 async function fetchClasses() {
   loadingClasses.value = true
   selectionError.value = ''
   try {
-    classes.value = await loadClasses(classRequest.signal)
-    const hint = normalize(props.hint.classCode ?? '')
-    const match = classes.value.find(
-      ({ classCode }) => normalize(classCode) === hint
+    const [visible, hintedClass] = await Promise.all([
+      loadClasses(classRequest.signal),
+      classOfHintedStudent()
+    ])
+    classes.value = visible
+    const hint = normalizeName(props.hint.classCode ?? '')
+    const match = visible.find(
+      ({ id, classCode }) =>
+        normalizeName(classCode) === hint || id === hintedClass
     )
     classId.value =
-      match?.id ??
-      (!hint && classes.value.length === 1 ? classes.value[0]?.id : undefined)
+      match?.id ?? (!hint && visible.length === 1 ? visible[0]?.id : undefined)
   } catch {
     if (!classRequest.signal.aborted)
       selectionError.value = 'Klassen konnten nicht geladen werden.'
@@ -176,12 +226,8 @@ watch(classId, async (id, _old, onCleanup) => {
     )
     if (request.signal.aborted) return
     students.value = result
-    const hint = normalize(props.hint.studentName ?? '')
-    const matches = result.filter(
-      (student) =>
-        normalize(fullName(student)) === hint ||
-        normalize(`${student.lastName}, ${student.firstName}`) === hint
-    )
+    const hint = props.hint.studentName ?? ''
+    const matches = result.filter((student) => matchesName(student, hint))
     if (matches.length === 1) studentId.value = matches[0]?.id
   } catch {
     if (!request.signal.aborted)
@@ -200,8 +246,12 @@ watch(
 )
 
 async function calculatePreview() {
-  if (!canPreview.value || busy.value || !classId.value || !studentId.value)
+  if (busy.value) return
+  if (previewProblem.value || !classId.value || !studentId.value) {
+    // Der Knopf bleibt bedienbar und nennt den Grund, statt grau zu bleiben
+    error.value = previewProblem.value
     return
+  }
   busy.value = true
   preview.value = undefined
   error.value = ''
@@ -271,19 +321,19 @@ onUnmounted(() => classRequest.abort())
           </select>
         </label>
         <label>
-          Person
+          Schüler/in
           <select
             v-model="studentId"
             required
             :disabled="loadingStudents || !students.length"
           >
-            <option :value="undefined" disabled>Person auswählen</option>
+            <option :value="undefined" disabled>Schüler/in auswählen</option>
             <option
               v-for="student in students"
               :key="student.id"
               :value="student.id"
             >
-              {{ studentLabel(student) }}
+              {{ label(student) }}
             </option>
           </select>
         </label>
@@ -352,7 +402,7 @@ onUnmounted(() => classRequest.abort())
       <PageError v-else-if="selectionError" :message="selectionError" />
       <p v-else-if="!classes.length">Es sind keine Klassen verfügbar.</p>
       <p v-else-if="classId && !students.length">
-        In dieser Klasse sind keine Personen erfasst.
+        In dieser Klasse sind keine Schülerinnen und Schüler erfasst.
       </p>
       <PageError :message="error" />
       <div class="excusal__actions">
@@ -361,7 +411,7 @@ onUnmounted(() => classRequest.abort())
           label="Vorschau berechnen"
           size="small"
           outlined
-          :disabled="!canPreview || busy"
+          :disabled="busy"
         />
         <Button
           type="button"
@@ -381,18 +431,30 @@ onUnmounted(() => classRequest.abort())
     >
       <template v-if="preview.id && selectedStudent">
         <p>
-          <strong>{{ studentLabel(selectedStudent) }}</strong>
+          <strong>{{ label(selectedStudent) }}</strong>
         </p>
         <p>{{ STATUS_LABELS[status] }}</p>
         <p v-if="scope === 'time'">{{ startsAt }}–{{ endsAt }} Uhr</p>
         <p v-if="reason">{{ reason }}</p>
         <ul class="excusal__days">
-          <li v-for="day in preview.impact.days" :key="day.date">
-            <strong>{{ formatDate(day.date) }}</strong>
-            <span v-if="day.pending"> · Vormerkung</span>
-            <span> · {{ previewLabel(day) }}</span>
+          <li
+            v-for="row in previewRows"
+            :key="row.date"
+            :class="{ 'excusal__day--unchanged': !row.day }"
+          >
+            <strong>{{ formatDate(row.date) }}</strong>
+            <template v-if="row.day">
+              <span v-if="row.day.pending"> · Vormerkung</span>
+              <span> · {{ previewLabel(row.day) }}</span>
+            </template>
+            <span v-else> · {{ unchangedText }}</span>
           </li>
         </ul>
+        <p v-if="unchangedDays.length > 10" class="excusal__unchanged">
+          {{ unchangedDays.length }} weitere Tage (Montag bis Freitag) im
+          Zeitraum bleiben unverändert: keine offenen Fehlminuten oder kein
+          Unterricht.
+        </p>
         <dl v-if="scope === 'time'">
           <div>
             <dt>Unentschuldigt</dt>
@@ -524,6 +586,15 @@ form,
   margin: 0;
   padding-inline-start: 1.2rem;
   font-size: 0.85rem;
+}
+
+.excusal__day--unchanged,
+.excusal__unchanged {
+  color: var(--muted);
+}
+
+.excusal__day--unchanged strong {
+  font-weight: 500;
 }
 
 .excusal__preview p {

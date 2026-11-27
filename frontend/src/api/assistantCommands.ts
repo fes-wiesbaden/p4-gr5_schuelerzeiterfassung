@@ -1,6 +1,6 @@
 import type { RouteLocationRaw } from 'vue-router'
 import { berlinInstant, STATUS_LABELS, type DailyStudent } from './attendance'
-import { deleteResource, loadData, postJson, putJson } from './client'
+import { changeData, loadData } from './client'
 import {
   addBlock,
   addSlot,
@@ -9,7 +9,6 @@ import {
   createBlockPlan,
   createTimetable,
   deleteSlot,
-  errorMessage,
   formatTime,
   loadClassWeek,
   loadOverview,
@@ -22,7 +21,10 @@ import {
   type Weekday
 } from './planning'
 import {
+  classOfNamedStudent,
   formatAbsenceTotals,
+  normalizeName,
+  personLabel,
   studentLabel,
   type Student,
   type StudentClass
@@ -52,6 +54,7 @@ export type Field = {
   kind: 'text' | 'date' | 'time' | 'number' | 'secret' | 'choice'
   options?: (context: CommandContext, values: Values) => Choice[]
   length?: number
+  // Darf leer bleiben, etwa der Vorname einer Lehrkraft
   optional?: boolean
 }
 export type Choice = { value: string; label: string; aliases?: string[] }
@@ -124,6 +127,10 @@ const student = choice('studentName', 'Schüler oder Schülerin', (ctx, values) 
 )
 const names = [text('firstName', 'Vorname'), text('lastName', 'Nachname')]
 const studentDetails = [...names, date('birthDate', 'Geburtsdatum')]
+const teacherNames = [
+  { ...text('firstName', 'Vorname (optional)'), optional: true },
+  text('lastName', 'Nachname')
+]
 const attendanceDate = date('date', 'Datum')
 const period = [date('date', 'Beginn'), date('endDate', 'Ende')]
 const startsAt = time('startsAt', 'Beginn')
@@ -187,8 +194,12 @@ const teacher = (label = 'Klassenleitung') =>
   choice('teacher', label, (ctx) =>
     ctx.teachers.map((item) => ({
       value: String(item.id),
-      label: `${item.firstName} ${item.lastName} · ${item.username}`,
-      aliases: [`${item.firstName} ${item.lastName}`, item.username]
+      label: `${personLabel(item)} · ${item.username}`,
+      aliases: [
+        personLabel(item),
+        `${item.firstName} ${item.lastName}`.trim(),
+        item.username
+      ]
     }))
   )
 const slotFields = [weekday, startsAt, endsAt, room()]
@@ -224,34 +235,55 @@ function lessonSummary(lesson: ScheduledLesson) {
     .join(' · ')
 }
 
+const excusedNotes: Partial<Record<DailyStudent['status'], string>> = {
+  MIT_ATTEST_ENTSCHULDIGT: ' (mit Attest)',
+  BETRIEBLICH_ENTSCHULDIGT: ' (betrieblich)'
+}
+
+// Fasst einen Tag für den Chat zusammen: alle Namen, getrennt nach
+// unentschuldigt abwesend, entschuldigt und im Betrieb
+export function attendanceSummary(records: DailyStudent[]) {
+  if (!records.length)
+    return 'Für diesen Tag sind keine Anwesenheitsdaten verfügbar.'
+  const sorted = [...records].sort(
+    (a, b) =>
+      a.lastName.localeCompare(b.lastName, 'de') ||
+      a.firstName.localeCompare(b.firstName, 'de')
+  )
+  const group = (
+    title: string,
+    members: DailyStudent[],
+    note: (item: DailyStudent) => string = () => ''
+  ) =>
+    members.length
+      ? `${title} (${members.length}): ${members
+          .map((item) => `${item.firstName} ${item.lastName}${note(item)}`)
+          .join(', ')}`
+      : null
+  const absent = sorted.filter((item) => item.status === 'ABWESEND')
+  const excused = sorted.filter((item) => item.status.endsWith('ENTSCHULDIGT'))
+  const atCompany = sorted.filter((item) => item.status === 'BETRIEB')
+  const present = sorted.filter((item) => item.status === 'ANWESEND').length
+  return [
+    group('Unentschuldigt abwesend', absent),
+    group('Entschuldigt', excused, (item) => excusedNotes[item.status] ?? ''),
+    group('Im Betrieb', atCompany),
+    absent.length || excused.length
+      ? null
+      : 'Niemand ist als abwesend oder entschuldigt eingetragen.',
+    `Anwesend: ${present} von ${records.length}`
+  ]
+    .filter(Boolean)
+    .join('\n')
+}
+
 async function write(
   path: string,
   method: 'POST' | 'PUT' | 'DELETE',
   body: unknown,
   success: string
 ): Promise<CommandResult> {
-  const response = await (method === 'DELETE'
-    ? deleteResource(path)
-    : method === 'POST'
-      ? postJson(path, body)
-      : putJson(path, body))
-  const payload =
-    response.status === 204 ? null : await response.json().catch(() => null)
-  if (!response.ok) {
-    if (response.status === 403)
-      throw new Error('Für diese Aktion fehlen dir die Rechte.')
-    if (payload?.code === 'STUDENT_HAS_HISTORY') {
-      throw new Error(
-        'Dieser Schüler hat bereits eine Anwesenheitshistorie. Die App lässt das Löschen deshalb nicht zu.'
-      )
-    }
-    if (response.status === 409 && !payload?.code) {
-      throw new Error(
-        'Der Eintrag wird noch verwendet oder die Änderung steht im Konflikt mit vorhandenen Daten.'
-      )
-    }
-    throw new Error(errorMessage(payload?.code))
-  }
+  const payload = await changeData(path, method, body ?? undefined)
   return result(
     payload?.changed === false
       ? 'Die Angaben waren bereits so gespeichert.'
@@ -305,16 +337,8 @@ export const commands: Record<string, Definition> = {
       const records = await loadData<DailyStudent[]>(
         `${classPath(v)}/attendance?date=${encodeURIComponent(v.date!)}`
       )
-      const absent = records.filter((item) => item.status === 'ABWESEND')
-      const first = absent
-        .slice(0, 12)
-        .map((s) => `${s.firstName} ${s.lastName}`)
-        .join(', ')
-      const summary = absent.length
-        ? `${absent.length} abwesend: ${first}${absent.length > 12 ? ' …' : ''}`
-        : 'Niemand ist als abwesend eingetragen.'
       return {
-        text: `${currentClass(v, ctx).classCode} · ${formatDate(v.date!)}\n${records.length ? summary : 'Für diesen Tag sind keine Anwesenheitsdaten verfügbar.'}`,
+        text: `${currentClass(v, ctx).classCode} · ${formatDate(v.date!)}\n${attendanceSummary(records)}`,
         link: {
           label: 'Tagesanwesenheit öffnen',
           to: {
@@ -440,9 +464,21 @@ ${entries.join('\n') || 'Für diese Woche liegen keine Tagesdaten vor.'}`,
   },
   add_absence_minutes: attendanceCommand(
     'Fehlminuten hinzufügen',
-    [{ key: 'minutes', label: 'Unentschuldigte Minuten', kind: 'number' }],
+    [
+      { key: 'minutes', label: 'Unentschuldigte Minuten', kind: 'number' },
+      {
+        key: 'note',
+        label: 'Vermerk (warum trägst du die Minuten ein?)',
+        kind: 'text',
+        length: 200
+      }
+    ],
     'manual-absence-minutes',
-    (v) => ({ minutes: Number(v.minutes), requestId: v.requestId }),
+    (v) => ({
+      minutes: Number(v.minutes),
+      note: String(v.note ?? '').trim(),
+      requestId: v.requestId
+    }),
     'Fehlminuten gebucht.'
   ),
   excuse_open: attendanceCommand(
@@ -656,7 +692,7 @@ ${entries.join('\n') || 'Für diese Woche liegen keine Tagesdaten vor.'}`,
     title: 'Lehrkraft anlegen',
     admin: true,
     fields: [
-      ...names,
+      ...teacherNames,
       text('username', 'Benutzername'),
       { key: 'password', label: 'Startpasswort', kind: 'secret', length: 72 }
     ],
@@ -672,7 +708,7 @@ ${entries.join('\n') || 'Für diese Woche liegen keine Tagesdaten vor.'}`,
   update_teacher: {
     title: 'Lehrkraft bearbeiten',
     admin: true,
-    fields: [teacher('Lehrkraft'), ...names],
+    fields: [teacher('Lehrkraft'), ...teacherNames],
     needs: ['teachers'],
     run: (v) =>
       write(
@@ -750,7 +786,7 @@ export async function loadCommandContext(
   signal: AbortSignal
 ): Promise<CommandContext> {
   if (definition.admin && !admin)
-    throw new Error('Diese Aktion steht der Verwaltung zur Verfügung.')
+    throw new Error('Dieser Auftrag steht nur der Verwaltung zur Verfügung.')
   const needs = new Set(definition.needs)
   const [classes, students, staffId, options, planning, rooms, teachers] =
     await Promise.all([
@@ -767,7 +803,7 @@ export async function loadCommandContext(
             signal
           )
         : undefined,
-      needs.has('planning') ? loadOverview() : undefined,
+      needs.has('planning') ? loadOverview(signal) : undefined,
       needs.has('rooms') ? loadData<Room[]>('/api/rooms', signal) : [],
       needs.has('teachers') && admin
         ? loadData<Teacher[]>('/api/teachers', signal)
@@ -786,14 +822,11 @@ export async function loadCommandContext(
   }
 }
 
-const normalized = (value: string) =>
-  value.trim().normalize().toLocaleLowerCase('de-DE').replace(/\s+/g, ' ')
-
 function matching(options: Choice[], hint: string | null | undefined) {
   if (!hint) return undefined
   const matches = options.filter((item) =>
     [item.label, ...(item.aliases ?? [])].some(
-      (label) => normalized(label) === normalized(hint)
+      (label) => normalizeName(label) === normalizeName(hint)
     )
   )
   return matches.length === 1 ? matches[0]?.value : undefined
@@ -807,16 +840,9 @@ export function fillCommand(
   const values: Values = {}
   // Eindeutige Personen können anhand des Namens ihrer zugänglichen Klasse zugeordnet werden.
   if (!hint.classCode && hint.studentName) {
-    const target = normalized(hint.studentName)
-    const candidates = ctx.students.filter((s) =>
-      [studentLabel(s), `${s.firstName} ${s.lastName}`].some(
-        (name) => normalized(name) === target
-      )
-    )
-    if (candidates.length === 1) {
-      const found = ctx.classes.find((c) => c.id === candidates[0]?.classId)
-      if (found) hint = { ...hint, classCode: found.classCode }
-    }
+    const classId = classOfNamedStudent(ctx.students, hint.studentName)
+    const found = ctx.classes.find((c) => c.id === classId)
+    if (found) hint = { ...hint, classCode: found.classCode }
   }
   for (const field of fields) {
     const options = field.options?.(ctx, values)

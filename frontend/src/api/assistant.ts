@@ -1,5 +1,5 @@
 import type { CommandHint } from './assistantCommands'
-import { loadData, postJson } from './client'
+import { apiErrorMessage, loadData, postJson, readProblem } from './client'
 
 export type ChatMessage = { role: 'user' | 'assistant'; content: string }
 
@@ -53,19 +53,9 @@ export type Excusal = {
 }
 
 const assistantPath = '/api/assistant'
-const messages: Record<string, string> = {
-  ASSISTANT_BUSY:
-    'Der Assistent beantwortet gerade eine Frage. Versuch es in einem Moment erneut.',
-  ASSISTANT_UNAVAILABLE: 'Klassenlotse ist gerade nicht erreichbar.',
-  ATTENDANCE_DAY_LOCKED_OR_UNPLANNED:
-    'Für dieses Datum ist keine Buchung möglich. Prüfe die Unterrichtsplanung und das Datum.',
-  INVALID_EXCUSAL_TIME:
-    'Prüfe Datum und Uhrzeit. Für mehrere Tage ist ein Attest erforderlich.',
-  EXCUSAL_PREVIEW_CHANGED:
-    'Die Fehlzeit hat sich geändert. Berechne die Vorschau erneut.',
-  EXCUSAL_PREVIEW_EXPIRED:
-    'Diese Vorschau ist abgelaufen. Berechne sie erneut.',
-  NOT_FOUND: 'Die ausgewählte Person oder Klasse ist nicht mehr verfügbar.'
+const notFound = {
+  NOT_FOUND:
+    'Die ausgewählte Klasse oder Schüler/in ist nicht mehr verfügbar. Wähle neu aus.'
 }
 
 export class AssistantRequestError extends Error {
@@ -77,20 +67,29 @@ export class AssistantRequestError extends Error {
   }
 }
 
+// Standardtext, falls das Modell keinen Antworttext liefert
+export const emptyAnswerText =
+  'Darauf habe ich gerade keine Antwort. Formuliere die Frage etwas anders oder wähle unten einen Auftrag aus.'
+export const emptyDraftText =
+  'Ich habe ein Formular vorbereitet. Prüfe die Angaben, bevor du etwas bestätigst.'
+
+// Ein Abbruch über `signal` beendet die Anfrage sofort; die Aufrufer erkennen
+// ihn an `signal.aborted`
 async function submit<T>(
   suffix: string,
   data: unknown,
-  fallback: string
+  fallback: string,
+  signal?: AbortSignal
 ): Promise<T> {
-  const response = await postJson(assistantPath + suffix, data).catch(() => {
-    throw new Error(fallback)
-  })
+  const response = await postJson(assistantPath + suffix, data, signal).catch(
+    (failure) => {
+      throw signal?.aborted ? failure : new Error(fallback)
+    }
+  )
   if (!response.ok) {
-    const detail = (await response.json().catch(() => null)) as {
-      code?: string
-    } | null
+    const { code } = await readProblem(response)
     throw new AssistantRequestError(
-      detail?.code ? (messages[detail.code] ?? fallback) : fallback,
+      apiErrorMessage(code, fallback, notFound),
       response.status
     )
   }
@@ -101,11 +100,17 @@ export function assistantAvailability() {
   return loadData<{ demoEnabled: boolean }>(assistantPath)
 }
 
-export function sendChat(messages: ChatMessage[], page?: string) {
+export function sendChat(
+  messages: ChatMessage[],
+  page?: string,
+  signal?: AbortSignal
+) {
   return submit<AssistantReply>(
     '/messages',
-    { messages, page },
-    'Die Frage konnte nicht gesendet werden.'
+    // Leere Einträge lehnt das Backend ab, deshalb gehen sie nie in die Anfrage
+    { messages: messages.filter(({ content }) => content.trim()), page },
+    'Die Frage konnte nicht gesendet werden.',
+    signal
   )
 }
 

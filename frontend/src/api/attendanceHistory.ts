@@ -1,4 +1,4 @@
-import { loadData, postJson } from './client'
+import { deleteResource, loadData, postJson } from './client'
 
 export interface HistoryDay {
   date: string
@@ -15,6 +15,17 @@ export interface HistoryDay {
   fullAbsence?: 'ABWESEND' | 'ENTSCHULDIGT' | null
   wasPresent?: boolean
   canBookMinutes?: boolean
+  // Geplante Unterrichtsminuten des Tages
+  plannedMinutes?: number
+  // Noch zulässige händische Fehlminuten: geplanter Unterricht abzüglich der
+  // bereits berechneten und händischen Fehlminuten
+  manualAbsenceLimit?: number
+  // Wirksame händische Einträge des Tages samt Vermerk
+  manualAbsenceEntries?: { minutes: number; note: string | null }[]
+  // Zwischenstand eines noch laufenden Unterrichtstags
+  interim?: boolean
+  // ABWESEND ist trotz erfasster Anwesenheit zulässig, wenn kein Scan vorliegt
+  canMarkAbsent?: boolean
   excusals?: {
     startsAt: string
     endsAt: string
@@ -52,11 +63,12 @@ export function addManualAbsence(
   studentId: number,
   date: string,
   minutes: number,
-  requestId: string
+  requestId: string,
+  note: string
 ) {
   return postJson(
     `/api/students/${studentId}/attendance/${date}/manual-absence-minutes`,
-    { minutes, requestId }
+    { minutes, requestId, note }
   )
 }
 
@@ -77,5 +89,29 @@ export function correctStatusPeriod(
   return postJson(
     `/api/students/${studentId}/attendance/${date}/status-periods`,
     { status, startsAt, endsAt }
+  )
+}
+
+export function removeManualAbsence(studentId: number, date: string) {
+  return deleteResource(
+    `/api/students/${studentId}/attendance/${date}/manual-absence-minutes`
+  )
+}
+
+export interface CalendarDay {
+  date: string
+  // Tag liegt in einem zugeordneten Unterrichtsblock und hat Unterricht
+  lessonDay: boolean
+  // An diesem Tag gibt es Fehlminuten
+  absent: boolean
+}
+
+export function loadAttendanceCalendar(
+  studentId: number,
+  from: string,
+  to: string
+) {
+  return loadData<CalendarDay[]>(
+    `/api/students/${studentId}/attendance/calendar?from=${from}&to=${to}`
   )
 }

@@ -9,6 +9,7 @@ import ClassesView from './views/ClassesView.vue'
 import StudentsView from './views/StudentsView.vue'
 import RoomsView from './views/RoomsView.vue'
 import StaffView from './views/StaffView.vue'
+import NotFoundView from './views/NotFoundView.vue'
 
 declare module 'vue-router' {
   interface RouteMeta {
@@ -21,6 +22,12 @@ declare module 'vue-router' {
 
 const router = createRouter({
   history: createWebHistory(),
+  // Neue Seiten beginnen oben; „Zurück“ stellt die alte Position wieder her
+  scrollBehavior(to, from, savedPosition) {
+    if (savedPosition) return savedPosition
+    if (to.path === from.path) return undefined
+    return { top: 0 }
+  },
   routes: [
     {
       path: '/login',
@@ -81,6 +88,12 @@ const router = createRouter({
           component: () => import('./views/SchedulePlanningView.vue'),
           meta: { title: 'Stunden- und Blockplan' }
         },
+        {
+          path: 'planung/entwurf',
+          name: 'stundenplan-entwurf',
+          component: () => import('./views/TimetableImportView.vue'),
+          meta: { adminOnly: true, title: 'Stundenplan-Entwurf' }
+        },
         { path: 'auswertungen', redirect: { name: 'schueler' } },
         {
           path: 'raeume',
@@ -96,7 +109,20 @@ const router = createRouter({
           path: 'personal',
           name: 'personal',
           component: StaffView,
-          meta: { adminOnly: true, title: 'Personal' }
+          meta: { adminOnly: true, title: 'Lehrkräfte' }
+        },
+        {
+          path: 'kein-zugriff',
+          name: 'kein-zugriff',
+          component: NotFoundView,
+          props: { denied: true },
+          meta: { title: 'Kein Zugriff' }
+        },
+        {
+          path: ':pathMatch(.*)*',
+          name: 'nicht-gefunden',
+          component: NotFoundView,
+          meta: { title: 'Seite nicht gefunden' }
         }
       ]
     }
@@ -111,7 +137,7 @@ setUnauthorizedHandler(async () => {
   if (wasLoggedIn && !currentRoute.meta.public) {
     await router.replace({
       name: 'login',
-      query: { weiter: currentRoute.fullPath }
+      query: { weiter: currentRoute.fullPath, grund: 'abgelaufen' }
     })
   }
 })
@@ -134,8 +160,8 @@ router.beforeEach(async (to) => {
     return { name: 'login', query: { weiter: to.fullPath } }
   }
 
-  if (!to.matched.length || (to.meta.adminOnly && !auth.isAdmin)) {
-    return { name: 'live-anwesenheit' }
+  if (to.meta.adminOnly && !auth.isAdmin) {
+    return { name: 'kein-zugriff' }
   }
 })
 

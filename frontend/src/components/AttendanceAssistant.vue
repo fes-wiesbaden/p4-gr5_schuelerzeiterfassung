@@ -1,7 +1,15 @@
 <script setup lang="ts">
 import PageError, { pageErrorTarget } from '@/components/PageError.vue'
-import { provide, computed, nextTick, ref, watch } from 'vue'
-import { useRoute, type RouteLocationRaw } from 'vue-router'
+import { provide, computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
+import { useRoute, useRouter, type RouteLocationRaw } from 'vue-router'
+import {
+  imageProblem,
+  readTimetableImage,
+  timetableDraft,
+  type ClassTarget,
+  type TimetableDraft
+} from '@/api/timetableImport'
+import TimetableClassQuestion from './TimetableClassQuestion.vue'
 import AssistantCommandDraft from './AssistantCommandDraft.vue'
 import {
   commands,
@@ -10,10 +18,13 @@ import {
   type CommandResult
 } from '@/api/assistantCommands'
 import Button from 'primevue/button'
+import InputText from 'primevue/inputtext'
 import Textarea from 'primevue/textarea'
 
 import {
   assistantAvailability,
+  emptyAnswerText,
+  emptyDraftText,
   sendChat,
   type ChatMessage,
   type ExcusalHint,
@@ -23,6 +34,7 @@ import { administrationNavItems, mainNavItems } from '@/layouts/navigation'
 import { useAuthStore } from '@/stores/auth'
 import ExcusalDraft from './ExcusalDraft.vue'
 import AssistantFirelight from './AssistantFirelight.vue'
+import { confirmAction } from '@/confirm'
 
 type TranscriptItem = ChatMessage & {
   link?: { label: string; to: RouteLocationRaw }
@@ -31,9 +43,23 @@ type TranscriptItem = ChatMessage & {
 
 const auth = useAuthStore()
 const route = useRoute()
+const router = useRouter()
 const open = ref(false)
+// Komponentenverweis, von dem nur das DOM-Element gebraucht wird
+const imageInput = ref<{ $el: HTMLInputElement }>()
+const readingImage = ref(false)
+// Gelesener Stundenplan, zu dem die Klasse noch zu klären ist
+const classQuestion = ref<TimetableDraft>()
 const motionKey = 'klassenlotse-bewegung-pausiert'
-const motionPaused = ref(localStorage.getItem(motionKey) === 'true')
+// Gesperrter Websitespeicher darf den Chat nicht verhindern
+function readMotionPaused() {
+  try {
+    return localStorage.getItem(motionKey) === 'true'
+  } catch {
+    return false
+  }
+}
+const motionPaused = ref(readMotionPaused())
 const panel = ref<HTMLDialogElement>()
 const demoEnabled = ref<boolean>()
 const availabilityError = ref(false)
@@ -46,11 +72,13 @@ const error = ref('')
 const dialogErrors = ref<HTMLElement>()
 provide(pageErrorTarget, dialogErrors)
 const answering = ref(false)
+let pendingAnswer: AbortController | undefined
+let restorePageScroll: (() => void) | undefined
 const draft = ref<ExcusalHint>()
 const draftVersion = ref(0)
 const command = ref<CommandHint>()
-const panelLabel = computed(() =>
-  open.value ? 'Klassenlotse schließen' : 'Klassenlotse öffnen'
+const motionLabel = computed(() =>
+  motionPaused.value ? 'Animation fortsetzen' : 'Animation pausieren'
 )
 const availableCommands = computed(() =>
   Object.entries(commands).filter(
@@ -62,8 +90,13 @@ const prompts = [
   { icon: 'pi pi-users', text: 'Wer fehlt heute?' },
   { icon: 'pi pi-question-circle', text: 'Wie korrigiere ich einen Status?' }
 ]
-const credentialInMessage =
-  /(?:passwort|kennwort|kartenkennung|kartennummer|rfid[- ]?uid)\s*(?::|=|lautet\s+|ist\s+)\s*\S/iu
+// Erkennt Zugangsdaten im Text: ein Stichwort, danach im selben Satz „:“, „=“,
+// „auf“, „lautet“, „ist“ oder „wird“ und ein Wert, oder eine Kartenkennung
+// aus 8, 14 oder 20 Hexzeichen mit mindestens einer Ziffer
+const credentialInMessage = [
+  /(?:passwort|kennwort|kartenkennung|kartennummer|rfid[- ]?uid)[^.?!\n]{0,40}?(?::|=|\b(?:auf|lautet|ist|wird)\b)\s*\S/iu,
+  /\b(?=[0-9a-f]*\d)(?:[0-9a-f]{20}|[0-9a-f]{14}|[0-9a-f]{8})\b/iu
+]
 const links = computed(() =>
   auth.isAdmin ? [...mainNavItems, ...administrationNavItems] : mainNavItems
 )
@@ -75,37 +108,89 @@ async function loadAvailability() {
   availabilityError.value = false
   try {
     demoEnabled.value = (await assistantAvailability()).demoEnabled
+    // Das Eingabefeld erscheint erst jetzt: Fokus nachziehen, solange er noch
+    // auf der Überschrift des gerade geöffneten Fensters steht
+    if (document.activeElement === title.value) void focusComposer()
   } catch {
     availabilityError.value = true
   }
 }
 
+// Sperrt das Scrollen der Seite hinter dem Chat und merkt sich den Zustand
+function lockPageScroll() {
+  if (restorePageScroll) return
+  const page = document.documentElement
+  const { overflow, paddingRight } = page.style
+  const scrollbar = window.innerWidth - page.clientWidth
+  page.style.overflow = 'hidden'
+  // Gleicht die wegfallende Bildlaufleiste aus, damit die Seite nicht springt
+  if (scrollbar > 0) page.style.paddingRight = `${scrollbar}px`
+  restorePageScroll = () => {
+    page.style.overflow = overflow
+    page.style.paddingRight = paddingRight
+    restorePageScroll = undefined
+  }
+}
+
+function composer() {
+  return panel.value?.querySelector<HTMLTextAreaElement>(
+    '.assistant__composer textarea'
+  )
+}
+
+// Setzt den Fokus ins Eingabefeld, sofern kein Formular geöffnet ist. Steht er
+// schon dort, passiert nichts, damit Ansagen des Chatverlaufs ungestört bleiben
+async function focusComposer() {
+  await nextTick()
+  if (!open.value || draft.value || command.value) return
+  const field = composer()
+  if (field && document.activeElement !== field)
+    field.focus({ preventScroll: true })
+}
+
 async function show() {
   if (open.value) return
   open.value = true
+  error.value = ''
+  lockPageScroll()
   if (demoEnabled.value === undefined) void loadAvailability()
   await nextTick()
   if (panel.value?.showModal) panel.value.showModal()
   else panel.value?.setAttribute('open', '')
-  title.value?.focus()
+  // Direkt lostippen können; ohne Eingabefeld erhält die Überschrift den Fokus
+  const field = composer()
+  if (field) field.focus({ preventScroll: true })
+  else title.value?.focus()
 }
 
 async function close(restoreFocus = true) {
   if (panel.value?.close) panel.value.close()
   else panel.value?.removeAttribute('open')
   open.value = false
+  restorePageScroll?.()
   await nextTick()
   if (restoreFocus) bubble.value?.focus()
 }
 
 function toggleMotion() {
   motionPaused.value = !motionPaused.value
-  localStorage.setItem(motionKey, String(motionPaused.value))
+  try {
+    localStorage.setItem(motionKey, String(motionPaused.value))
+  } catch {
+    // Ohne Websitespeicher gilt die Wahl bis zum Neuladen
+  }
 }
+
+onBeforeUnmount(() => {
+  pendingAnswer?.abort()
+  restorePageScroll?.()
+})
 
 watch(
   [draft, command],
   async ([nextDraft, nextCommand], [previousDraft, previousCommand]) => {
+    // Eine ältere Fehlermeldung gehört nicht zum neu geöffneten Formular
+    if (nextDraft || nextCommand) error.value = ''
     if (!open.value) return
     await nextTick()
     if (nextDraft || nextCommand) {
@@ -113,9 +198,9 @@ watch(
         ?.querySelector<HTMLElement>('.command h3, .excusal h3')
         ?.focus()
     } else if (previousDraft || previousCommand) {
-      const target = panel.value?.querySelector<HTMLElement>(
-        '.assistant__composer textarea, .assistant__actions summary'
-      )
+      const target =
+        composer() ??
+        panel.value?.querySelector<HTMLElement>('.assistant__tools select')
       target?.focus()
     }
   }
@@ -146,14 +231,20 @@ async function ask(question: string) {
   )
     return
   error.value = ''
-  if (credentialInMessage.test(content)) {
+  if (credentialInMessage.some((pattern) => pattern.test(content))) {
     error.value =
       'Gib Passwörter oder Kartenkennungen im Formular des jeweiligen Auftrags ein.'
+    void focusComposer()
     return
   }
   answering.value = true
+  const request = new AbortController()
+  pendingAnswer = request
+  // Nach einem Klick auf einen Vorschlag verschwindet dessen Schaltfläche,
+  // deshalb wandert der Fokus schon vor der Antwort ins Eingabefeld
+  void focusComposer()
   const previous = messages.value
-    .filter((message) => !message.local)
+    .filter((message) => !message.local && message.content.trim())
     .slice(-4)
     .map(({ role, content }) => ({ role, content }))
   const userMessage: ChatMessage = { role: 'user', content }
@@ -162,40 +253,162 @@ async function ask(question: string) {
   void scrollToLatest()
   try {
     const page = typeof route?.name === 'string' ? route.name : undefined
-    const reply = await sendChat([...previous, userMessage], page)
+    const reply = await sendChat(
+      [...previous, userMessage],
+      page,
+      request.signal
+    )
     const link =
       reply.kind === 'navigate'
         ? links.value.find(({ routeName }) => routeName === reply.route)
         : undefined
+    const opensCommand =
+      reply.kind === 'command' &&
+      Boolean(reply.command && commandFor(reply.command.key))
+    // Eine leere Modellantwort erscheint nie als leere Sprechblase
+    const answer = (reply.answer ?? '').trim().slice(0, 750)
     messages.value.push({
       role: 'assistant',
       content:
         reply.kind === 'navigate' && !link
           ? 'Diese Seite ist in deiner Navigation nicht verfügbar.'
-          : reply.answer.slice(0, 750),
+          : answer ||
+            (reply.kind === 'excusal' || opensCommand
+              ? emptyDraftText
+              : emptyAnswerText),
       link: link
         ? { label: link.label, to: { name: link.routeName } }
         : undefined
     })
     if (reply.kind === 'excusal') showDraft(reply)
-    if (
-      reply.kind === 'command' &&
-      reply.command &&
-      commandFor(reply.command.key)
-    ) {
-      command.value = reply.command
-    }
+    if (opensCommand && reply.command) command.value = reply.command
   } catch (failure) {
     messages.value.pop()
     input.value = content
-    error.value =
-      failure instanceof Error
-        ? failure.message
-        : 'Die Frage konnte nicht gesendet werden.'
+    // Nach „Abbrechen“ bleibt nur der Eingabetext stehen, ohne Fehlermeldung
+    if (!request.signal.aborted)
+      error.value =
+        failure instanceof Error
+          ? failure.message
+          : 'Die Frage konnte nicht gesendet werden.'
   } finally {
     answering.value = false
+    pendingAnswer = undefined
+    void scrollToLatest()
+    void focusComposer()
+  }
+}
+
+function cancelAnswer() {
+  pendingAnswer?.abort()
+}
+
+// Liest einen Stundenplan vom hochgeladenen Bild und öffnet ihn als Entwurf.
+// Gespeichert wird erst, wenn der Entwurf dort ausdrücklich bestätigt wird
+async function readTimetable(event: Event) {
+  const field = event.target as HTMLInputElement
+  const file = field.files?.[0]
+  field.value = ''
+  if (!file || answering.value) return
+  error.value = imageProblem(file)
+  if (error.value) return
+  if (
+    timetableDraft.value &&
+    !(await confirmAction({
+      title: 'Offenen Stundenplan-Entwurf ersetzen?',
+      message:
+        'Es gibt bereits einen noch nicht angelegten Entwurf. Das neue Bild ersetzt ihn samt deinen Änderungen.',
+      confirmLabel: 'Entwurf ersetzen',
+      danger: true
+    }))
+  )
+    return
+  answering.value = true
+  readingImage.value = true
+  const request = new AbortController()
+  pendingAnswer = request
+  messages.value.push({
+    role: 'user',
+    content: `Stundenplan-Bild hochgeladen: ${file.name}`,
+    local: true
+  })
+  void scrollToLatest()
+  try {
+    const draft = await readTimetableImage(file, request.signal)
+    const count = draft.slots.length
+    messages.value.push({
+      role: 'assistant',
+      content: `Ich habe ${count} ${count === 1 ? 'Unterrichtszeit' : 'Unterrichtszeiten'} erkannt. Bevor ich den Entwurf öffne, noch kurz zur Klasse:`,
+      local: true
+    })
+    classQuestion.value = draft
+  } catch (failure) {
+    messages.value.pop()
+    if (!request.signal.aborted)
+      error.value =
+        failure instanceof Error
+          ? failure.message
+          : 'Der Stundenplan konnte nicht gelesen werden.'
+  } finally {
+    answering.value = false
+    readingImage.value = false
+    pendingAnswer = undefined
     void scrollToLatest()
   }
+}
+
+// Übernimmt die Antworten zur Klasse und öffnet den Entwurf. Gespeichert wird
+// erst, wenn der Entwurf dort ausdrücklich bestätigt wird
+async function openTimetableDraft(target: ClassTarget) {
+  const draft = classQuestion.value
+  if (!draft) return
+  classQuestion.value = undefined
+  const classCode =
+    target.mode === 'existing'
+      ? draft.classes.find((entry) => entry.id === target.classId)?.classCode
+      : target.mode === 'new'
+        ? target.classCode
+        : undefined
+  // Wurde die erkannte Klasse korrigiert, soll auch der Planname sie nennen
+  const name =
+    classCode && draft.classCode
+      ? draft.name.replace(draft.classCode, classCode)
+      : draft.name
+  timetableDraft.value = { ...draft, name, target }
+  messages.value.push({
+    role: 'assistant',
+    content:
+      (target.mode === 'existing'
+        ? `Alles klar: Der Plan wird der Klasse ${classCode} zugeordnet.`
+        : target.mode === 'new'
+          ? `Alles klar: Die Klasse ${classCode} lege ich zusammen mit dem Plan an.`
+          : 'Alles klar: Der Plan wird keiner Klasse zugeordnet.') +
+      ' Ich habe den Entwurf geöffnet. Prüfe ihn in Ruhe – angelegt wird erst, wenn du ihn dort bestätigst.',
+    link: {
+      label: 'Stundenplan-Entwurf öffnen',
+      to: { name: 'stundenplan-entwurf' }
+    },
+    local: true
+  })
+  await close(false)
+  await router.push({ name: 'stundenplan-entwurf' })
+}
+
+function cancelClassQuestion() {
+  classQuestion.value = undefined
+  messages.value.push({
+    role: 'assistant',
+    content: 'Abgebrochen – der gelesene Stundenplan wurde verworfen.',
+    local: true
+  })
+  void scrollToLatest()
+  void focusComposer()
+}
+
+function chooseCommand(event: Event) {
+  const select = event.target as HTMLSelectElement
+  if (select.value) command.value = { key: select.value, fields: {} }
+  select.value = ''
 }
 
 function sendOnEnter(event: KeyboardEvent) {
@@ -213,7 +426,11 @@ function onConfirmed(impact: ExcusalImpact) {
     : 'Entschuldigung vorgemerkt.'
   const pendingText =
     pending && booked ? ` Weitere Schultage vorgemerkt: ${pending}.` : ''
-  messages.value.push({ role: 'assistant', content: sentence + pendingText })
+  messages.value.push({
+    role: 'assistant',
+    content: sentence + pendingText,
+    local: true
+  })
   refreshViews()
   void scrollToLatest()
 }
@@ -257,15 +474,15 @@ function onCommandSaved(result: CommandResult, changed: boolean) {
           <button
             type="button"
             class="assistant__motion"
-            :aria-pressed="motionPaused"
-            title="Feenlicht-Animation pausieren"
+            :class="{ 'assistant__motion--paused': motionPaused }"
+            :aria-label="motionLabel"
+            :data-tooltip="motionLabel"
             @click="toggleMotion"
           >
             <i
               :class="motionPaused ? 'pi pi-play' : 'pi pi-pause'"
               aria-hidden="true"
             />
-            <span class="assistant__sr-only">Animation pausieren</span>
           </button>
           <Button
             type="button"
@@ -297,6 +514,10 @@ function onCommandSaved(result: CommandResult, changed: boolean) {
                 <p>
                   Frag nach einer Seite, einem Stundenplan oder bereite eine
                   Änderung vor.
+                </p>
+                <p>
+                  Probier es ruhig aus: Gebucht wird erst, wenn du eine Änderung
+                  ausdrücklich bestätigst.
                 </p>
               </div>
               <button
@@ -352,54 +573,35 @@ function onCommandSaved(result: CommandResult, changed: boolean) {
               </RouterLink>
             </div>
           </div>
-          <p v-if="answering" class="assistant__status" role="status">
-            <i class="pi pi-ellipsis-h" aria-hidden="true" /> Klassenlotse
-            antwortet …
-          </p>
-          <details
-            v-if="!command && !draft && !answering"
-            class="assistant__actions"
-          >
-            <summary>
-              <i class="pi pi-list" aria-hidden="true" /> Auftrag auswählen
-            </summary>
-            <label>
-              <span class="assistant__sr-only">Auftrag</span>
-              <select
-                @change="
-                  command = {
-                    key: ($event.target as HTMLSelectElement).value,
-                    fields: {}
-                  }
-                "
-              >
-                <option value="" disabled selected>Aktion wählen</option>
-                <option
-                  v-for="[key, definition] in availableCommands"
-                  :key="key"
-                  :value="key"
-                >
-                  {{ definition.title }}
-                </option>
-              </select>
-            </label>
-          </details>
+          <div v-if="answering" class="assistant__status">
+            <p role="status">
+              <i class="pi pi-ellipsis-h" aria-hidden="true" />
+              {{
+                readingImage
+                  ? 'Klassenlotse liest den Stundenplan – das kann bis zu anderthalb Minuten dauern …'
+                  : 'Klassenlotse antwortet …'
+              }}
+            </p>
+            <Button
+              type="button"
+              label="Abbrechen"
+              size="small"
+              text
+              @click="cancelAnswer"
+            />
+          </div>
+          <TimetableClassQuestion
+            v-if="classQuestion"
+            :draft="classQuestion"
+            @done="openTimetableDraft"
+            @cancel="cancelClassQuestion"
+          />
           <AssistantCommandDraft
-            v-if="command"
+            v-else-if="command"
             :hint="command"
             :context-class="route?.query.klasse"
             @saved="onCommandSaved"
             @cancel="command = undefined"
-          />
-          <Button
-            v-else-if="!draft && !command && !answering"
-            type="button"
-            label="Fehlzeit entschuldigen"
-            icon="pi pi-calendar"
-            size="small"
-            text
-            :disabled="answering"
-            @click="showDraft()"
           />
           <ExcusalDraft
             v-else-if="draft"
@@ -410,8 +612,57 @@ function onCommandSaved(result: CommandResult, changed: boolean) {
           />
         </div>
 
+        <div
+          v-if="!draft && !command && !classQuestion"
+          class="assistant__tools"
+        >
+          <label>
+            <span class="assistant__sr-only">Auftrag auswählen</span>
+            <select :disabled="answering" @change="chooseCommand">
+              <option value="" disabled selected>Auftrag auswählen</option>
+              <option
+                v-for="[key, definition] in availableCommands"
+                :key="key"
+                :value="key"
+              >
+                {{ definition.title }}
+              </option>
+            </select>
+          </label>
+          <Button
+            type="button"
+            label="Fehlzeit entschuldigen"
+            icon="pi pi-calendar"
+            size="small"
+            outlined
+            :disabled="answering"
+            @click="showDraft()"
+          />
+          <template v-if="demoEnabled && auth.isAdmin">
+            <Button
+              type="button"
+              label="Stundenplan aus Bild"
+              icon="pi pi-image"
+              size="small"
+              outlined
+              title="Foto oder Screenshot eines Stundenplans hochladen. Klassenlotse erstellt daraus einen Entwurf, den du prüfst und bestätigst."
+              :disabled="answering"
+              @click="imageInput?.$el.click()"
+            />
+            <InputText
+              ref="imageInput"
+              class="assistant__sr-only"
+              type="file"
+              accept="image/png,image/jpeg,image/webp"
+              aria-label="Bild eines Stundenplans hochladen"
+              tabindex="-1"
+              @change="readTimetable"
+            />
+          </template>
+        </div>
+
         <form
-          v-if="demoEnabled && !draft && !command"
+          v-if="demoEnabled && !draft && !command && !classQuestion"
           class="assistant__composer"
           @submit.prevent="ask(input)"
         >
@@ -422,7 +673,8 @@ function onCommandSaved(result: CommandResult, changed: boolean) {
             placeholder="Schreib eine Frage oder einen Auftrag …"
             :maxlength="750"
             rows="2"
-            :disabled="answering"
+            :readonly="answering"
+            :aria-busy="answering"
             @keydown.enter="sendOnEnter"
           />
           <Button
@@ -443,13 +695,10 @@ function onCommandSaved(result: CommandResult, changed: boolean) {
       ref="bubble"
       class="assistant__bubble"
       type="button"
-      :aria-label="panelLabel"
+      aria-label="Klassenlotse öffnen"
       title="Klassenlotse"
-      :aria-expanded="open"
       aria-haspopup="dialog"
       @click="show"
-      @keydown.enter.prevent="show"
-      @keydown.space.prevent="show"
     >
       <AssistantFirelight v-if="!open" :paused="motionPaused" />
     </button>
@@ -504,7 +753,7 @@ function onCommandSaved(result: CommandResult, changed: boolean) {
 
 .assistant__panel {
   display: grid;
-  grid-template-rows: auto auto minmax(0, 1fr) auto;
+  grid-template-rows: auto auto minmax(0, 1fr) auto auto;
   position: fixed;
   inset: auto max(16px, env(safe-area-inset-right))
     max(16px, env(safe-area-inset-bottom)) auto;
@@ -549,7 +798,7 @@ function onCommandSaved(result: CommandResult, changed: boolean) {
 }
 
 .assistant__header p,
-.assistant__status {
+.assistant__status p {
   margin: 0;
   color: var(--muted);
   font-size: 0.8rem;
@@ -565,6 +814,7 @@ function onCommandSaved(result: CommandResult, changed: boolean) {
 }
 
 .assistant__motion {
+  position: relative;
   margin-inline-start: auto;
   border: 1px solid transparent;
   border-radius: 9px;
@@ -574,9 +824,26 @@ function onCommandSaved(result: CommandResult, changed: boolean) {
 }
 
 .assistant__motion:hover,
-.assistant__motion[aria-pressed='true'] {
+.assistant__motion--paused {
   border-color: var(--control-border);
   background: var(--accent-soft);
+}
+
+/* Sichtbare Erklärung des Symbols bei Mauszeiger und Tastaturfokus */
+.assistant__motion:is(:hover, :focus-visible)::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  z-index: 1;
+  top: calc(100% + 6px);
+  right: 0;
+  padding: 5px 9px;
+  border-radius: 7px;
+  background: var(--ink);
+  color: var(--surface);
+  font-size: 0.78rem;
+  font-weight: 500;
+  white-space: nowrap;
+  pointer-events: none;
 }
 
 .assistant__log:empty {
@@ -592,10 +859,6 @@ function onCommandSaved(result: CommandResult, changed: boolean) {
   overflow-y: auto;
   overscroll-behavior: contain;
   scrollbar-color: var(--control-border) transparent;
-}
-
-.assistant__scroll > button {
-  justify-self: start;
 }
 
 .assistant__shortcuts,
@@ -626,23 +889,35 @@ function onCommandSaved(result: CommandResult, changed: boolean) {
 }
 
 .assistant__welcome p,
-.assistant__message p,
-.assistant__actions {
+.assistant__message p {
   color: var(--accent-ink);
   font-size: 0.83rem;
 }
 
-.assistant__actions summary {
-  align-content: center;
-  min-height: 32px;
-  padding: 6px 0;
-  cursor: pointer;
-  font-weight: 600;
+/* Feste Zeile über dem Eingabefeld: beide Einstiege bleiben immer sichtbar */
+.assistant__tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  border-top: 1px solid var(--line);
 }
 
-.assistant__actions select {
+.assistant__tools label {
+  flex: 1 1 10rem;
+  min-width: 0;
+}
+
+.assistant__tools select {
   width: 100%;
-  margin-top: 6px;
+  min-height: 40px;
+  font-size: 0.86rem;
+}
+
+.assistant__tools button {
+  flex: none;
+  min-height: 40px;
 }
 
 .assistant__sr-only {
@@ -714,10 +989,15 @@ function onCommandSaved(result: CommandResult, changed: boolean) {
   font-weight: 650;
 }
 
-.assistant__status {
+.assistant__status,
+.assistant__status p {
   display: flex;
   gap: 7px;
   align-items: center;
+}
+
+.assistant__status {
+  justify-content: space-between;
 }
 
 .assistant__link {
@@ -743,6 +1023,10 @@ function onCommandSaved(result: CommandResult, changed: boolean) {
   gap: 8px;
   border-top: 1px solid var(--line);
   padding: 12px 14px;
+}
+
+.assistant__composer textarea[readonly] {
+  background: var(--paper);
 }
 
 .assistant__composer textarea {

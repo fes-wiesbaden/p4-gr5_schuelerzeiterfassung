@@ -21,11 +21,25 @@ export interface DailyStudent {
   wasPresent: boolean
   fullAbsence: 'ABWESEND' | 'ENTSCHULDIGT' | null
   manualAbsenceMinutes: number
+  birthDate?: string
+  // ABWESEND ist trotz erfasster Anwesenheit zulässig, wenn kein Scan vorliegt
+  canMarkAbsent?: boolean
 }
 
 export interface CurrentClass {
   classId: number | null
   serverTime: string
+}
+
+// Kurze Erklärung je Status für Auswahllisten und Hilfetexte
+export const STATUS_HINTS: Record<AttendanceStatus, string> = {
+  ANWESEND: 'Nimmt am Unterricht teil.',
+  ABWESEND: 'Fehlt unentschuldigt.',
+  BETRIEB: 'Ist im Ausbildungsbetrieb – zählt nicht als Fehlzeit.',
+  BETRIEBLICH_ENTSCHULDIGT:
+    'Fehlt aus betrieblichen Gründen – zählt als entschuldigt.',
+  ENTSCHULDIGT: 'Fehlt mit Entschuldigung.',
+  MIT_ATTEST_ENTSCHULDIGT: 'Fehlt mit ärztlichem Attest.'
 }
 
 export const BERLIN = 'Europe/Berlin'

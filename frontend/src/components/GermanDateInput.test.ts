@@ -1,4 +1,4 @@
-import { mount } from '@vue/test-utils'
+import { flushPromises, mount } from '@vue/test-utils'
 import PrimeVue from 'primevue/config'
 import { expect, it } from 'vitest'
 
@@ -11,7 +11,9 @@ it('zeigt das Geburtsdatum deutsch an und übergibt dem Formular das ISO-Datum',
     props: {
       label: 'Geburtsdatum',
       name: 'birthDate',
-      defaultValue: '2008-04-21',
+      modelValue: '2008-04-21',
+      'onUpdate:modelValue': (value?: string) =>
+        wrapper.setProps({ modelValue: value }),
       required: true
     },
     global: { plugins: [PrimeVue] }
@@ -32,6 +34,12 @@ it('zeigt das Geburtsdatum deutsch an und übergibt dem Formular das ISO-Datum',
     expect(field.element.value).toBe('31.02.2007')
     expect(field.element.checkValidity()).toBe(false)
     expect(new FormData(form).get('birthDate')).toBe('')
+
+    // Beim erneuten Fokussieren bleibt der Tippfehler zum Korrigieren stehen
+    await field.trigger('focus')
+    await flushPromises()
+    expect(field.element.value).toBe('31.02.2007')
+    expect(field.element.checkValidity()).toBe(false)
   } finally {
     wrapper.unmount()
   }

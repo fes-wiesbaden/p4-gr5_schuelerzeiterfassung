@@ -21,5 +21,5 @@ export const mainNavItems: NavItem[] = [
 
 export const administrationNavItems: NavItem[] = [
   { label: 'Räume', routeName: 'raeume', icon: 'pi-building' },
-  { label: 'Personal', routeName: 'personal', icon: 'pi-id-card' }
+  { label: 'Lehrkräfte', routeName: 'personal', icon: 'pi-id-card' }
 ]

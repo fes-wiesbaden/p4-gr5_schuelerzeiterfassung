@@ -2,6 +2,7 @@ import { computed, ref } from 'vue'
 import { defineStore } from 'pinia'
 
 import { getJson, postJson } from '@/api/client'
+import { timetableDraft } from '@/api/timetableImport'
 
 export type Role = 'admin' | 'lehrkraft'
 
@@ -12,7 +13,8 @@ export interface AuthUser {
 
 // Abgelehnte Anmeldungen erhalten denselben Text, damit kein Rückschluss auf
 // vorhandene Benutzernamen möglich ist. Verbindungsfehler haben einen eigenen Hinweis
-const LOGIN_FAILED = 'Anmeldung fehlgeschlagen. Bitte Eingaben prüfen.'
+const LOGIN_FAILED =
+  'Benutzername oder Passwort stimmen nicht. Bitte prüfe beide Eingaben.'
 const SERVER_UNREACHABLE =
   'Server nicht erreichbar. Bitte später erneut versuchen.'
 
@@ -73,6 +75,8 @@ export const useAuthStore = defineStore('auth', () => {
         return false
       }
       clearSession()
+      // Ein offener Stundenplan-Entwurf gehört nicht in die nächste Anmeldung
+      timetableDraft.value = undefined
       // Nach der Abmeldung muss /api/me erneut aufgerufen werden, damit vor
       // der nächsten Anmeldung wieder ein CSRF-Token-Cookie vorhanden ist
       sessionChecked.value = false

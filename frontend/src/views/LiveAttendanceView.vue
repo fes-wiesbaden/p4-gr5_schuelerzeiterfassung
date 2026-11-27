@@ -5,6 +5,7 @@ import { useRoute } from 'vue-router'
 import Button from 'primevue/button'
 
 import {
+  STATUS_HINTS,
   STATUS_LABELS,
   berlinDate,
   berlinTime,
@@ -17,10 +18,16 @@ import {
   type AttendanceStatus
 } from '@/api/attendance'
 import { loadData, postJson } from '@/api/client'
-import { expectOk } from '@/api/planning'
 import GermanDateInput from '@/components/GermanDateInput.vue'
 import GermanTimeInput from '@/components/GermanTimeInput.vue'
-import { timePattern, toCalendarDate } from '@/dateTime'
+import { formatDate, timePattern, toCalendarDate, toIsoDate } from '@/dateTime'
+import {
+  expectOk,
+  formatTime,
+  loadClassWeek,
+  type ClassWeekDay
+} from '@/api/planning'
+import { showNotice } from '@/notice'
 import AppDataTable, {
   type DataTableColumn
 } from '@/components/AppDataTable.vue'
@@ -46,7 +53,6 @@ const classError = ref(false)
 const dayLoading = ref(false)
 const dayError = ref(false)
 const lastUpdated = ref('')
-const message = ref('')
 const correctionError = ref('')
 const drafts = reactive<Record<number, Draft>>({})
 const validDate = computed(() =>
@@ -58,20 +64,105 @@ let clockOffset = 0
 const columns: DataTableColumn<AttendanceRow>[] = [
   { field: 'name', header: 'Name' },
   { field: 'status', header: 'Status' },
-  { field: 'unexcusedMinutes', header: 'Unentschuldigt' },
-  { field: 'studentId', header: 'Status ändern' }
+  { field: 'unexcusedMinutes', header: 'Unentschuldigte Fehlzeit' },
+  { field: 'studentId', header: 'Status ändern (gilt ab Uhrzeit)' }
 ]
 
+const excusedStatuses: AttendanceStatus[] = [
+  'ENTSCHULDIGT',
+  'MIT_ATTEST_ENTSCHULDIGT',
+  'BETRIEBLICH_ENTSCHULDIGT'
+]
+
+// Jede Person zählt in genau einer Gruppe, die Summe ergibt die Klassenstärke
 const overview = computed(() => {
   const entries = rows.value ?? []
+  const count = (...statuses: AttendanceStatus[]) =>
+    entries.filter(({ status }) => statuses.includes(status)).length
   return {
-    present: entries.filter(({ status }) => status === 'ANWESEND').length,
-    absent: entries.filter(({ status }) => status === 'ABWESEND').length,
-    days: entries.filter(({ fullAbsence }) => fullAbsence === 'ABWESEND')
-      .length,
-    minutes: entries.reduce((sum, entry) => sum + partialMinutes(entry), 0)
+    total: entries.length,
+    present: count('ANWESEND'),
+    absent: count('ABWESEND'),
+    excused: count(...excusedStatuses),
+    company: count('BETRIEB'),
+    late: entries.filter(
+      (entry) => entry.status === 'ANWESEND' && partialMinutes(entry) > 0
+    ).length
   }
 })
+
+// Gleichnamige Personen werden über das Geburtsdatum unterschieden
+const duplicateNames = computed(() => {
+  const seen = new Map<string, number>()
+  for (const row of rows.value ?? [])
+    seen.set(row.name, (seen.get(row.name) ?? 0) + 1)
+  return new Set(
+    [...seen].filter(([, count]) => count > 1).map(([name]) => name)
+  )
+})
+
+const isToday = computed(() => selectedDate.value === today.value)
+const selectedClassCode = computed(
+  () => classes.value.find(({ id }) => id === selectedClass.value)?.classCode
+)
+
+// Unterricht des gewählten Tages laut Stundenplan
+const lessons = ref<ClassWeekDay['lessons']>()
+let lessonRequest: AbortController | undefined
+
+async function loadLessons() {
+  const classId = selectedClass.value
+  const day = selectedDate.value
+  lessonRequest?.abort()
+  lessons.value = undefined
+  if (!classId || !day || day > today.value) return
+  const request = new AbortController()
+  lessonRequest = request
+  try {
+    const week = await loadClassWeek(classId, day, request.signal)
+    if (request.signal.aborted) return
+    lessons.value = week.find((entry) => entry.date === day)?.lessons ?? []
+  } catch {
+    // Die Anwesenheitsliste bleibt auch ohne Stundenplanhinweis nutzbar
+  }
+}
+
+const currentTime = ref('')
+const lessonInfo = computed(() => {
+  const planned = lessons.value
+  if (!planned) return ''
+  if (!planned.length) return 'An diesem Tag ist kein Unterricht geplant.'
+  const plan = planned.filter((lesson) => !lesson.cancelled)
+  if (!plan.length) return 'Der Unterricht fällt an diesem Tag aus.'
+  const describe = (lesson: ClassWeekDay['lessons'][number]) =>
+    [
+      `${formatTime(lesson.startsAt)}–${formatTime(lesson.endsAt)} Uhr`,
+      lesson.subject,
+      `Raum ${lesson.roomNumber}`
+    ]
+      .filter(Boolean)
+      .join(' · ')
+  const span = `Unterricht ${formatTime(plan[0]!.startsAt)}–${formatTime(plan.at(-1)!.endsAt)} Uhr`
+  if (!isToday.value || !currentTime.value) return span
+  const now = currentTime.value
+  const running = plan.find(
+    (lesson) =>
+      formatTime(lesson.startsAt) <= now && now < formatTime(lesson.endsAt)
+  )
+  if (running) return `Jetzt: ${describe(running)}`
+  const next = plan.find((lesson) => formatTime(lesson.startsAt) > now)
+  return next
+    ? `Als Nächstes: ${describe(next)}`
+    : `${span} · für heute beendet`
+})
+
+function shiftDay(days: number) {
+  const date = toCalendarDate(selectedDate.value)
+  if (!date) return
+  date.setDate(date.getDate() + days)
+  const next = toIsoDate(date)
+  if (next <= today.value) selectDate(next)
+}
 
 const classRequest = new AbortController()
 let dayRequest: AbortController | undefined
@@ -84,6 +175,11 @@ function serverNow() {
 
 function hasPresence(row: AttendanceRow) {
   return row.wasPresent || row.status === 'ANWESEND'
+}
+
+// „Abwesend“ bleibt wählbar, solange kein Kartenscan die Anwesenheit belegt
+function canChoose(row: AttendanceRow, status: AttendanceStatus) {
+  return status !== 'ABWESEND' || !hasPresence(row) || row.canMarkAbsent
 }
 
 function partialMinutes(row: AttendanceRow) {
@@ -148,8 +244,11 @@ async function refreshAttendance(day = selectedDate.value) {
     )
     if (request.signal.aborted) return
     if (displayedDate.value !== day) clearDrafts()
+    // Die Abfrage nach Mitternacht wechselt den Tag ohne den Watcher unten
+    const dayChanged = selectedDate.value !== day
     displayedDate.value = day
     selectedDate.value = day
+    if (dayChanged) void loadLessons()
     const now = serverNow()
     rows.value = entries.map((entry) => ({
       ...entry,
@@ -173,6 +272,7 @@ async function refreshAttendance(day = selectedDate.value) {
       }
     }
     lastUpdated.value = berlinTime(now)
+    currentTime.value = berlinTime(now)
     dayError.value = false
   } catch {
     if (!request.signal.aborted) dayError.value = true
@@ -209,7 +309,6 @@ async function correct(row: AttendanceRow) {
   const day = displayedDate.value
   const classId = selectedClass.value
   draft.saving = true
-  message.value = ''
   correctionError.value = ''
   try {
     const response = await expectOk(
@@ -220,9 +319,11 @@ async function correct(row: AttendanceRow) {
     )
     const { changed } = (await response.json()) as { changed: boolean }
     if (day !== displayedDate.value || classId !== selectedClass.value) return
-    message.value = changed
-      ? `Status von ${row.name} gespeichert.`
-      : `Keine Änderung für ${row.name}.`
+    showNotice(
+      changed
+        ? `${row.name}: ${STATUS_LABELS[draft.status]} ab ${draft.time} Uhr gespeichert.`
+        : `Keine Änderung für ${row.name} – der Status galt bereits.`
+    )
     draft.touched = false
     draft.saving = false
     await refreshAttendance()
@@ -245,9 +346,9 @@ watch([selectedClass, selectedDate], ([classId, date], [previousClass]) => {
   dayLoading.value = false
   dayError.value = false
   correctionError.value = ''
-  message.value = ''
   clearDrafts()
   void refreshAttendance()
+  void loadLessons()
 })
 
 function attendanceChanged() {
@@ -269,6 +370,7 @@ onUnmounted(() => {
   window.removeEventListener('attendance:changed', attendanceChanged)
   classRequest.abort()
   dayRequest?.abort()
+  lessonRequest?.abort()
 })
 </script>
 
@@ -277,7 +379,9 @@ onUnmounted(() => {
     <div class="attendance__heading">
       <div>
         <h1 id="attendance-title">Live-Anwesenheit</h1>
-        <p>Tagesstatus und Fehlzeiten deiner Klassen.</p>
+        <p>
+          Wer ist da, wer fehlt? Die Liste aktualisiert sich alle 30 Sekunden.
+        </p>
       </div>
       <Button
         v-if="selectedClass"
@@ -317,18 +421,52 @@ onUnmounted(() => {
             </option>
           </select>
         </label>
-        <label>
-          Datum
-          <GermanDateInput
-            :model-value="selectedDate"
-            class="attendance__date"
-            label="Datum"
-            :max="today"
-            required
-            @update:model-value="selectDate"
-          />
-        </label>
+        <!-- Kein <label>: Es würde den ersten Knopf darin auslösen -->
+        <div
+          class="attendance__date-field"
+          role="group"
+          aria-labelledby="attendance-date-label"
+        >
+          <span id="attendance-date-label">Datum</span>
+          <span class="attendance__day">
+            <Button
+              icon="pi pi-chevron-left"
+              aria-label="Vorheriger Tag"
+              severity="secondary"
+              outlined
+              @click="shiftDay(-1)"
+            />
+            <GermanDateInput
+              :model-value="selectedDate"
+              class="attendance__date"
+              label="Datum"
+              :max="today"
+              required
+              @update:model-value="selectDate"
+            />
+            <Button
+              icon="pi pi-chevron-right"
+              aria-label="Nächster Tag"
+              severity="secondary"
+              outlined
+              :disabled="isToday"
+              @click="shiftDay(1)"
+            />
+          </span>
+        </div>
+        <Button
+          v-if="!isToday"
+          class="attendance__today"
+          label="Heute"
+          text
+          @click="selectDate(today)"
+        />
       </div>
+      <p v-if="lessonInfo && validDate" class="attendance__lesson">
+        <i class="pi pi-clock" aria-hidden="true" />
+        {{ lessonInfo }}
+        <span v-if="!isToday"> · {{ formatDate(selectedDate) }}</span>
+      </p>
 
       <p v-if="!validDate" class="attendance__notice">
         Wähle heute oder ein früheres Datum.
@@ -352,31 +490,37 @@ onUnmounted(() => {
         Für diese Klasse liegen an diesem Datum keine Anwesenheitsdaten vor.
       </p>
 
-      <p v-if="message" class="attendance__notice" role="status">
-        {{ message }}
-      </p>
       <PageError :message="correctionError" />
       <div v-if="rows?.length" class="attendance__register">
         <dl class="attendance__summary">
           <div>
             <dt><i class="pi pi-check" aria-hidden="true" /> Anwesend</dt>
-            <dd>{{ overview.present }}</dd>
+            <dd>
+              {{ overview.present }}
+              <span>von {{ overview.total }}</span>
+            </dd>
           </div>
           <div>
             <dt><i class="pi pi-times" aria-hidden="true" /> Abwesend</dt>
             <dd>{{ overview.absent }}</dd>
           </div>
           <div>
-            <dt><i class="pi pi-clock" aria-hidden="true" /> Unentschuldigt</dt>
-            <dd>
-              <template v-if="overview.days">
-                {{ overview.days }}
-                <span>{{ overview.days === 1 ? 'Tag' : 'Tage' }}</span> ·
-              </template>
-              {{ overview.minutes }} <span>Min.</span>
-            </dd>
+            <dt>
+              <i class="pi pi-info-circle" aria-hidden="true" /> Entschuldigt
+            </dt>
+            <dd>{{ overview.excused }}</dd>
+          </div>
+          <div>
+            <dt><i class="pi pi-building" aria-hidden="true" /> Im Betrieb</dt>
+            <dd>{{ overview.company }}</dd>
           </div>
         </dl>
+        <p v-if="overview.late" class="attendance__late">
+          {{ overview.late }}
+          {{ overview.late === 1 ? 'Person ist' : 'Personen sind' }} anwesend,
+          {{ overview.late === 1 ? 'hat' : 'haben' }} aber unentschuldigte
+          Fehlminuten (z. B. Verspätung).
+        </p>
         <AppDataTable
           :columns="columns"
           :rows="rows"
@@ -394,13 +538,31 @@ onUnmounted(() => {
             >
               {{ row.name }}
             </RouterLink>
+            <small
+              v-if="duplicateNames.has(row.name) && row.birthDate"
+              class="attendance__birth"
+            >
+              geb. {{ formatDate(row.birthDate) }}
+            </small>
           </template>
           <template #cell-status="{ value }">
             <StatusBadge :status="value as AttendanceStatus" />
           </template>
           <template #cell-unexcusedMinutes="{ row }">
-            <span v-if="row.fullAbsence === 'ABWESEND'">Ganzer Tag</span>
-            <span v-else>{{ partialMinutes(row) }} Min.</span>
+            <span v-if="row.fullAbsence === 'ABWESEND'">
+              Ganzer Tag
+              <small v-if="row.status !== 'ABWESEND'" class="attendance__birth">
+                (davon {{ row.unexcusedMinutes }} Min. vor der Entschuldigung
+                unentschuldigt)
+              </small>
+            </span>
+            <span v-else-if="row.fullAbsence === 'ENTSCHULDIGT'">
+              Keine (ganzer Tag entschuldigt)
+            </span>
+            <span v-else-if="partialMinutes(row)">
+              {{ partialMinutes(row) }} Min.
+            </span>
+            <span v-else class="attendance__none">Keine</span>
           </template>
           <template #cell-studentId="{ row }">
             <form
@@ -417,14 +579,12 @@ onUnmounted(() => {
                   v-for="(label, status) in STATUS_LABELS"
                   :key="status"
                 >
-                  <option
-                    v-if="status !== 'ABWESEND' || !hasPresence(row)"
-                    :value="status"
-                  >
+                  <option v-if="canChoose(row, status)" :value="status">
                     {{ label }}
                   </option>
                 </template>
               </select>
+              <span class="correction__from" aria-hidden="true">ab</span>
               <GermanTimeInput
                 v-model="drafts[row.studentId]!.time"
                 :label="`Gültig ab Uhrzeit für ${row.name}`"
@@ -433,7 +593,7 @@ onUnmounted(() => {
               />
               <Button
                 type="submit"
-                label="Ändern"
+                label="Speichern"
                 size="small"
                 outlined
                 :loading="drafts[row.studentId]!.saving"
@@ -441,7 +601,27 @@ onUnmounted(() => {
             </form>
           </template>
         </AppDataTable>
-        <p class="attendance__updated">Stand {{ lastUpdated }} Uhr</p>
+        <details class="attendance__legend">
+          <summary>Was bedeuten die Status?</summary>
+          <dl>
+            <template v-for="(label, status) in STATUS_LABELS" :key="status">
+              <dt>{{ label }}</dt>
+              <dd>{{ STATUS_HINTS[status] }}</dd>
+            </template>
+          </dl>
+          <p>
+            Die Uhrzeit gibt an, ab wann der neue Status gilt. Hat das Terminal
+            bereits eine Karte erfasst, ist „Abwesend“ nicht mehr wählbar –
+            trage fehlende Zeit dann im Schülerprofil als Fehlminuten ein.
+            „Abwesend“ nimmt eine von Hand eingetragene Anwesenheit nur ab der
+            gewählten Uhrzeit zurück. Zum Zurücknehmen einer versehentlichen
+            Anwesenheit dieselbe Uhrzeit wie bei „Anwesend“ wählen.
+          </p>
+        </details>
+        <p class="attendance__updated">
+          Stand {{ lastUpdated }} Uhr
+          <span v-if="selectedClassCode"> · {{ selectedClassCode }}</span>
+        </p>
       </div>
     </template>
   </section>
@@ -477,7 +657,7 @@ onUnmounted(() => {
   flex-wrap: wrap;
 }
 
-.attendance__filters label {
+.attendance__filters :is(label, .attendance__date-field) {
   display: grid;
   gap: 6px;
   max-width: 100%;
@@ -496,6 +676,7 @@ onUnmounted(() => {
 }
 
 .attendance__student {
+  white-space: nowrap;
   color: var(--accent-ink);
   font-weight: 600;
   text-underline-offset: 3px;
@@ -518,9 +699,89 @@ onUnmounted(() => {
   font-variant-numeric: tabular-nums;
 }
 
+.attendance__day {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.attendance__today {
+  align-self: end;
+  min-height: 44px;
+}
+
+.attendance__lesson {
+  margin: -8px 0 0;
+  color: var(--accent-ink);
+  font-weight: 600;
+}
+
+.attendance__lesson span {
+  color: var(--muted);
+  font-weight: 400;
+}
+
+.attendance__late {
+  margin: 0;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--line);
+  background: #fff5e7;
+  color: #6b3a00;
+  font-size: 0.9rem;
+}
+
+.attendance__birth {
+  display: block;
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.attendance__none {
+  color: var(--muted);
+}
+
+.attendance__legend {
+  padding: 12px 16px 0;
+  font-size: 0.9rem;
+}
+
+.attendance__legend summary {
+  width: fit-content;
+  color: var(--accent-ink);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.attendance__legend dl {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 6px 16px;
+  margin: 12px 0;
+}
+
+.attendance__legend dt {
+  font-weight: 600;
+}
+
+.attendance__legend dd {
+  margin: 0;
+  color: var(--muted);
+}
+
+.attendance__legend p {
+  max-width: 46rem;
+  margin: 0 0 4px;
+  color: var(--muted);
+}
+
+.correction__from {
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
 .attendance__summary {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   margin: 0;
   padding: 18px 0;
   background: #f1ebf9;
@@ -572,7 +833,13 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   gap: 6px;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
+}
+
+@media (max-width: 70rem) {
+  .correction {
+    flex-wrap: wrap;
+  }
 }
 
 .correction :is(select, input) {

@@ -1,18 +1,13 @@
 <script setup lang="ts">
 import InputText from 'primevue/inputtext'
-import { ref, watch } from 'vue'
+import { ref } from 'vue'
 import GermanDateInput from './GermanDateInput.vue'
 import type { Student } from '@/api/students'
+import { todayInBerlin } from '@/api/attendance'
 
 const props = defineProps<{ student?: Student }>()
-const birthDate = ref('')
-watch(
-  () => props.student?.birthDate,
-  (date) => {
-    birthDate.value = date ?? ''
-  },
-  { immediate: true }
-)
+// Das Formular entsteht bei jedem Öffnen neu und liest den Wert einmal
+const birthDate = ref(props.student?.birthDate ?? '')
 </script>
 
 <template>
@@ -40,6 +35,7 @@ watch(
       v-model="birthDate"
       label="Geburtsdatum"
       name="birthDate"
+      :max="todayInBerlin()"
       required
     />
   </label>

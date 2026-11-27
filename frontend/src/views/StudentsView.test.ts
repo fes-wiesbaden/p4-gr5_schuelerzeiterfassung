@@ -1,12 +1,10 @@
 import { flushPromises, mount } from '@vue/test-utils'
 import { createPinia } from 'pinia'
 import PrimeVue from 'primevue/config'
-import { afterEach, expect, it, vi } from 'vitest'
+import { expect, it, vi } from 'vitest'
 import { routeLocationKey, routerKey } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import StudentsView from './StudentsView.vue'
-
-afterEach(() => vi.unstubAllGlobals())
 
 it('legt aus der Gesamtübersicht einen Schüler in einer verwaltbaren Klasse an', async () => {
   const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {

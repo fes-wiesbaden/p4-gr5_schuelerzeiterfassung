@@ -6,6 +6,7 @@ import Button from 'primevue/button'
 import AttendanceAssistant from '@/components/AttendanceAssistant.vue'
 import PageError, { pageErrorTarget } from '@/components/PageError.vue'
 import { useAuthStore } from '@/stores/auth'
+import { clearNotice, notice } from '@/notice'
 import { administrationNavItems, mainNavItems } from './navigation'
 
 const auth = useAuthStore()
@@ -21,7 +22,7 @@ provide(pageErrorTarget, pageErrors)
 const roleLabel = computed(() => {
   switch (auth.user?.role) {
     case 'admin':
-      return 'Administrator'
+      return 'Verwaltung'
     case 'lehrkraft':
       return 'Lehrkraft'
     default:
@@ -141,9 +142,7 @@ function handleSidebarKeydown(event: KeyboardEvent) {
               : [mainNavItems]"
             :key="index"
           >
-            <p v-if="index === 1" class="app-nav__section-label">
-              Administration
-            </p>
+            <p v-if="index === 1" class="app-nav__section-label">Verwaltung</p>
             <ul class="app-nav">
               <li v-for="item in items" :key="item.routeName">
                 <RouterLink
@@ -174,6 +173,17 @@ function handleSidebarKeydown(event: KeyboardEvent) {
         <div class="app-content__inner">
           <div ref="pageErrors" class="app-content__errors" />
           <PageError :message="auth.errorMessage" />
+          <p v-if="notice" class="app-notice" role="status">
+            <i class="pi pi-check-circle" aria-hidden="true" />
+            <span>{{ notice }}</span>
+            <button
+              type="button"
+              aria-label="Meldung schließen"
+              @click="clearNotice"
+            >
+              <i class="pi pi-times" aria-hidden="true" />
+            </button>
+          </p>
           <RouterView />
         </div>
       </main>
@@ -183,6 +193,44 @@ function handleSidebarKeydown(event: KeyboardEvent) {
 </template>
 
 <style scoped>
+/* Überlagert den Seiteninhalt, damit die Meldung nichts verschiebt */
+.app-notice {
+  position: fixed;
+  z-index: 20;
+  top: 16px;
+  left: 50%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: max-content;
+  max-width: calc(100vw - 32px);
+  margin: 0;
+  transform: translateX(-50%);
+  padding: 10px 12px 10px 14px;
+  border: 1px solid #bfe8cc;
+  border-radius: 10px;
+  background: #e7f6ec;
+  color: #14602f;
+  font-weight: 600;
+  box-shadow: 0 6px 18px rgb(38 29 52 / 0.08);
+}
+
+.app-notice button {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+
+.app-notice button:hover {
+  background: #cfeeda;
+}
+
 .app-shell {
   display: grid;
   grid-template-rows: auto 1fr;

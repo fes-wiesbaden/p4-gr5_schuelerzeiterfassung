@@ -15,7 +15,7 @@ defineProps<{
 <template>
   <div class="app-table-scroll">
     <table class="app-table" role="table">
-      <caption class="app-table__caption">
+      <caption class="visually-hidden">
         {{
           caption
         }}
@@ -58,15 +58,6 @@ defineProps<{
   width: 100%;
   border-collapse: collapse;
   font-size: 0.9rem;
-}
-
-.app-table__caption {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  overflow: hidden;
-  clip: rect(0 0 0 0);
-  white-space: nowrap;
 }
 
 .app-table th,

@@ -22,6 +22,9 @@
   --accent-soft: #eee7fa;
   --line: #e2dce9;
   --control-border: #8e7d9c;
+  --danger: #8c3038;
+  --danger-soft: #fff2f2;
+  --danger-line: #f0b4b4;
   --radius: 14px;
 
   font-family: 'DM Sans', 'Noto Sans', system-ui, sans-serif;
@@ -99,6 +102,16 @@ select {
 .p-button.p-button-danger {
   --p-button-outlined-danger-color: #9f2837;
   --p-button-text-danger-color: #9f2837;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
 }
 
 ::selection {

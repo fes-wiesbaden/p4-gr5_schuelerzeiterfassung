@@ -10,6 +10,9 @@ export default defineConfig({
   },
   test: {
     environment: 'jsdom',
-    setupFiles: ['./test/setup.ts']
+    setupFiles: ['./test/setup.ts'],
+    // Jeder Test beginnt ohne Ersatz-Globals und mit echten Methoden statt Spies
+    unstubGlobals: true,
+    restoreMocks: true
   }
 })

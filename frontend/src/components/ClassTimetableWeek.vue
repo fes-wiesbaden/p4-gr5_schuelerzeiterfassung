@@ -2,11 +2,17 @@
 import PageError from '@/components/PageError.vue'
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
+import { useAuthStore } from '@/stores/auth'
 import Button from 'primevue/button'
 import { loadClasses, todayInBerlin, type SchoolClass } from '@/api/attendance'
 import {
+  cancelLessons,
+  formatTime,
   loadClassSchedule,
   loadClassWeek,
+  restoreLessons,
+  type ManualAbsenceHint,
+  type ScheduledLesson,
   type ClassSchedule,
   type ClassWeekDay
 } from '@/api/planning'
@@ -16,11 +22,14 @@ import {
   toCalendarDate,
   toIsoDate
 } from '@/dateTime'
+import { confirmAction } from '@/confirm'
+import { showNotice } from '@/notice'
 import GermanDateInput from './GermanDateInput.vue'
 import TimetableGrid from './TimetableGrid.vue'
 
 withDefaults(defineProps<{ active?: boolean }>(), { active: true })
 const route = useRoute()
+const auth = useAuthStore()
 const classes = ref<SchoolClass[]>()
 const classId = ref<number>()
 const date = ref(todayInBerlin())
@@ -32,12 +41,22 @@ const scheduleError = ref('')
 const weekError = ref('')
 const loadingWeek = ref(false)
 const revision = ref(0)
+// Der Schuljahresplan ändert sich nicht durch einen Ausfall
+const scheduleRevision = ref(0)
 const weekLabel = computed(() => formatCalendarWeek(date.value))
-const yearLabel = computed(() =>
-  schedule.value
-    ? `Schuljahr ${schedule.value.schoolYear}/${String(schedule.value.schoolYear + 1).slice(-2)}`
-    : ''
-)
+// Das Schuljahr läuft vom 1. August bis zum 31. Juli und richtet sich nach
+// der angezeigten Woche, nicht nach dem aktuellen Blockplan
+const yearLabel = computed(() => {
+  const shown = toCalendarDate(days.value[0]?.date ?? date.value)
+  if (!shown) return ''
+  const start =
+    shown.getMonth() >= 7 ? shown.getFullYear() : shown.getFullYear() - 1
+  return `Schuljahr ${start}/${String(start + 1).slice(-2)}`
+})
+const isCurrentWeek = computed(() => {
+  const now = todayInBerlin()
+  return days.value.some((day) => day.date === now) || date.value === now
+})
 const weekBlock = computed(() =>
   schedule.value?.blocks.find((block) =>
     days.value.some(
@@ -85,12 +104,132 @@ async function fetchClasses() {
 function shiftWeek(amount: number) {
   const current = toCalendarDate(date.value || todayInBerlin())
   if (!current) return
-  current.setDate(current.getDate() + amount)
+  // Immer auf den Montag der Zielwoche springen, damit das Datumsfeld
+  // den Wochenbeginn zeigt
+  current.setDate(current.getDate() - ((current.getDay() + 6) % 7) + amount)
   date.value = toIsoDate(current)
 }
 
 function refreshWeek() {
   revision.value += 1
+}
+
+function reloadPlan() {
+  scheduleRevision.value += 1
+  refreshWeek()
+}
+
+// Unterrichtsausfall: einzelne Stunde, ganzer Tag oder ganze Woche
+const changing = ref(false)
+const cancelError = ref('')
+// Händische Fehlminuten an Tagen mit neuem Ausfall: bitte prüfen
+const manualHints = ref<ManualAbsenceHint[]>([])
+const weekCancelled = computed(() => {
+  const lessons = days.value.flatMap((day) => day.lessons)
+  return lessons.length > 0 && lessons.every((lesson) => lesson.cancelled)
+})
+
+function pastNote(dates: string[]) {
+  return dates.some((day) => day <= todayInBerlin())
+    ? ' Bereits erfasste Fehlzeiten dieser Zeit werden neu berechnet.'
+    : ''
+}
+
+async function changeCancellation(
+  work: () => Promise<unknown>,
+  success: string
+) {
+  if (changing.value) return
+  changing.value = true
+  cancelError.value = ''
+  manualHints.value = []
+  try {
+    await work()
+    showNotice(success)
+  } catch (failure) {
+    cancelError.value =
+      failure instanceof TypeError
+        ? 'Der Ausfall konnte nicht gespeichert werden. Prüfe die Verbindung.'
+        : (failure as Error).message
+  } finally {
+    changing.value = false
+    // Auch nach einem Teilfehler zeigen Stundenplan und offene
+    // Anwesenheitsansichten den Stand des Servers
+    window.dispatchEvent(new Event('attendance:changed'))
+    refreshWeek()
+  }
+}
+
+async function toggleLesson(day: string, lesson: ScheduledLesson) {
+  const id = classId.value
+  if (!id) return
+  const label = `${lesson.subject || 'Unterricht'} am ${formatDate(day)}, ${formatTime(lesson.startsAt)}–${formatTime(lesson.endsAt)} Uhr`
+  if (lesson.cancelled) {
+    if (
+      !(await confirmAction({
+        title: 'Ausfall zurücknehmen?',
+        message: `${label} findet wieder statt.${pastNote([day])}`,
+        confirmLabel: 'Zurücknehmen'
+      }))
+    )
+      return
+    await changeCancellation(
+      () => restoreLessons(id, day, lesson.startsAt),
+      `Ausfall zurückgenommen: ${label}.`
+    )
+    return
+  }
+  if (
+    !(await confirmAction({
+      title: 'Stunde fällt aus?',
+      message: `${label} wird als Ausfall eingetragen. Dafür entstehen keine Fehlminuten.${pastNote([day])}`,
+      confirmLabel: 'Als Ausfall eintragen'
+    }))
+  )
+    return
+  await changeCancellation(async () => {
+    manualHints.value = await cancelLessons(id, day, lesson.startsAt)
+  }, `Ausfall eingetragen: ${label}.`)
+}
+
+async function toggleDays(dates: string[], cancel: boolean, scope: string) {
+  const id = classId.value
+  if (!id || !dates.length) return
+  if (
+    !(await confirmAction({
+      title: cancel
+        ? `${scope}: Unterricht fällt aus?`
+        : `${scope}: Ausfall zurücknehmen?`,
+      message: cancel
+        ? `Alle Stunden werden als Ausfall eingetragen. Dafür entstehen keine Fehlminuten.${pastNote(dates)}`
+        : `Alle Stunden finden wieder statt.${pastNote(dates)}`,
+      confirmLabel: cancel ? 'Als Ausfall eintragen' : 'Zurücknehmen'
+    }))
+  )
+    return
+  await changeCancellation(
+    async () => {
+      // Hinweise sofort sammeln, damit sie auch bei einem Teilfehler bleiben
+      for (const day of dates) {
+        if (cancel) manualHints.value.push(...(await cancelLessons(id, day)))
+        else await restoreLessons(id, day)
+      }
+    },
+    cancel
+      ? `${scope}: Ausfall eingetragen.`
+      : `${scope}: Ausfall zurückgenommen.`
+  )
+}
+
+function toggleDay(day: string, cancel: boolean) {
+  return toggleDays([day], cancel, formatDate(day))
+}
+
+function toggleWeek() {
+  const dates = days.value
+    .filter((day) => day.lessons.length)
+    .map((day) => day.date)
+  return toggleDays(dates, !weekCancelled.value, weekLabel.value)
 }
 
 function jumpToBlock(startsOn: string) {
@@ -106,7 +245,7 @@ async function jumpToNextBlock() {
 }
 
 watch(() => [route?.query.klasse, route?.query.datum], useRouteSelection)
-watch([classId, revision], async ([id], _previous, onCleanup) => {
+watch([classId, scheduleRevision], async ([id], _previous, onCleanup) => {
   schedule.value = undefined
   scheduleError.value = ''
   if (!id) return
@@ -120,9 +259,14 @@ watch([classId, revision], async ([id], _previous, onCleanup) => {
       scheduleError.value = 'Der Schuljahresplan konnte nicht geladen werden.'
   }
 })
-watch([classId, date, revision], async ([id, day], _previous, onCleanup) => {
+watch([classId, date, revision], async ([id, day], previous, onCleanup) => {
   weekError.value = ''
-  days.value = []
+  const staleDays =
+    id !== previous?.[0] || !days.value.some((entry) => entry.date === day)
+  if (id !== previous?.[0] || day !== previous?.[1]) cancelError.value = ''
+  // Beim Neuladen derselben Woche bleibt der Plan stehen, damit er nach einem
+  // eingetragenen Ausfall nicht aufblitzt. Eine andere Klasse zeigt ihn nie
+  if (staleDays) days.value = []
   loadingWeek.value = Boolean(id && day)
   if (!id || !day) return
   const request = new AbortController()
@@ -139,12 +283,12 @@ watch([classId, date, revision], async ([id, day], _previous, onCleanup) => {
 })
 onMounted(() => {
   void fetchClasses()
-  window.addEventListener('planning:changed', refreshWeek)
+  window.addEventListener('planning:changed', reloadPlan)
   window.addEventListener('management:changed', fetchClasses)
 })
 onUnmounted(() => {
   classRequest.abort()
-  window.removeEventListener('planning:changed', refreshWeek)
+  window.removeEventListener('planning:changed', reloadPlan)
   window.removeEventListener('management:changed', fetchClasses)
 })
 </script>
@@ -174,13 +318,13 @@ onUnmounted(() => {
     </header>
     <div v-if="schedule?.blocks.length" class="class-week__controls">
       <label>
-        Unterrichtsblock
+        Zu einem Unterrichtsblock springen
         <select
           ref="blockSelect"
           :value="weekBlock?.startsOn ?? ''"
           @change="jumpToBlock(($event.target as HTMLSelectElement).value)"
         >
-          <option disabled value="">Block auswählen</option>
+          <option disabled value="">Woche ohne Unterrichtsblock</option>
           <option
             v-for="block in schedule.blocks"
             :key="block.startsOn"
@@ -199,7 +343,7 @@ onUnmounted(() => {
         aria-label="Vorherige Stundenplanwoche"
         @click="shiftWeek(-7)"
       />
-      <GermanDateInput v-model="date" label="Stundenplanwoche" />
+      <GermanDateInput v-model="date" label="Datum in der gewünschten Woche" />
       <Button
         type="button"
         icon="pi pi-chevron-right"
@@ -208,6 +352,7 @@ onUnmounted(() => {
         @click="shiftWeek(7)"
       />
       <Button
+        v-if="!isCurrentWeek"
         type="button"
         label="Diese Woche"
         text
@@ -215,21 +360,28 @@ onUnmounted(() => {
       />
     </div>
     <PageError v-if="active" :message="scheduleError" />
+    <PageError v-if="active" :message="cancelError" />
     <PageError
       v-if="classError || weekError"
       :message="active ? classError || weekError : ''"
     >
       <Button
         type="button"
-        label="Erneut laden"
+        label="Erneut versuchen"
         outlined
-        @click="classError ? fetchClasses() : refreshWeek()"
+        @click="classError ? fetchClasses() : reloadPlan()"
       />
     </PageError>
-    <p v-else-if="!classes || loadingWeek" role="status">
+    <p v-else-if="!classes || (loadingWeek && !days.length)" role="status">
       Wochenstundenplan wird geladen …
     </p>
-    <p v-else-if="!classes.length">Dir ist keine Klasse zugeordnet.</p>
+    <p v-else-if="!classes.length">
+      {{
+        auth.isAdmin
+          ? 'Es gibt noch keine Klassen. Lege zuerst unter „Klassen“ eine an.'
+          : 'Dir ist noch keine Klasse zugeordnet. Die Verwaltung kann das ändern.'
+      }}
+    </p>
     <p v-else-if="!date">Wähle ein Datum aus der gewünschten Woche.</p>
     <div
       v-else-if="days.length && schedule && !weekBlock"
@@ -246,12 +398,74 @@ onUnmounted(() => {
         @click="jumpToNextBlock"
       />
     </div>
-    <TimetableGrid
-      v-else-if="days.length"
-      :days="days"
-      :periods="days[0]?.periods"
-      :caption="`Wochenstundenplan für ${selectedClass?.classCode}`"
-    />
+    <template v-else-if="days.length">
+      <div v-if="manualHints.length" class="class-week__manual" role="status">
+        <p>
+          <i class="pi pi-exclamation-triangle" aria-hidden="true" />
+          {{
+            new Set(manualHints.map((hint) => hint.date)).size > 1
+              ? 'An diesen Tagen'
+              : 'An diesem Tag'
+          }}
+          stehen von Hand eingetragene Fehlminuten. Sie bleiben bestehen – prüfe
+          bitte, ob sie zur ausgefallenen Zeit gehören, und entferne sie dann im
+          Profil:
+        </p>
+        <ul>
+          <li
+            v-for="hint in manualHints"
+            :key="`${hint.studentId}/${hint.date}`"
+          >
+            <RouterLink
+              :to="{
+                name: 'schueler-detail',
+                params: { studentId: hint.studentId },
+                query: { woche: hint.date }
+              }"
+            >
+              {{ hint.lastName }}, {{ hint.firstName }}
+            </RouterLink>
+            · {{ formatDate(hint.date) }} · {{ hint.minutes }} Min.
+          </li>
+        </ul>
+        <Button
+          type="button"
+          label="Hinweis schließen"
+          size="small"
+          text
+          @click="manualHints = []"
+        />
+      </div>
+      <div class="class-week__cancel">
+        <p>
+          <i class="pi pi-info-circle" aria-hidden="true" />
+          Fällt Unterricht aus? Klick auf eine Stunde, um sie für diesen Tag als
+          Ausfall zu markieren – ein weiterer Klick nimmt das zurück. Für
+          ausgefallene Stunden entstehen keine Fehlminuten.
+        </p>
+        <Button
+          type="button"
+          :label="
+            weekCancelled
+              ? 'Ausfall der ganzen Woche zurücknehmen'
+              : 'Ganze Woche fällt aus'
+          "
+          size="small"
+          outlined
+          :disabled="changing"
+          @click="toggleWeek"
+        />
+      </div>
+      <TimetableGrid
+        :days="days"
+        :periods="days[0]?.periods"
+        :caption="`Wochenstundenplan für ${selectedClass?.classCode}`"
+        :busy="changing"
+        cancellable
+        @toggle-lesson="toggleLesson"
+        @toggle-day="toggleDay"
+      />
+    </template>
   </article>
 </template>
 
@@ -294,6 +508,47 @@ p {
   align-items: end;
   flex-wrap: wrap;
   gap: 12px 20px;
+}
+
+.class-week__manual {
+  display: grid;
+  justify-items: start;
+  gap: 6px;
+  padding: 12px 14px;
+  border: 1px solid #f1d9a8;
+  border-radius: 10px;
+  background: #fff5e7;
+  color: #6b3a00;
+  font-size: 0.9rem;
+  line-height: 1.4;
+}
+
+.class-week__manual ul {
+  margin: 0;
+  padding-left: 1.2rem;
+}
+
+.class-week__manual a {
+  color: inherit;
+  font-weight: 600;
+}
+
+.class-week__cancel {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px 16px;
+  padding: 10px 14px;
+  border-radius: 10px;
+  background: var(--paper);
+  color: var(--muted);
+  font-size: 0.88rem;
+}
+
+.class-week__cancel p {
+  flex: 1 1 24rem;
+  line-height: 1.4;
 }
 
 .class-week__break {

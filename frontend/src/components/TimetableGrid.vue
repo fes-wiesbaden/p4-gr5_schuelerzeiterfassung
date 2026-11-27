@@ -18,8 +18,42 @@ const props = defineProps<{
   caption: string
   periods?: TimetablePeriod[]
   busy?: boolean
+  // Stunden lassen sich per Klick für ihr Datum als Ausfall markieren
+  cancellable?: boolean
 }>()
-const emit = defineEmits<{ edit: [slot: Slot]; remove: [slot: Slot] }>()
+const emit = defineEmits<{
+  edit: [slot: Slot]
+  remove: [slot: Slot]
+  toggleLesson: [date: string, lesson: Entry]
+  toggleDay: [date: string, cancel: boolean]
+}>()
+
+// Datum, für das eine Stunde per Klick ausfallen kann
+function toggleDate(index: number) {
+  return props.cancellable ? props.days[index]?.date : undefined
+}
+
+function toggleAttributes(index: number, lesson: Entry) {
+  if (!toggleDate(index)) return {}
+  return {
+    type: 'button',
+    'aria-pressed': Boolean(lesson.cancelled),
+    disabled: props.busy,
+    title: lesson.cancelled
+      ? 'Klicken, um den Ausfall zurückzunehmen'
+      : 'Klicken, um diese Stunde als Ausfall zu markieren'
+  }
+}
+
+function toggleLesson(index: number, lesson: Entry) {
+  const date = toggleDate(index)
+  if (date) emit('toggleLesson', date, lesson)
+}
+
+function allCancelled(lessons: Entry[]) {
+  return lessons.length > 0 && lessons.every((lesson) => lesson.cancelled)
+}
+// shortcut: „heute“ gilt ab dem Laden; über Mitternacht offene Seiten markieren den Vortag bis zum Neuladen
 const today = todayInBerlin()
 const mobile = ref(false)
 const selectedDay = ref(0)
@@ -174,7 +208,7 @@ const rows = computed(() => {
 
     <div v-if="hasVisibleLessons" class="week-grid__table">
       <table>
-        <caption class="week-grid__caption" v-text="caption" />
+        <caption class="visually-hidden" v-text="caption" />
         <thead>
           <tr>
             <th scope="col">Stunde</th>
@@ -187,6 +221,19 @@ const rows = computed(() => {
             >
               {{ WEEKDAYS[day.index]?.label }}
               <span v-if="day.date">{{ formatDate(day.date) }}</span>
+              <button
+                v-if="cancellable && day.date && day.lessons.length"
+                type="button"
+                class="week-grid__day-toggle"
+                :disabled="busy"
+                @click="emit('toggleDay', day.date, !allCancelled(day.lessons))"
+              >
+                {{
+                  allCancelled(day.lessons)
+                    ? 'Ausfall zurücknehmen'
+                    : 'Ganzer Tag fällt aus'
+                }}
+              </button>
             </th>
           </tr>
         </thead>
@@ -214,19 +261,40 @@ const rows = computed(() => {
                 :rowspan="cell.span"
                 :class="{
                   'week-grid__filled': cell.entry,
+                  'week-grid__cancelled': cell.entry?.cancelled,
                   'week-grid__last-column':
                     cell.index === visibleDays.at(-1)?.index
                 }"
               >
-                <div v-if="cell.entry" class="week-grid__lesson">
-                  <strong>Unterricht</strong>
+                <!-- Mit Datum schaltet ein Klick den Ausfall um, sonst zeigt die
+                     Zelle die Vorlage samt Bearbeiten und Löschen -->
+                <component
+                  :is="toggleDate(cell.index) ? 'button' : 'div'"
+                  v-if="cell.entry"
+                  v-bind="toggleAttributes(cell.index, cell.entry)"
+                  class="week-grid__lesson"
+                  :class="{ 'week-grid__toggle': toggleDate(cell.index) }"
+                  @click="toggleLesson(cell.index, cell.entry)"
+                >
+                  <span v-if="cell.entry.cancelled" class="week-grid__badge">
+                    <i class="pi pi-ban" aria-hidden="true" /> Fällt aus
+                  </span>
+                  <strong>{{ cell.entry.subject || 'Unterricht' }}</strong>
+                  <small v-if="cell.entry.teacherName">
+                    {{ cell.entry.teacherName }}
+                  </small>
                   <small v-if="cell.entry.roomNumber">
                     Raum {{ cell.entry.roomNumber }}
                   </small>
-                  <small v-if="cell.entry.slot?.validFrom">
+                  <small
+                    v-if="!toggleDate(cell.index) && cell.entry.slot?.validFrom"
+                  >
                     Ab {{ formatDate(cell.entry.slot.validFrom) }}
                   </small>
-                  <div v-if="cell.entry.slot" class="week-grid__actions">
+                  <div
+                    v-if="!toggleDate(cell.index) && cell.entry.slot"
+                    class="week-grid__actions"
+                  >
                     <Button
                       type="button"
                       icon="pi pi-pencil"
@@ -247,7 +315,7 @@ const rows = computed(() => {
                       @click="emit('remove', cell.entry.slot)"
                     />
                   </div>
-                </div>
+                </component>
               </td>
             </template>
           </tr>
@@ -313,14 +381,6 @@ table {
   table-layout: fixed;
   text-align: left;
   font-variant-numeric: tabular-nums;
-}
-
-.week-grid__caption {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  overflow: hidden;
-  clip-path: inset(50%);
 }
 
 th,
@@ -410,6 +470,88 @@ td {
   gap: 3px;
   padding: 9px 11px;
   overflow-wrap: anywhere;
+}
+
+.week-grid__cancelled {
+  background: repeating-linear-gradient(
+    135deg,
+    #fde8e6,
+    #fde8e6 10px,
+    #fbd9d6 10px,
+    #fbd9d6 20px
+  );
+  --lesson-ink: var(--danger);
+  --lesson-muted: #8c5a5e;
+}
+
+.week-grid__cancelled strong {
+  text-decoration: line-through;
+}
+
+.week-grid__badge {
+  width: fit-content;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: #a3323c;
+  color: #fff;
+  font-size: 0.7rem;
+  font-weight: 700;
+}
+
+.week-grid__toggle {
+  width: 100%;
+  height: 100%;
+  min-height: 100%;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+/* Die ganze Zelle ist klickbar, auch wenn der Text kürzer ist als die Zelle */
+.week-grid__toggle::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+}
+
+td:has(.week-grid__toggle) {
+  position: relative;
+}
+
+td:has(.week-grid__toggle:hover:not(:disabled)) {
+  box-shadow: inset 0 0 0 2px var(--accent);
+}
+
+.week-grid__toggle:focus-visible {
+  outline: none;
+}
+
+td:has(.week-grid__toggle:focus-visible) {
+  box-shadow: inset 0 0 0 3px var(--accent);
+}
+
+.week-grid__toggle:disabled {
+  cursor: wait;
+}
+
+.week-grid__day-toggle {
+  display: block;
+  margin-top: 6px;
+  padding: 3px 8px;
+  border: 1px solid var(--control-border);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--accent-ink);
+  font: inherit;
+  font-size: 0.7rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.week-grid__day-toggle:hover:not(:disabled) {
+  background: var(--accent-soft);
 }
 
 .week-grid__lesson strong {

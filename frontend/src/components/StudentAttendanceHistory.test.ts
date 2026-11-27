@@ -3,9 +3,22 @@ import PrimeVue from 'primevue/config'
 import { afterEach, expect, it, vi } from 'vitest'
 import StudentAttendanceHistory from './StudentAttendanceHistory.vue'
 
+// Die Kalendermarkierungen laden unabhängig von der Woche und stören die
+// Reihenfolge der geprüften Aufrufe nicht
+function stubFetch(
+  fetchMock: (url: string, options?: RequestInit) => Promise<Response>
+) {
+  vi.stubGlobal('fetch', (url: string, options?: RequestInit) =>
+    String(url).includes('/attendance/calendar')
+      ? Promise.resolve(Response.json([]))
+      : options === undefined
+        ? fetchMock(url)
+        : fetchMock(url, options)
+  )
+}
+
 afterEach(() => {
   vi.useRealTimers()
-  vi.unstubAllGlobals()
   document.cookie = 'XSRF-TOKEN=; Max-Age=0'
 })
 
@@ -38,12 +51,7 @@ it('zeigt die Woche eines Schülers und entschuldigt alle offenen Fehlzeiten des
     .mockResolvedValueOnce(Response.json(week))
     .mockResolvedValueOnce(Response.json({ changed: true }))
     .mockReturnValueOnce(refreshedWeek)
-  vi.stubGlobal('fetch', fetchMock)
-  vi.stubGlobal('matchMedia', () => ({
-    matches: false,
-    addEventListener() {},
-    removeEventListener() {}
-  }))
+  stubFetch(fetchMock)
   const wrapper = mount(StudentAttendanceHistory, {
     props: { studentId: 4 },
     global: { plugins: [PrimeVue] }
@@ -71,7 +79,7 @@ it('zeigt die Woche eines Schülers und entschuldigt alle offenen Fehlzeiten des
     })
   )
   expect(fetchMock.mock.calls[2]?.[0]).toBe(url)
-  expect(wrapper.get('tr.history-partial').exists()).toBe(true)
+  expect(wrapper.find('tr.history-partial').exists()).toBe(true)
   expect(wrapper.find('[role="status"]').exists()).toBe(false)
 
   resolveWeek(
@@ -99,18 +107,13 @@ it('zeigt die Woche eines Schülers und entschuldigt alle offenen Fehlzeiten des
       .findAll('tbody td')
       .map((cell) => cell.text())
       .slice(1, 5)
-  ).toEqual(['20 min', '20 min', '0 min', '20 min'])
+  ).toEqual(['20 Min.', '20 Min.', '0 Min.', '20 Min.'])
   wrapper.unmount()
 })
 
 it('blättert zwei Kalenderwochen vor und merkt nur die erlaubten Status vor', async () => {
   vi.useFakeTimers({ toFake: ['Date'] })
   vi.setSystemTime(new Date('2026-09-15T07:00:00Z'))
-  vi.stubGlobal('matchMedia', () => ({
-    matches: false,
-    addEventListener() {},
-    removeEventListener() {}
-  }))
   const day = {
     date: '2026-09-28',
     unexcusedMinutes: null,
@@ -153,7 +156,7 @@ it('blättert zwei Kalenderwochen vor und merkt nur die erlaubten Status vor', a
         ]
       })
     )
-  vi.stubGlobal('fetch', fetchMock)
+  stubFetch(fetchMock)
   const wrapper = mount(StudentAttendanceHistory, {
     props: { studentId: 4 },
     global: { plugins: [PrimeVue] }
@@ -178,7 +181,8 @@ it('blättert zwei Kalenderwochen vor und merkt nur die erlaubten Status vor', a
   ).toEqual(['status'])
   expect(
     status?.findAll('option').map((option) => option.element.value)
-  ).toEqual(['BETRIEBLICH_ENTSCHULDIGT', 'ENTSCHULDIGT'])
+  ).toEqual(['', 'BETRIEBLICH_ENTSCHULDIGT', 'ENTSCHULDIGT'])
+  await status?.setValue('BETRIEBLICH_ENTSCHULDIGT')
   const [start, end] = wrapper.findAll('form input.german-time')
   await start?.setValue('09:30')
   await end?.setValue('11:00')
@@ -194,7 +198,7 @@ it('blättert zwei Kalenderwochen vor und merkt nur die erlaubten Status vor', a
     })
   )
   expect(wrapper.text()).toContain(
-    'Geplant 09:30–11:00 · Betrieblich entschuldigt'
+    'Vorgemerkt 09:30–11:00 Uhr · Betrieblich entschuldigt'
   )
   await wrapper.get('form input[type="checkbox"]').setValue(true)
   expect(wrapper.find('form input.german-time').exists()).toBe(false)
@@ -204,8 +208,13 @@ it('blättert zwei Kalenderwochen vor und merkt nur die erlaubten Status vor', a
   fetchMock
     .mockResolvedValueOnce(Response.json({ changed: true }))
     .mockResolvedValueOnce(Response.json(lastWeek))
+  // Der ganze Schultag wird wie andere folgenreiche Korrekturen erst nach Rückfrage gebucht
+  const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true)
   await wrapper.get('form').trigger('submit')
   await flushPromises()
+  expect(confirm).toHaveBeenCalledWith(
+    expect.stringContaining('Ganzen Schultag vormerken?')
+  )
   expect(fetchMock).toHaveBeenNthCalledWith(
     6,
     '/api/students/4/attendance/2026-09-28/school-day-excuses',

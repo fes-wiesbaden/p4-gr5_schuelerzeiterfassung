@@ -18,6 +18,8 @@ import {
   type StudentClass
 } from '@/api/students'
 import { formatDate } from '@/dateTime'
+import { confirmAction } from '@/confirm'
+import { showNotice } from '@/notice'
 import StudentFormFields from '@/components/StudentFormFields.vue'
 import StudentRfidCards from '@/components/StudentRfidCards.vue'
 import { useAuthStore } from '@/stores/auth'
@@ -40,7 +42,7 @@ const busy = ref(false)
 const error = ref('')
 const actionError = ref('')
 const editor = ref<HTMLFieldSetElement>()
-const editButton = ref<InstanceType<typeof Button>>()
+const editButton = ref<{ $el: HTMLButtonElement }>()
 const canManage = computed(
   () =>
     auth.isAdmin ||
@@ -172,7 +174,10 @@ async function save(event: Event) {
     if (props.studentId === id) {
       await reloadStudent()
       if (actionError.value) editing.value = false
-      else await closeEditor()
+      else {
+        showNotice('Stammdaten gespeichert.')
+        await closeEditor()
+      }
     }
   } catch (e) {
     if (props.studentId === id) {
@@ -188,13 +193,22 @@ async function remove() {
   const data = student.value
   const id = props.studentId
   if (!data || data.id !== id || !canManage.value || busy.value) return
-  if (!window.confirm(`${data.firstName} ${data.lastName} wirklich löschen?`))
+  if (
+    !(await confirmAction({
+      title: `${data.firstName} ${data.lastName} löschen?`,
+      message:
+        'Der Schüler wird dauerhaft gelöscht. Das ist nur möglich, solange keine Anwesenheitsdaten vorliegen.',
+      confirmLabel: 'Löschen',
+      danger: true
+    }))
+  )
     return
 
   busy.value = true
   actionError.value = ''
   try {
     await changeData(`/api/students/${id}`, 'DELETE')
+    showNotice(`${data.firstName} ${data.lastName} wurde gelöscht.`)
     if (props.studentId === id) {
       await router.replace({
         name: 'schueler',
@@ -294,6 +308,17 @@ async function remove() {
             </dd>
           </div>
         </dl>
+        <p
+          v-if="student.unexcusedPartialMinutes !== undefined"
+          class="certificate-note"
+        >
+          Teilweise gefehlt (ohne ganze Fehltage):
+          {{ student.unexcusedPartialMinutes }} Min. unentschuldigt ·
+          {{ student.excusedPartialMinutes ?? 0 }} Min. entschuldigt. Je volle
+          45 Minuten zählt eine Stunde, der Rest verfällt nicht, sondern wird
+          weiter gesammelt. Ganze Fehltage zählen nur als Tag, nicht zusätzlich
+          als Stunden.
+        </p>
       </section>
 
       <StudentAttendanceHistory
@@ -373,6 +398,14 @@ fieldset {
 .certificate h2 {
   margin: 0 0 12px;
   font-size: 1.1rem;
+}
+
+.certificate-note {
+  max-width: 46rem;
+  margin: 12px 0 0;
+  color: var(--muted);
+  font-size: 0.88rem;
+  line-height: 1.45;
 }
 
 .student-facts {

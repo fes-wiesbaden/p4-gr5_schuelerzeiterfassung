@@ -1,25 +1,26 @@
 <script setup lang="ts">
+import { ref, watch } from 'vue'
 import InputText from 'primevue/inputtext'
 import { timePattern, timeWithSecondsPattern } from '@/dateTime'
 
 defineProps<{ label: string; seconds?: boolean; required?: boolean }>()
 const value = defineModel<string>({ default: '' })
+const field = ref<{ $el: HTMLInputElement }>()
 
-function clearError(event: Event) {
-  const field = event.target as HTMLInputElement
-  field.setCustomValidity('')
-}
+// Auch ein per Programm gesetzter Wert hebt eine frühere Fehlermeldung auf
+watch(value, () => field.value?.$el.setCustomValidity(''))
 
 function showError(event: Event) {
-  const field = event.target as HTMLInputElement
-  field.setCustomValidity(
-    field.validity.valueMissing ? 'Gib eine Uhrzeit ein.' : field.title
+  const input = event.target as HTMLInputElement
+  input.setCustomValidity(
+    input.validity.valueMissing ? 'Gib eine Uhrzeit ein.' : input.title
   )
 }
 </script>
 
 <template>
   <InputText
+    ref="field"
     v-model="value"
     type="text"
     class="german-time"
@@ -33,7 +34,6 @@ function showError(event: Event) {
     placeholder="HH:MM"
     :maxlength="seconds ? 8 : 5"
     :required="required"
-    @input="clearError"
     @invalid="showError"
   />
 </template>

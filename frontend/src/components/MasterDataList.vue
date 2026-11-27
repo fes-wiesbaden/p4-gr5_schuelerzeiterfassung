@@ -10,13 +10,30 @@ import {
   watch
 } from 'vue'
 import { changeData, loadData } from '@/api/client'
+import { searchableText, searchKey } from '@/api/students'
 import PageError from '@/components/PageError.vue'
+import { confirmAction } from '@/confirm'
+import { showNotice } from '@/notice'
 const props = defineProps<{
   url: string
   columnTitle?: string
-  columns?: { field: keyof T; title: string; format?: (row: T) => string }[]
+  columns?: {
+    field: keyof T
+    title: string
+    format?: (row: T) => string
+    // Vergleichswert für die Sortierung per Klick auf die Spaltenüberschrift
+    sortValue?: (row: T) => number | string
+  }[]
+  // Einzahl für Schaltflächen und Überschriften, z. B. „Schüler“
+  entryName?: string
+  // Zusätzlicher Suchtext je Zeile, z. B. die Klasse
+  searchText?: (row: T) => string
+  searchPlaceholder?: string
+  // Überschrift einer Zusatzspalte, die der Slot „extra“ füllt
+  extraTitle?: string
   itemUrl?: string
   editable: boolean
+  // Getrennt von „editable“: Anlegen kann fehlende Auswahldaten brauchen
   canCreate?: boolean
   createUrl?: string | null
   title: string
@@ -25,12 +42,59 @@ const props = defineProps<{
 const emit = defineEmits<{ saved: [] }>()
 const rows = shallowRef<T[]>([])
 const query = ref('')
+const sorting = ref<{ field: string; descending: boolean }>()
+const collator = new Intl.Collator('de', { numeric: true })
+
 const visibleRows = computed(() => {
-  const search = query.value.trim().toLocaleLowerCase('de')
-  return rows.value.filter((row) =>
-    props.label(row).toLocaleLowerCase('de').includes(search)
+  const words = searchKey(query.value)
+    .split(/[\s,]+/)
+    .filter(Boolean)
+  const matches = rows.value.filter((row) => {
+    const text = searchableText(
+      props.label(row) + ' ' + (props.searchText?.(row) ?? '')
+    )
+    return words.every((word) => text.includes(word))
+  })
+  const active = sorting.value
+  const column = props.columns?.find(
+    (entry) => String(entry.field) === active?.field
   )
+  if (!active) return matches
+  const value = (row: T) =>
+    column?.sortValue ? column.sortValue(row) : props.label(row)
+  const sorted = [...matches].sort((a, b) => {
+    const left = value(a)
+    const right = value(b)
+    return typeof left === 'number' && typeof right === 'number'
+      ? left - right
+      : collator.compare(String(left), String(right))
+  })
+  return active.descending ? sorted.reverse() : sorted
 })
+
+function sortBy(field: string) {
+  const active = sorting.value
+  if (active?.field !== field) {
+    // Zahlen zuerst absteigend: die auffälligsten Werte stehen oben
+    sorting.value = { field, descending: field !== 'label' }
+  } else if (active.descending === (field !== 'label')) {
+    sorting.value = { field, descending: !active.descending }
+  } else {
+    sorting.value = undefined
+  }
+}
+
+function sortState(field: string) {
+  const active = sorting.value
+  if (active?.field !== field) return 'none'
+  return active.descending ? 'descending' : 'ascending'
+}
+
+function sortIcon(field: string) {
+  const state = sortState(field)
+  if (state === 'none') return 'pi-sort-alt'
+  return state === 'ascending' ? 'pi-sort-amount-up-alt' : 'pi-sort-amount-down'
+}
 const selected = shallowRef<T>()
 const editing = ref(false)
 const busy = ref(false)
@@ -44,6 +108,8 @@ const heading = ref<HTMLHeadingElement>()
 const editor = ref<HTMLFieldSetElement>()
 const createButton = ref<HTMLButtonElement>()
 const retryButton = ref<HTMLButtonElement>()
+// Nur ein fehlgeschlagenes Laden lässt sich durch erneutes Laden beheben
+const loadFailed = ref(false)
 
 function focusListAction() {
   const target = retryButton.value ?? createButton.value ?? heading.value
@@ -70,6 +136,7 @@ async function retryLoad(restoreFocus = false) {
   const version = ++loadVersion
   const changed = url !== loadedUrl
   error.value = ''
+  loadFailed.value = false
   loadingList.value = true
   try {
     const result = await loadData<T[]>(url)
@@ -85,6 +152,7 @@ async function retryLoad(restoreFocus = false) {
       loaded.value = false
     }
     error.value = 'Liste konnte nicht geladen werden.'
+    loadFailed.value = true
   } finally {
     if (isCurrentLoad(url, version)) {
       loadingList.value = false
@@ -109,6 +177,7 @@ async function edit(row?: T) {
   selected.value = row
   editing.value = true
   error.value = ''
+  loadFailed.value = false
   await nextTick()
   editor.value?.querySelector<HTMLInputElement>('input, select')?.focus()
 }
@@ -117,7 +186,15 @@ async function save(event: Event) {
   await submit(selected.value ? 'PUT' : 'POST', body)
 }
 async function remove(row: T) {
-  if (!window.confirm(props.label(row) + ' wirklich löschen?')) return
+  if (
+    !(await confirmAction({
+      title: `${props.label(row)} löschen?`,
+      message: 'Der Eintrag wird dauerhaft gelöscht.',
+      confirmLabel: 'Löschen',
+      danger: true
+    }))
+  )
+    return
   selected.value = row
   await submit('DELETE')
 }
@@ -133,6 +210,7 @@ async function submit(method: 'POST' | 'PUT' | 'DELETE', body?: unknown) {
   if (url === null) return
   busy.value = true
   error.value = ''
+  loadFailed.value = false
   let saved = false
   try {
     await changeData(url ?? source, method, body)
@@ -140,6 +218,13 @@ async function submit(method: 'POST' | 'PUT' | 'DELETE', body?: unknown) {
     if (!isCurrentLoad(source, version)) return
     emit('saved')
     editing.value = false
+    showNotice(
+      method === 'DELETE'
+        ? 'Eintrag gelöscht.'
+        : method === 'POST'
+          ? `${props.entryName ?? 'Eintrag'} angelegt.`
+          : 'Änderung gespeichert.'
+    )
     if (method === 'DELETE')
       rows.value = rows.value.filter((row) => row.id !== rowId)
     try {
@@ -149,6 +234,7 @@ async function submit(method: 'POST' | 'PUT' | 'DELETE', body?: unknown) {
       if (isCurrentLoad(source, version)) {
         error.value =
           'Änderung gespeichert. Die Liste konnte nicht aktualisiert werden. Bitte erneut laden.'
+        loadFailed.value = true
       }
     }
   } catch (e) {
@@ -177,29 +263,36 @@ onUnmounted(() =>
     <header class="list-heading">
       <h1 ref="heading" tabindex="-1">{{ title }}</h1>
       <button
-        v-if="!editing && loaded && (canCreate || editable)"
+        v-if="!editing && loaded && canCreate"
         ref="createButton"
         class="primary"
         :disabled="busy || loadingList"
         @click="edit()"
       >
-        Neu anlegen
+        <i class="pi pi-plus" aria-hidden="true" />
+        {{ entryName ? entryName + ' anlegen' : 'Neu anlegen' }}
       </button>
     </header>
 
     <PageError :message="error">
       <button
-        v-if="!editing"
+        v-if="!editing && loadFailed"
         ref="retryButton"
         :disabled="busy || loadingList"
         @click="retryLoad(true)"
       >
-        Erneut laden
+        Erneut versuchen
       </button>
     </PageError>
     <fieldset v-if="editing" ref="editor" :disabled="busy">
       <legend>
-        {{ selected ? label(selected) + ' bearbeiten' : 'Neuer Eintrag' }}
+        {{
+          selected
+            ? label(selected) + ' bearbeiten'
+            : entryName
+              ? entryName + ' anlegen'
+              : 'Neuer Eintrag'
+        }}
       </legend>
       <form @submit.prevent="save">
         <slot name="form" :row="selected" />
@@ -223,8 +316,8 @@ onUnmounted(() =>
           <InputText
             v-model="query"
             type="search"
-            aria-label="Liste durchsuchen"
-            placeholder="Liste durchsuchen"
+            :aria-label="searchPlaceholder ?? 'Liste durchsuchen'"
+            :placeholder="searchPlaceholder ?? 'Liste durchsuchen'"
           />
         </label>
       </div>
@@ -233,11 +326,11 @@ onUnmounted(() =>
       </p>
       <div v-if="loaded" class="list-results">
         <div class="list-results-content" :inert="loadingList || undefined">
-          <p v-if="loaded" class="count" role="status">
+          <p class="count" role="status">
             {{ visibleRows.length }}
             {{ visibleRows.length === 1 ? 'Eintrag' : 'Einträge' }}
           </p>
-          <p v-if="loaded && !visibleRows.length">
+          <p v-if="!visibleRows.length">
             {{
               rows.length
                 ? 'Keine passenden Einträge gefunden.'
@@ -248,14 +341,44 @@ onUnmounted(() =>
             <table :aria-label="title">
               <thead>
                 <tr>
-                  <th scope="col">{{ columnTitle ?? 'Bezeichnung' }}</th>
+                  <th scope="col" :aria-sort="sortState('label')">
+                    <button type="button" class="sort" @click="sortBy('label')">
+                      {{ columnTitle ?? 'Bezeichnung' }}
+                      <i
+                        class="pi"
+                        :class="sortIcon('label')"
+                        aria-hidden="true"
+                      />
+                    </button>
+                  </th>
                   <th
                     v-for="column in columns"
                     :key="String(column.field)"
                     scope="col"
                     class="number"
+                    :aria-sort="
+                      column.sortValue
+                        ? sortState(String(column.field))
+                        : undefined
+                    "
                   >
-                    {{ column.title }}
+                    <button
+                      v-if="column.sortValue"
+                      type="button"
+                      class="sort"
+                      @click="sortBy(String(column.field))"
+                    >
+                      {{ column.title }}
+                      <i
+                        class="pi"
+                        :class="sortIcon(String(column.field))"
+                        aria-hidden="true"
+                      />
+                    </button>
+                    <template v-else>{{ column.title }}</template>
+                  </th>
+                  <th v-if="extraTitle" scope="col" class="actions">
+                    {{ extraTitle }}
                   </th>
                   <th v-if="editable" scope="col" class="actions">Aktionen</th>
                 </tr>
@@ -263,8 +386,14 @@ onUnmounted(() =>
               <tbody>
                 <tr v-for="row in visibleRows" :key="row.id">
                   <component
-                    :is="columns?.length || editable ? 'th' : 'td'"
-                    :scope="columns?.length || editable ? 'row' : undefined"
+                    :is="
+                      columns?.length || editable || extraTitle ? 'th' : 'td'
+                    "
+                    :scope="
+                      columns?.length || editable || extraTitle
+                        ? 'row'
+                        : undefined
+                    "
                     class="entry-name"
                   >
                     <slot name="name" :row="row">{{ label(row) }}</slot>
@@ -276,6 +405,9 @@ onUnmounted(() =>
                     :data-label="column.title"
                   >
                     {{ column.format ? column.format(row) : row[column.field] }}
+                  </td>
+                  <td v-if="extraTitle" class="actions extra">
+                    <slot name="extra" :row="row" />
                   </td>
                   <td v-if="editable" class="actions">
                     <button
@@ -352,6 +484,33 @@ button:disabled {
 }
 .primary:hover {
   background: var(--accent-ink);
+}
+.primary i {
+  margin-right: 0.4rem;
+  font-size: 0.85em;
+}
+thead .sort {
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-weight: 600;
+}
+thead .sort:hover {
+  background: transparent;
+  color: var(--accent-ink);
+}
+thead .sort i {
+  margin-left: 0.3rem;
+  font-size: 0.8em;
+}
+.extra :deep(a) {
+  display: inline-block;
+  margin-left: 0.9rem;
+  color: var(--accent-ink);
+  white-space: nowrap;
 }
 .toolbar {
   display: flex;

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import PageError from '@/components/PageError.vue'
-import { computed, nextTick, onMounted, onUnmounted, ref } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import Button from 'primevue/button'
 import InputText from 'primevue/inputtext'
 import GermanDateInput from './GermanDateInput.vue'
@@ -17,7 +17,7 @@ import {
   type Field,
   type Values
 } from '@/api/assistantCommands'
-import { formatDate, timeWithSecondsPattern, toCalendarDate } from '@/dateTime'
+import { formatDate, timePattern, toCalendarDate } from '@/dateTime'
 import { useAuthStore } from '@/stores/auth'
 
 const props = defineProps<{ hint: CommandHint; contextClass?: unknown }>()
@@ -45,47 +45,74 @@ const previewElement = ref<HTMLElement>()
 const error = ref('')
 const busy = ref(false)
 const request = new AbortController()
-const timePattern = new RegExp(`^${timeWithSecondsPattern}$`)
+const clockTime = new RegExp(`^${timePattern}$`)
 
 function options(field: Field, inputs = values.value) {
   return context.value ? (field.options?.(context.value, inputs) ?? []) : []
 }
 
-function valid(field: Field) {
+// Nennt den konkreten Grund, warum ein Feld noch nicht passt
+function fieldProblem(field: Field) {
   const value = values.value[field.key] ?? ''
-  if (!value.trim()) return Boolean(field.optional)
+  const name = `„${field.label}“`
+  if (!value.trim()) {
+    if (field.optional) return ''
+    return field.kind === 'choice'
+      ? `Wähle bei ${name} einen Eintrag aus.`
+      : `Fülle das Feld ${name} aus.`
+  }
   switch (field.kind) {
     case 'date':
-      return Boolean(toCalendarDate(value))
+      return toCalendarDate(value)
+        ? ''
+        : `${name}: Gib ein gültiges Datum im Format TT.MM.JJJJ ein.`
     case 'time':
-      return timePattern.test(value)
+      return clockTime.test(value)
+        ? ''
+        : `${name}: Gib die Uhrzeit im Format HH:MM ein, zum Beispiel 08:00.`
     case 'number':
-      return (
-        /^\d+$/.test(value) && Number(value) >= 1 && Number(value) <= 2147483647
-      )
+      return /^\d+$/.test(value) &&
+        Number(value) >= 1 &&
+        Number(value) <= 2147483647
+        ? ''
+        : `${name}: Gib eine ganze Zahl ab 1 ein.`
     case 'choice':
       return options(field).some((item) => item.value === value)
-    default:
-      return value.length <= (field.length ?? 100)
+        ? ''
+        : `Wähle bei ${name} einen Eintrag aus.`
+    default: {
+      const limit = field.length ?? 100
+      return value.length <= limit
+        ? ''
+        : `${name} darf höchstens ${limit} Zeichen lang sein.`
+    }
   }
 }
-const complete = computed(() => {
-  if (!context.value || !fields.value.every(valid)) return false
-  if (
-    values.value.startsAt &&
-    values.value.endsAt &&
-    values.value.startsAt.padEnd(8, ':00') >=
-      values.value.endsAt.padEnd(8, ':00')
-  )
-    return false
-  if (
-    values.value.endDate &&
-    values.value.date &&
-    values.value.endDate < values.value.date
-  )
-    return false
-  return true
+
+// Erster Grund, der eine Vorschau verhindert. Leer bedeutet: alles vollständig
+const problem = computed(() => {
+  if (!context.value) return 'Die Auswahl wird noch geladen.'
+  for (const field of fields.value) {
+    const reason = fieldProblem(field)
+    if (reason) return reason
+  }
+  const { startsAt, endsAt, date, endDate } = values.value
+  if (startsAt && endsAt && startsAt >= endsAt)
+    return 'Das Ende muss nach dem Beginn liegen. Prüfe die beiden Uhrzeiten.'
+  if (endDate && date && endDate < date)
+    return 'Das Ende darf nicht vor dem Beginn liegen. Prüfe die beiden Daten.'
+  return ''
 })
+const complete = computed(() => !problem.value)
+// Ein angezeigter Eingabehinweis verschwindet, sobald die Angabe korrigiert ist
+watch(problem, (_next, previous) => {
+  if (error.value && error.value === previous) error.value = ''
+})
+
+// Uhrzeiten erscheinen überall als HH:MM, auch wenn die Daten Sekunden enthalten
+function withoutSeconds(time: string) {
+  return /^\d{2}:\d{2}:\d{2}$/.test(time) ? time.slice(0, 5) : time
+}
 
 function setDefaults(override = false) {
   const ctx = context.value
@@ -111,8 +138,8 @@ function setDefaults(override = false) {
       existing = lesson
         ? {
             weekday: lesson.weekday,
-            startsAt: lesson.startsAt,
-            endsAt: lesson.endsAt,
+            startsAt: withoutSeconds(lesson.startsAt),
+            endsAt: withoutSeconds(lesson.endsAt),
             room: String(lesson.roomId)
           }
         : {}
@@ -156,7 +183,7 @@ function display(field: Field, snapshot: Values) {
   if (!value) return 'Keine Angabe'
   if (field.kind === 'secret') return '••••••'
   if (field.kind === 'date') return formatDate(value)
-  if (field.kind === 'time') return value + ' Uhr'
+  if (field.kind === 'time') return withoutSeconds(value) + ' Uhr'
   if (field.kind === 'choice')
     return (
       options(field, snapshot).find((item) => item.value === value)?.label ?? ''
@@ -187,6 +214,10 @@ async function load() {
         : hint,
       data
     )
+    for (const field of fields.value) {
+      if (field.kind === 'time')
+        values.value[field.key] = withoutSeconds(values.value[field.key] ?? '')
+    }
     setDefaults()
     if (definition.read && complete.value) await perform({ ...values.value })
   } catch (failure) {
@@ -201,7 +232,12 @@ async function load() {
 }
 
 async function prepare() {
-  if (!complete.value || !definition || busy.value) return
+  if (!definition || busy.value) return
+  if (problem.value) {
+    // Der Knopf bleibt bedienbar und nennt den Grund, statt grau zu bleiben
+    error.value = problem.value
+    return
+  }
   const snapshot = { ...values.value }
   if (definition.read) {
     await perform(snapshot)
@@ -233,7 +269,7 @@ async function perform(snapshot: Values) {
         ? 'Das Ergebnis konnte nicht abgerufen werden. Prüfe den Eintrag vor einem erneuten Versuch.'
         : failure instanceof Error
           ? failure.message
-          : 'Die Aktion ist fehlgeschlagen.'
+          : 'Der Auftrag ist fehlgeschlagen.'
     if (failure instanceof TypeError) prepared.value = undefined
   } finally {
     busy.value = false
@@ -261,7 +297,9 @@ onUnmounted(() => request.abort())
         :class="definition?.read ? 'pi pi-search' : 'pi pi-pencil'"
         aria-hidden="true"
       />
-      <h3 tabindex="-1">{{ definition?.title ?? 'Aktion nicht verfügbar' }}</h3>
+      <h3 tabindex="-1">
+        {{ definition?.title ?? 'Auftrag nicht verfügbar' }}
+      </h3>
     </div>
     <p v-if="busy && !context" role="status">Auswahl wird geladen …</p>
     <PageError :message="error" />
@@ -317,12 +355,10 @@ onUnmounted(() => request.abort())
           <select
             v-if="field.kind === 'choice'"
             :value="values[field.key]"
-            :required="!field.optional"
+            required
             @change="selected(field, $event)"
           >
-            <option value="" :disabled="!field.optional">
-              {{ field.optional ? 'Ohne Zuordnung' : 'Bitte auswählen' }}
-            </option>
+            <option value="" disabled>Bitte auswählen</option>
             <option
               v-for="item in options(field)"
               :key="item.value"
@@ -342,7 +378,6 @@ onUnmounted(() => request.abort())
             v-else-if="field.kind === 'time'"
             v-model="values[field.key]!"
             :label="field.label"
-            seconds
             required
           />
           <InputText
@@ -371,7 +406,6 @@ onUnmounted(() => request.abort())
           type="submit"
           :label="definition?.read ? 'Anzeigen' : 'Vorschau anzeigen'"
           size="small"
-          :disabled="!complete"
           :loading="busy"
         />
         <Button

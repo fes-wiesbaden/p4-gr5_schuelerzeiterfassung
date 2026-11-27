@@ -1,6 +1,6 @@
 import { flushPromises, mount } from '@vue/test-utils'
 import PrimeVue from 'primevue/config'
-import { afterEach, expect, it, vi } from 'vitest'
+import { expect, it, vi } from 'vitest'
 import { ref } from 'vue'
 import MasterDataList from './MasterDataList.vue'
 import { pageErrorTarget } from './PageError.vue'
@@ -14,8 +14,6 @@ function pendingResponse() {
   })
   return { response, resolve }
 }
-
-afterEach(() => vi.unstubAllGlobals())
 
 it('zeigt wiederholte Speicherfehler am Seitenanfang und behält die Eingaben', async () => {
   const scrollTo = vi.fn()
@@ -43,14 +41,15 @@ it('zeigt wiederholte Speicherfehler am Seitenanfang und behält die Eingaben', 
       url: '/api/rooms',
       title: 'Räume',
       editable: true,
-      label: (row: Row) => row.name
+      canCreate: true,
+      label: (row: { id: number }) => (row as Row).name
     },
     slots: { form: '<input name="roomNumber">' }
   })
   try {
     await flushPromises()
     await wrapper.get('button.primary').trigger('click')
-    const input = wrapper.get('input[name="roomNumber"]')
+    const input = wrapper.get<HTMLInputElement>('input[name="roomNumber"]')
     await input.setValue('R01')
     const form = wrapper.get('form')
 
@@ -86,7 +85,7 @@ it('behält den Filter beim Klassenwechsel und ignoriert verspätete Antworten',
       url: '/api/classes/1/students',
       title: 'Schüler',
       editable: false,
-      label: (row: Row) => row.name
+      label: (row: { id: number }) => (row as Row).name
     },
     slots: { filter: '<select aria-label="Klasse"></select>' }
   })

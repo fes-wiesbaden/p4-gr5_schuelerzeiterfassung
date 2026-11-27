@@ -49,6 +49,15 @@ async function handleSubmit() {
         </div>
         <form class="login__form" @submit.prevent="handleSubmit">
           <h1>Anmelden</h1>
+          <p
+            v-if="route.query.grund === 'abgelaufen' && !auth.errorMessage"
+            class="login__info"
+            role="status"
+          >
+            Deine Sitzung ist abgelaufen oder du hast dich an einem anderen
+            Gerät angemeldet. Melde dich bitte erneut an – danach geht es an
+            derselben Stelle weiter.
+          </p>
           <PageError :message="auth.errorMessage" />
 
           <div class="login__field">
@@ -98,6 +107,9 @@ async function handleSubmit() {
             class="login__submit"
             :loading="auth.busy"
           />
+          <p class="login__help">
+            Zugangsdaten vergessen? Die Verwaltung setzt dein Passwort zurück.
+          </p>
         </form>
       </div>
     </div>
@@ -189,6 +201,23 @@ async function handleSubmit() {
 .login__field {
   display: grid;
   gap: 6px;
+}
+
+.login__info {
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--accent-soft);
+  color: var(--accent-ink);
+  font-size: 0.9rem;
+  line-height: 1.4;
+}
+
+.login__help {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.85rem;
 }
 
 .login__field label {

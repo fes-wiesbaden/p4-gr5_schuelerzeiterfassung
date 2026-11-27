@@ -3,36 +3,44 @@ import PageError from '@/components/PageError.vue'
 import { ref } from 'vue'
 import Button from 'primevue/button'
 import InputText from 'primevue/inputtext'
-import { deleteResource, putJson } from '@/api/client'
+import { changeData } from '@/api/client'
+import { confirmAction } from '@/confirm'
+import { showNotice } from '@/notice'
 
 const props = defineProps<{ studentId: number }>()
 const uid = ref('')
 const saving = ref(false)
 const error = ref('')
-const message = ref('')
 
 async function updateCard(remove: boolean) {
   if (saving.value) return
+  if (
+    remove &&
+    !(await confirmAction({
+      title: 'Karte entfernen?',
+      message:
+        'Danach erfasst das Terminal mit dieser Karte keine Anwesenheit mehr.',
+      confirmLabel: 'Entfernen',
+      danger: true
+    }))
+  )
+    return
   saving.value = true
   error.value = ''
-  message.value = ''
   const url = `/api/students/${props.studentId}/rfid-uid`
   try {
-    const response = await (remove
-      ? deleteResource(url)
-      : putJson(url, { uid: uid.value }))
-    if (response.ok) {
-      uid.value = ''
-      message.value = remove ? 'Karte entfernt.' : 'Karte gespeichert.'
-    } else if (response.status === 409) {
-      error.value = 'Diese Karte ist bereits einem anderen Schüler zugeordnet.'
-    } else if (response.status === 400) {
-      error.value = 'Die Kartenkennung hat ein ungültiges Format.'
-    } else {
-      error.value = 'Die Kartenzuordnung konnte nicht geändert werden.'
-    }
-  } catch {
-    error.value = 'Der Server ist nicht erreichbar.'
+    await changeData(
+      url,
+      remove ? 'DELETE' : 'PUT',
+      remove ? undefined : { uid: uid.value }
+    )
+    uid.value = ''
+    showNotice(remove ? 'Karte entfernt.' : 'Karte gespeichert.')
+  } catch (failure) {
+    error.value =
+      failure instanceof TypeError
+        ? 'Der Server ist nicht erreichbar.'
+        : (failure as Error).message
   } finally {
     saving.value = false
   }
@@ -74,7 +82,6 @@ async function updateCard(remove: boolean) {
         />
       </div>
       <PageError :message="error" />
-      <p v-if="message" role="status">{{ message }}</p>
     </form>
   </section>
 </template>
@@ -84,20 +91,6 @@ async function updateCard(remove: boolean) {
   display: grid;
   gap: 0.5rem;
   max-width: 26rem;
-}
-
-.card-form p {
-  margin: 0;
-}
-
-.card-form select {
-  min-width: 0;
-  padding: 0.55rem 0.75rem;
-  border: 1px solid var(--control-border);
-  border-radius: 10px;
-  background: var(--surface);
-  color: inherit;
-  font: inherit;
 }
 
 .card-actions {

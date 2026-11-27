@@ -67,9 +67,7 @@ const columns = computed(() => [
         {
           field: 'classId' as const,
           title: 'Klasse',
-          format: (row: Student) =>
-            classes.value.find((entry) => entry.id === row.classId)
-              ?.classCode ?? '—'
+          format: (row: Student) => classCode(row) || '—'
         }
       ]
     : []),
@@ -77,15 +75,39 @@ const columns = computed(() => [
     field: 'unexcusedDays' as const,
     title: 'Unentschuldigt',
     format: (row: Student) =>
-      formatAbsenceTotals(row.unexcusedDays, row.unexcusedHours)
+      formatAbsenceTotals(row.unexcusedDays, row.unexcusedHours),
+    sortValue: (row: Student) =>
+      absenceOrder(row.unexcusedDays, row.unexcusedPartialMinutes)
   },
   {
     field: 'excusedDays' as const,
     title: 'Entschuldigt',
     format: (row: Student) =>
-      formatAbsenceTotals(row.excusedDays, row.excusedHours)
+      formatAbsenceTotals(row.excusedDays, row.excusedHours),
+    sortValue: (row: Student) =>
+      absenceOrder(row.excusedDays, row.excusedPartialMinutes)
   }
 ])
+// Sortiert wie angezeigt: erst ganze Fehltage, dann die Minuten der Fehlstunden
+function absenceOrder(days: number, partialMinutes = 0) {
+  return days * 1_000_000 + partialMinutes
+}
+function classCode(row: Student) {
+  return (
+    classes.value.find((entry) => entry.id === row.classId)?.classCode ?? ''
+  )
+}
+// Lehrkräfte legen Schüler nur in Klassen an, die sie selbst leiten
+const createHint = computed(() => {
+  if (auth.isAdmin || loading.value) return ''
+  if (!managedClasses.value.length)
+    return 'Neue Schüler legt die Klassenleitung oder die Verwaltung an.'
+  if (managedClasses.value.length < classes.value.length)
+    return `Neue Schüler kannst du in deiner eigenen Klasse anlegen (${managedClasses.value
+      .map((entry) => entry.classCode)
+      .join(', ')}).`
+  return ''
+})
 const profileContext = computed(() =>
   classPage.value
     ? { von: 'klasse' }
@@ -112,7 +134,7 @@ onMounted(async () => {
 
 <template>
   <RouterLink v-if="classPage" class="back" :to="{ name: 'klassen' }">
-    Zur Klassenliste
+    <i class="pi pi-arrow-left" aria-hidden="true" /> Zur Klassenliste
   </RouterLink>
   <h1 v-if="loading || error || (classPage && !selection)">{{ title }}</h1>
   <PageError v-if="error" :message="error" />
@@ -129,6 +151,9 @@ onMounted(async () => {
     :create-url="createUrl"
     :title="title"
     column-title="Name"
+    entry-name="Schüler"
+    search-placeholder="Name oder Klasse suchen"
+    :search-text="classCode"
     :columns="columns"
     :label="studentLabel"
     @saved="createClassId = undefined"
@@ -172,10 +197,11 @@ onMounted(async () => {
       <StudentFormFields />
     </template>
   </MasterDataList>
-  <StudentRfidAssignments
-    v-if="!classPage && !auth.isAdmin && !loading"
-    :classes="classes"
-  />
+  <p v-if="createHint && !error" class="create-hint">{{ createHint }}</p>
+  <details v-if="!classPage && !auth.isAdmin && !loading" class="cards">
+    <summary>RFID-Karten deiner Klassen anzeigen</summary>
+    <StudentRfidAssignments :classes="classes" />
+  </details>
 </template>
 
 <style scoped>
@@ -186,5 +212,25 @@ a {
 .back {
   display: inline-block;
   margin-bottom: 1rem;
+}
+
+.create-hint {
+  margin: 0.9rem 0 0;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.cards {
+  max-width: 68rem;
+  margin-top: 1.5rem;
+}
+
+.cards summary {
+  width: fit-content;
+  min-height: 44px;
+  padding: 0.6rem 0;
+  color: var(--accent-ink);
+  font-weight: 600;
+  cursor: pointer;
 }
 </style>

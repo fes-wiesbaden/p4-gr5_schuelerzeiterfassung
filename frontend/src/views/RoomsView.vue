@@ -17,6 +17,7 @@ function label(r: Row) {
   <MasterDataList
     url="/api/rooms"
     editable
+    can-create
     title="Räume"
     column-title="Raumnummer"
     :label="label"

@@ -15,7 +15,7 @@ const error = ref('')
 const columns: DataTableColumn<AssignmentRow>[] = [
   { field: 'studentName', header: 'Schüler' },
   { field: 'classCode', header: 'Klasse' },
-  { field: 'rfidUid', header: 'RFID-UID' }
+  { field: 'rfidUid', header: 'Kartenkennung' }
 ]
 
 onMounted(async () => {
@@ -55,7 +55,7 @@ onMounted(async () => {
 
 <template>
   <section class="card-assignments">
-    <h2>Kartenzuordnungen</h2>
+    <h2 class="visually-hidden">Kartenzuordnungen</h2>
     <p v-if="loading" role="status">Kartenzuordnungen werden geladen …</p>
     <PageError v-else-if="error" :message="error" />
     <AppDataTable
@@ -63,7 +63,7 @@ onMounted(async () => {
       :columns="columns"
       :rows="rows"
       row-key="rfidUid"
-      caption="Kartenzuordnungen aller Klassen"
+      caption="Kartenzuordnungen deiner Klassen"
     >
       <template #cell-studentName="{ row }">
         <RouterLink
@@ -90,7 +90,7 @@ onMounted(async () => {
 
 <style scoped>
 .card-assignments {
-  margin-top: 1.5rem;
+  margin-top: 0.5rem;
 }
 
 a {

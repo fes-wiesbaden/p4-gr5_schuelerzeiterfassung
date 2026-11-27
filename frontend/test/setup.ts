@@ -8,3 +8,10 @@ Object.defineProperty(globalThis, 'matchMedia', {
     removeEventListener() {}
   })
 })
+
+// JSDOM implementiert das Scrollen nicht und meldet sonst bei jedem Aufruf einen Fehler
+Object.defineProperty(window, 'scrollTo', {
+  configurable: true,
+  writable: true,
+  value: () => {}
+})

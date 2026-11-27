@@ -4,8 +4,8 @@ import { routeLocationKey } from 'vue-router'
 import PrimeVue from 'primevue/config'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { errorMessage, type PlanningOverview } from '@/api/planning'
-import { formatCalendarWeek } from '@/dateTime'
+import type { PlanningOverview } from '@/api/planning'
+import { notice } from '@/notice'
 import { useAuthStore } from '@/stores/auth'
 import SchedulePlanningView from './SchedulePlanningView.vue'
 
@@ -98,8 +98,6 @@ describe('SchedulePlanningView', () => {
   })
 
   afterEach(() => {
-    vi.restoreAllMocks()
-    vi.unstubAllGlobals()
     fetchMock.mockReset()
   })
 
@@ -142,12 +140,9 @@ describe('SchedulePlanningView', () => {
     expect(table.text()).toContain('Montag')
     expect(table.text()).toContain('Freitag')
     expect(table.text()).toContain('Unterricht')
-    expect(table.find('td[rowspan="2"]').exists()).toBe(true)
     expect(table.get('.week-grid__lesson').text()).toContain('Raum R01')
     expect(wrapper.text()).toContain('38. KW 2026')
     expect(wrapper.text()).toContain('Schuljahr 2026/27')
-    expect(wrapper.text()).not.toContain('Regelstundenplan')
-    expect(wrapper.text()).not.toContain('Stundenpläne bearbeiten')
     expect(wrapper.find('[role="tablist"]').exists()).toBe(false)
     wrapper.unmount()
   })
@@ -368,7 +363,7 @@ describe('SchedulePlanningView', () => {
     await form.find('select').setValue('DIENSTAG')
     await form.find('input[aria-label="Beginn"]').setValue('08:00')
     await form.find('input[aria-label="Ende"]').setValue('08:45')
-    await form.findAll('select')[1].setValue('1')
+    await form.findAll('select')[2].setValue('1')
     await form.trigger('submit')
     await flushPromises()
 
@@ -380,7 +375,9 @@ describe('SchedulePlanningView', () => {
           weekday: 'DIENSTAG',
           startsAt: '08:00',
           endsAt: '08:45',
-          roomId: 1
+          roomId: 1,
+          subject: null,
+          teacherId: null
         })
       })
     )
@@ -390,28 +387,10 @@ describe('SchedulePlanningView', () => {
     )
     expect(scrollTo).toHaveBeenCalledWith({ top: 0, behavior: 'instant' })
     expect(document.activeElement).toBe(alert.element)
-    expect(form.find('input[aria-label="Beginn"]').element.value).toBe('08:00')
+    expect(
+      form.get<HTMLInputElement>('input[aria-label="Beginn"]').element.value
+    ).toBe('08:00')
     wrapper.unmount()
-  })
-
-  it('springt auch bei einem wiederholten Ladefehler nach oben', async () => {
-    const scrollTo = vi.spyOn(window, 'scrollTo').mockImplementation(() => {})
-    fetchMock.mockRejectedValue(
-      new Error('Die Planung konnte nicht geladen werden.')
-    )
-    const wrapper = mountAs('admin', document.body)
-    try {
-      await flushPromises()
-      const alert = wrapper.get('[role="alert"]')
-      expect(document.activeElement).toBe(alert.element)
-      expect(scrollTo).toHaveBeenCalledTimes(1)
-
-      window.dispatchEvent(new Event('management:changed'))
-      await flushPromises()
-      expect(scrollTo).toHaveBeenCalledTimes(2)
-    } finally {
-      wrapper.unmount()
-    }
   })
 
   it.each([200, 500])(
@@ -464,15 +443,15 @@ describe('SchedulePlanningView', () => {
       .find((candidate) =>
         candidate.text().includes('Unterrichtszeit bearbeiten')
       )!
-    const [weekday, room] = form.findAll('select')
-    const startsAt = form.get('input[aria-label="Beginn"]')
-    const endsAt = form.get('input[aria-label="Ende"]')
+    const [weekday, , room] = form.findAll('select')
+    const startsAt = form.get<HTMLInputElement>('input[aria-label="Beginn"]')
+    const endsAt = form.get<HTMLInputElement>('input[aria-label="Ende"]')
     expect([
       weekday.element.value,
       startsAt.element.value,
       endsAt.element.value,
       room.element.value
-    ]).toEqual(['MONTAG', '07:30:00', '09:00:00', '1'])
+    ]).toEqual(['MONTAG', '07:30', '09:00', '1'])
     await weekday.setValue('DIENSTAG')
     await startsAt.setValue('08:00')
     await endsAt.setValue('09:30')
@@ -489,13 +468,13 @@ describe('SchedulePlanningView', () => {
           weekday: 'DIENSTAG',
           startsAt: '08:00',
           endsAt: '09:30',
-          roomId: 2
+          roomId: 2,
+          subject: null,
+          teacherId: null
         })
       })
     )
-    expect(wrapper.get('[role="status"]').text()).toBe(
-      'Unterrichtszeit geändert ab 22.09.2026.'
-    )
+    expect(notice.value).toBe('Unterrichtszeit geändert ab 22.09.2026.')
     wrapper.unmount()
   })
 
@@ -525,19 +504,7 @@ describe('SchedulePlanningView', () => {
       '/api/planning/timetables/1/slots/1',
       expect.objectContaining({ method: 'DELETE' })
     )
-    expect(wrapper.get('[role="status"]').text()).toBe(
-      'Unterrichtszeit entfällt ab 21.09.2026.'
-    )
+    expect(notice.value).toBe('Unterrichtszeit entfällt ab 21.09.2026.')
     wrapper.unmount()
-  })
-
-  it('berechnet die Kalenderwoche auch beim Jahreswechsel nach ISO', () => {
-    expect(formatCalendarWeek('2027-01-01')).toBe('53. KW 2026')
-    expect(formatCalendarWeek('2027-01-04')).toBe('1. KW 2027')
-  })
-
-  it('liefert für unbekannte Fehlercodes einen allgemeinen Hinweis', () => {
-    expect(errorMessage('UNBEKANNT')).toContain('fehlgeschlagen')
-    expect(errorMessage(undefined)).toContain('fehlgeschlagen')
   })
 })

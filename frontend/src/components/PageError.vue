@@ -46,10 +46,10 @@ watch(
   justify-items: start;
   gap: 8px;
   padding: 10px 12px;
-  border: 1px solid #f0b4b4;
+  border: 1px solid var(--danger-line);
   border-radius: 8px;
-  background: #fff2f2;
-  color: #8c3038;
+  background: var(--danger-soft);
+  color: var(--danger);
   font-size: 0.9rem;
   overflow-wrap: anywhere;
 }
