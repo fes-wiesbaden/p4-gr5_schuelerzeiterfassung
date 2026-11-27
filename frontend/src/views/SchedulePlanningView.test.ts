@@ -86,6 +86,14 @@ describe('SchedulePlanningView', () => {
 
   beforeEach(() => {
     vi.stubGlobal('fetch', fetchMock)
+    vi.stubGlobal(
+      'ResizeObserver',
+      class {
+        observe() {}
+        unobserve() {}
+        disconnect() {}
+      }
+    )
   })
 
   afterEach(() => {
@@ -140,6 +148,7 @@ describe('SchedulePlanningView', () => {
     expect(wrapper.text()).toContain('Schuljahr 2026/27')
     expect(wrapper.text()).not.toContain('Regelstundenplan')
     expect(wrapper.text()).not.toContain('Stundenpläne bearbeiten')
+    expect(wrapper.find('[role="tablist"]').exists()).toBe(false)
     wrapper.unmount()
   })
 
@@ -231,17 +240,50 @@ describe('SchedulePlanningView', () => {
     }
   })
 
-  it('zeigt Slots, Blöcke mit Klassen und das berechnete Löschdatum', async () => {
+  it('startet mit dem Stundenplan und zeigt jeweils nur den gewählten Planungsbereich', async () => {
     fetchMock.mockResolvedValue(respond(200, overview))
     const wrapper = mountAs('admin')
-    await flushPromises()
+    try {
+      await flushPromises()
 
-    expect(fetchMock).toHaveBeenCalledWith('/api/planning', expect.anything())
-    expect(wrapper.text()).toContain('Montag')
-    expect(wrapper.text()).toContain('07:30')
-    expect(wrapper.text()).toContain('R01')
-    expect(wrapper.text()).toContain('30.06.2027')
-    expect(wrapper.text()).toContain('KL-A')
+      expect(fetchMock).toHaveBeenCalledWith('/api/planning', expect.anything())
+      const tabs = wrapper.findAll('[role="tab"]')
+      const panels = wrapper.findAll('[role="tabpanel"]')
+      expect(tabs.map((tab) => tab.text())).toEqual([
+        'Stundenplan',
+        'Blockplan',
+        'Klassenplanung'
+      ])
+      expect(tabs[0]?.attributes('aria-selected')).toBe('true')
+      expect(panels.map((panel) => panel.isVisible())).toEqual([
+        true,
+        false,
+        false
+      ])
+      expect(panels[0]?.text()).toContain('Montag')
+      expect(panels[0]?.text()).toContain('07:30')
+      expect(panels[0]?.text()).toContain('R01')
+
+      await tabs[1]?.trigger('click')
+      expect(panels.map((panel) => panel.isVisible())).toEqual([
+        false,
+        true,
+        false
+      ])
+      expect(panels[1]?.text()).toContain('30.06.2027')
+      expect(panels[1]?.text()).toContain('KL-A')
+
+      await tabs[2]?.trigger('click')
+      expect(panels.map((panel) => panel.isVisible())).toEqual([
+        false,
+        false,
+        true
+      ])
+      expect(panels[2]?.text()).toContain('Block zuordnen')
+      expect(fetchMock).toHaveBeenCalledTimes(1)
+    } finally {
+      wrapper.unmount()
+    }
   })
 
   it('bietet zur Zuordnung nur noch nicht zugeordnete Blöcke des aktuellen Plans an', async () => {
@@ -249,6 +291,7 @@ describe('SchedulePlanningView', () => {
     const wrapper = mountAs('admin')
     await flushPromises()
 
+    await wrapper.findAll('[role="tab"]')[2]!.trigger('click')
     const options = wrapper
       .findAll('form')
       .find((form) => form.text().includes('Block zuordnen'))!
@@ -256,6 +299,7 @@ describe('SchedulePlanningView', () => {
     expect(
       options.map((option) => [option.element.value, option.text()])
     ).toEqual([['2', '21.09.2026 – 25.09.2026']])
+    wrapper.unmount()
   })
 
   it('zeigt den Konflikt des Backends als verständliche Meldung an', async () => {
@@ -295,6 +339,7 @@ describe('SchedulePlanningView', () => {
       'Die Unterrichtszeit überschneidet sich mit einer vorhandenen Unterrichtszeit dieses Stundenplans.'
     )
     expect(form.find('input[aria-label="Beginn"]').element.value).toBe('08:00')
+    wrapper.unmount()
   })
 
   it('füllt die Slotbearbeitung vor und zeigt den ersten geänderten Termin', async () => {
@@ -345,6 +390,7 @@ describe('SchedulePlanningView', () => {
     expect(wrapper.get('[role="status"]').text()).toBe(
       'Unterrichtszeit geändert ab 22.09.2026.'
     )
+    wrapper.unmount()
   })
 
   it('löscht zukünftige Termine erst nach Bestätigung', async () => {
@@ -376,6 +422,7 @@ describe('SchedulePlanningView', () => {
     expect(wrapper.get('[role="status"]').text()).toBe(
       'Unterrichtszeit entfällt ab 21.09.2026.'
     )
+    wrapper.unmount()
   })
 
   it('berechnet die Kalenderwoche auch beim Jahreswechsel nach ISO', () => {
