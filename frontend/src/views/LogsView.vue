@@ -100,7 +100,11 @@ function logTable<T>(kind: 'raw-scans' | 'audits', defaultSort: string) {
   }
 
   function filter() {
-    if (!input.from || !input.to || input.from > input.to) {
+    if (
+      !input.from ||
+      !input.to ||
+      input.from.slice(0, 16) > input.to.slice(0, 16)
+    ) {
       state.rangeError = 'Bitte einen gültigen Zeitraum wählen.'
       return
     }
