@@ -166,6 +166,24 @@ describe('LogsView', () => {
     wrapper.unmount()
   })
 
+  it('behält die Meldung zum ungültigen Zeitraum beim Sortieren', async () => {
+    const wrapper = await mountAs('lehrkraft')
+    const [from, to] = wrapper.findAll('input[type="datetime-local"]')
+    await from.setValue('2026-09-14T10:00')
+    await to.setValue('2026-09-14T09:00')
+    await wrapper.find('form').trigger('submit')
+    const header = wrapper
+      .findAll('th')
+      .find((element) => element.text().includes('RFID-UID'))!
+    await header.trigger('click')
+    await flushPromises()
+    expect(wrapper.get('[role="alert"]').text()).toContain('gültigen Zeitraum')
+    expect(urls().at(-1)!.searchParams.get('from')).toBe(
+      '2026-09-07T22:00:00.000Z'
+    )
+    wrapper.unmount()
+  })
+
   it('zeigt nur die Antwort der neuesten Anfrage', async () => {
     const wrapper = await mountAs('lehrkraft')
     let answerSlowRequest: (response: Response) => void = () => {}

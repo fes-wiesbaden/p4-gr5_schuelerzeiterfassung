@@ -6,14 +6,17 @@ import de.feswiesbaden.attendance.repository.LogRepository.LogQuery;
 import de.feswiesbaden.attendance.repository.LogRepository.Page;
 import de.feswiesbaden.attendance.repository.LogRepository.RawScanEntry;
 import de.feswiesbaden.attendance.service.LogService;
+import jakarta.validation.Valid;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
+import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 import java.time.Instant;
 import org.springframework.http.CacheControl;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.ModelAttribute;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -31,38 +34,53 @@ public class LogController {
     this.logs = logs;
   }
 
+  /** Gemeinsame Filter- und Seitenparameter beider Logs, fehlende Werte erhalten Standardwerte */
+  public record LogParams(
+      @NotNull Instant from,
+      @NotNull Instant to,
+      @Size(max = 100) String search,
+      @Pattern(regexp = "asc|desc") String direction,
+      @Min(0) Integer page,
+      @Min(1) @Max(100) Integer size) {
+    public LogParams {
+      direction = direction == null ? "desc" : direction;
+      page = page == null ? 0 : page;
+      size = size == null ? 25 : size;
+    }
+
+    LogQuery toQuery(String sort) {
+      return new LogQuery(from, to, search, sort, direction.equals("asc"), page, size);
+    }
+
+    /** Der Suchbegriff kann eine UID sein und bleibt deshalb aus technischen Logs heraus */
+    @Override
+    public String toString() {
+      return "LogParams[page=" + page + "]";
+    }
+  }
+
   /** Rohscans enthalten Kartenkennungen und werden deshalb nicht im Browser zwischengespeichert */
   @GetMapping("/raw-scans")
   public ResponseEntity<Page<RawScanEntry>> rawScans(
-      @RequestParam Instant from,
-      @RequestParam Instant to,
-      @RequestParam(required = false) @Size(max = 100) String search,
+      @Valid @ModelAttribute LogParams params,
       @RequestParam(defaultValue = "scannedAt")
           @Pattern(regexp = "scannedAt|rfidUid|student|classCode")
-          String sort,
-      @RequestParam(defaultValue = "desc") @Pattern(regexp = "asc|desc") String direction,
-      @RequestParam(defaultValue = "0") @Min(0) int page,
-      @RequestParam(defaultValue = "25") @Min(1) @Max(100) int size) {
-    var query = new LogQuery(from, to, search, sort, direction.equals("asc"), page, size);
-    return ResponseEntity.ok().cacheControl(CacheControl.noStore()).body(logs.rawScans(query));
+          String sort) {
+    return ResponseEntity.ok()
+        .cacheControl(CacheControl.noStore())
+        .body(logs.rawScans(params.toQuery(sort)));
   }
 
   /** Änderungsprotokoll, optional auf einen Ereignistyp beschränkt */
   @GetMapping("/audits")
   public ResponseEntity<Page<AuditEntry>> audits(
-      @RequestParam Instant from,
-      @RequestParam Instant to,
+      @Valid @ModelAttribute LogParams params,
       @RequestParam(required = false) AuditEventType eventType,
-      @RequestParam(required = false) @Size(max = 100) String search,
       @RequestParam(defaultValue = "occurredAt")
           @Pattern(regexp = "occurredAt|eventType|student|actor")
-          String sort,
-      @RequestParam(defaultValue = "desc") @Pattern(regexp = "asc|desc") String direction,
-      @RequestParam(defaultValue = "0") @Min(0) int page,
-      @RequestParam(defaultValue = "25") @Min(1) @Max(100) int size) {
-    var query = new LogQuery(from, to, search, sort, direction.equals("asc"), page, size);
+          String sort) {
     return ResponseEntity.ok()
         .cacheControl(CacheControl.noStore())
-        .body(logs.audits(query, eventType));
+        .body(logs.audits(params.toQuery(sort), eventType));
   }
 }

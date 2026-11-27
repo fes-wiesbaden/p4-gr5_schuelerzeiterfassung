@@ -63,7 +63,9 @@ function logTable<T>(kind: 'raw-scans' | 'audits', defaultSort: string) {
     rows: [] as T[],
     total: 0,
     loading: false,
-    error: ''
+    error: '',
+    // Bleibt beim Blättern stehen, solange der eingegebene Zeitraum ungültig ist
+    rangeError: ''
   })
   // Nur die Antwort der neuesten Anfrage wird angezeigt
   let latest = 0
@@ -98,9 +100,10 @@ function logTable<T>(kind: 'raw-scans' | 'audits', defaultSort: string) {
 
   function filter() {
     if (!input.from || !input.to || input.from > input.to) {
-      state.error = 'Bitte einen gültigen Zeitraum wählen.'
+      state.rangeError = 'Bitte einen gültigen Zeitraum wählen.'
       return
     }
+    state.rangeError = ''
     applied = { ...input }
     state.first = 0
     load()
@@ -132,10 +135,6 @@ function openTab(value: string | number) {
     auditsOpened = true
     audits.load()
   }
-}
-
-function eventLabel(type: AuditEntry['eventType']): string {
-  return EVENT_LABELS[type]
 }
 
 function statusLabel(status: string | null): string {
@@ -177,8 +176,12 @@ function signed(value: number): string {
               placeholder="Schüler, Klasse oder RFID-UID"
               @submit="scans.filter"
             />
-            <p v-if="scans.state.error" class="logs__error" role="alert">
-              {{ scans.state.error }}
+            <p
+              v-if="scans.state.rangeError || scans.state.error"
+              class="logs__error"
+              role="alert"
+            >
+              {{ scans.state.rangeError || scans.state.error }}
             </p>
             <DataTable
               :value="scans.state.rows"
@@ -238,8 +241,12 @@ function signed(value: number): string {
                 />
               </label>
             </LogFilterForm>
-            <p v-if="audits.state.error" class="logs__error" role="alert">
-              {{ audits.state.error }}
+            <p
+              v-if="audits.state.rangeError || audits.state.error"
+              class="logs__error"
+              role="alert"
+            >
+              {{ audits.state.rangeError || audits.state.error }}
             </p>
             <DataTable
               :value="audits.state.rows"
@@ -263,7 +270,7 @@ function signed(value: number): string {
               </Column>
               <Column field="eventType" header="Ereignis" sortable>
                 <template #body="{ data }">
-                  {{ eventLabel(data.eventType) }}
+                  {{ EVENT_LABELS[data.eventType] }}
                 </template>
               </Column>
               <Column field="actor" header="Ausgelöst von" sortable />

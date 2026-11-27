@@ -9,6 +9,7 @@ import java.time.ZoneOffset;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Stream;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 
@@ -84,6 +85,10 @@ public class LogRepository {
     public String toString() {
       return "LogQuery[sort=" + sort + ", page=" + page + "]";
     }
+
+    long offset() {
+      return (long) page * size;
+    }
   }
 
   /** Rohscan mit dem Schüler, dem die Karte aktuell zugeordnet ist */
@@ -131,7 +136,7 @@ public class LogRepository {
                 + " CONCAT(s.last_name, ', ', s.first_name) AS student_name"
                 + RAW_SCAN_FROM
                 + order(RAW_SCAN_SORT, query, "r.scan_id"),
-            statement -> bind(statement, params, query),
+            statement -> setParams(statement, params, query.size(), query.offset()),
             (row, index) ->
                 new RawScanEntry(
                     row.getString("scan_id"),
@@ -158,7 +163,7 @@ public class LogRepository {
                 + " AS actor"
                 + AUDIT_FROM
                 + order(AUDIT_SORT, query, "a.id"),
-            statement -> bind(statement, params, query),
+            statement -> setParams(statement, params, query.size(), query.offset()),
             (row, index) ->
                 new AuditEntry(
                     row.getLong("id"),
@@ -184,17 +189,12 @@ public class LogRepository {
         });
   }
 
-  private static void bind(PreparedStatement statement, List<Object> params, LogQuery query)
+  /** Bindet die Filterwerte und hängt bei Seitenabfragen LIMIT und OFFSET an */
+  private static void setParams(PreparedStatement statement, List<Object> params, Object... paging)
       throws SQLException {
-    setParams(statement, params);
-    statement.setInt(params.size() + 1, query.size());
-    statement.setLong(params.size() + 2, (long) query.page() * query.size());
-  }
-
-  private static void setParams(PreparedStatement statement, List<Object> params)
-      throws SQLException {
-    for (int i = 0; i < params.size(); i++) {
-      statement.setObject(i + 1, params.get(i));
+    var values = Stream.concat(params.stream(), Arrays.stream(paging)).toList();
+    for (int i = 0; i < values.size(); i++) {
+      statement.setObject(i + 1, values.get(i));
     }
   }
 

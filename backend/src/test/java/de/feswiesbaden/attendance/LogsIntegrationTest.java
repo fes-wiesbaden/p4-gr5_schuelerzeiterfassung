@@ -182,6 +182,9 @@ class LogsIntegrationTest {
         "/api/logs/raw-scans" + RANGE + "&sort=scan_id;DROP",
         "/api/logs/raw-scans" + RANGE + "&direction=sideways",
         "/api/logs/raw-scans" + RANGE + "&size=1000",
+        "/api/logs/raw-scans" + RANGE + "&page=-1",
+        "/api/logs/raw-scans?to=2026-09-15T00:00:00Z",
+        "/api/logs/raw-scans?from=gestern&to=2026-09-15T00:00:00Z",
         "/api/logs/audits" + RANGE + "&eventType=UNKNOWN"
       })
   void rejectsInvalidQueries(String url) throws Exception {
