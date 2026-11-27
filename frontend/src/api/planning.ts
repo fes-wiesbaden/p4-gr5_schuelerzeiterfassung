@@ -144,8 +144,10 @@ export async function expectOk(response: Response): Promise<Response> {
   throw new Error(errorMessage(code))
 }
 
-export async function loadOverview(): Promise<PlanningOverview> {
-  const response = await expectOk(await getJson('/api/planning'))
+export async function loadOverview(
+  signal?: AbortSignal
+): Promise<PlanningOverview> {
+  const response = await expectOk(await getJson('/api/planning', signal))
   return (await response.json()) as PlanningOverview
 }
 

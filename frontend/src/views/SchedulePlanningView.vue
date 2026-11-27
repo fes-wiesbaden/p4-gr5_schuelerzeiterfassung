@@ -53,6 +53,7 @@ const errorMessage = computed(() => loadError.value || actionError.value)
 const errorRevision = ref(0)
 const busy = ref(false)
 const feedback = ref('')
+let overviewRequest: AbortController | undefined
 
 const selectedTimetableId = ref<number | null>(null)
 const selectedBlockPlanId = ref<number | null>(null)
@@ -99,11 +100,40 @@ const classTimetable = computed(() =>
   )
 )
 // Nur Blöcke des aktuellen Blockplans, denen die Klasse noch nicht zugeordnet ist
-const assignableBlocks = computed(
-  () =>
-    classPlan.value?.blocks.filter(
-      (block) => !block.classIds.includes(selectedClassId.value ?? -1)
-    ) ?? []
+const blockOptions = computed(() => {
+  const schoolClass = selectedClass.value
+  const planning = overview.value
+  if (!schoolClass || !planning || !classPlan.value) return []
+
+  const otherClassPlans = new Map(
+    planning.classes
+      .filter(
+        (other) =>
+          other.id !== schoolClass.id &&
+          other.timetableId === schoolClass.timetableId
+      )
+      .map((other) => [other.id, other.blockPlanId])
+  )
+  const occupiedBlocks = planning.blockPlans.flatMap((plan) =>
+    plan.blocks.filter((block) =>
+      block.classIds.some((id) => otherClassPlans.get(id) === plan.id)
+    )
+  )
+
+  return classPlan.value.blocks
+    .filter((block) => !block.classIds.includes(schoolClass.id))
+    .map((block) => ({
+      ...block,
+      timetableConflict: occupiedBlocks.some(
+        (other) =>
+          other.startsOn <= block.endsOn && other.endsOn >= block.startsOn
+      )
+    }))
+})
+const selectedBlock = computed(() =>
+  blockOptions.value.find(
+    (block) => block.id === assignmentForm.blockId && !block.timetableConflict
+  )
 )
 // Folgepläne müssen nach dem Ende des aktuellen Blockplans beginnen
 const nextPlanCandidates = computed(
@@ -125,13 +155,19 @@ function weekdayLabel(weekday: Weekday): string {
 }
 
 async function refresh() {
+  overviewRequest?.abort()
+  const request = new AbortController()
+  overviewRequest = request
   try {
-    overview.value = await loadOverview()
+    const result = await loadOverview(request.signal)
+    if (request.signal.aborted) return
+    overview.value = result
     loadError.value = ''
     selectedTimetableId.value ??= overview.value.timetables[0]?.id ?? null
     selectedBlockPlanId.value ??= overview.value.blockPlans[0]?.id ?? null
     selectedClassId.value ??= overview.value.classes[0]?.id ?? null
   } catch (error) {
+    if (request.signal.aborted) return
     loadError.value =
       error instanceof Error
         ? error.message
@@ -271,13 +307,13 @@ async function submitBlock() {
 
 async function submitAssignment() {
   const schoolClass = selectedClass.value
-  const blockId = assignmentForm.blockId
-  if (!schoolClass || blockId === null) {
+  const block = selectedBlock.value
+  if (!schoolClass || !block) {
     return
   }
   if (
     await run(async () => {
-      await assignBlock(schoolClass.id, blockId)
+      await assignBlock(schoolClass.id, block.id)
       return `Klasse ${schoolClass.classCode} dem Block zugeordnet.`
     })
   ) {
@@ -340,7 +376,10 @@ onMounted(() => {
     window.addEventListener('management:changed', refresh)
   }
 })
-onUnmounted(() => window.removeEventListener('management:changed', refresh))
+onUnmounted(() => {
+  overviewRequest?.abort()
+  window.removeEventListener('management:changed', refresh)
+})
 </script>
 
 <template>
@@ -681,22 +720,26 @@ onUnmounted(() => window.removeEventListener('management:changed', refresh))
                     <select
                       v-model="assignmentForm.blockId"
                       required
-                      :disabled="!assignableBlocks.length"
+                      :disabled="!blockOptions.length"
                     >
                       <option
-                        v-for="block in assignableBlocks"
+                        v-for="block in blockOptions"
                         :key="block.id"
                         :value="block.id"
+                        :disabled="block.timetableConflict"
                       >
                         {{ formatDate(block.startsOn) }} –
                         {{ formatDate(block.endsOn) }}
+                        {{
+                          block.timetableConflict ? '· Stundenplan belegt' : ''
+                        }}
                       </option>
                     </select>
                   </label>
                   <Button
                     type="submit"
                     label="Zuordnen"
-                    :disabled="busy || assignmentForm.blockId === null"
+                    :disabled="busy || !selectedBlock"
                   />
                 </form>
 

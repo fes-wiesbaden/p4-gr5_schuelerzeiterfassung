@@ -292,19 +292,61 @@ describe('SchedulePlanningView', () => {
     }
   })
 
-  it('bietet zur Zuordnung nur noch nicht zugeordnete Blöcke des aktuellen Plans an', async () => {
-    fetchMock.mockResolvedValue(respond(200, overview))
+  it('lässt freie Blöcke zu und sperrt Überschneidungen desselben Stundenplans', async () => {
+    const [ownPlan, otherPlan] = overview.blockPlans
+    const planning: PlanningOverview = {
+      ...overview,
+      classes: [
+        ...overview.classes,
+        { id: 2, classCode: 'KL-B', blockPlanId: 2, timetableId: 1 }
+      ],
+      blockPlans: [
+        {
+          ...ownPlan!,
+          blocks: [
+            ...ownPlan!.blocks,
+            {
+              id: 4,
+              startsOn: '2026-09-28',
+              endsOn: '2026-10-05',
+              classIds: []
+            }
+          ]
+        },
+        {
+          ...otherPlan!,
+          blocks: [{ ...otherPlan!.blocks[0]!, classIds: [2] }]
+        }
+      ]
+    }
+    fetchMock
+      .mockResolvedValueOnce(respond(200, planning))
+      .mockResolvedValueOnce(new Response(null, { status: 204 }))
+      .mockResolvedValueOnce(respond(200, planning))
     const wrapper = mountAs('admin')
     await flushPromises()
 
     await wrapper.findAll('[role="tab"]')[2]!.trigger('click')
-    const options = wrapper
+    const form = wrapper
       .findAll('form')
       .find((form) => form.text().includes('Block zuordnen'))!
-      .findAll('option')
+    const select = form.get('select')
+    const options = select.findAll('option')
     expect(
-      options.map((option) => [option.element.value, option.text()])
-    ).toEqual([['2', '21.09.2026 – 25.09.2026']])
+      options.map((option) => [option.element.value, option.element.disabled])
+    ).toEqual([
+      ['2', false],
+      ['4', true]
+    ])
+    expect(options[1]?.text()).toContain('Stundenplan belegt')
+    await select.setValue('2')
+    await form.trigger('submit')
+    await flushPromises()
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      '/api/planning/classes/1/blocks',
+      expect.objectContaining({ method: 'POST', body: '{"blockId":2}' })
+    )
     wrapper.unmount()
   })
 
@@ -371,6 +413,40 @@ describe('SchedulePlanningView', () => {
       wrapper.unmount()
     }
   })
+
+  it.each([200, 500])(
+    'ignoriert eine überholte Planungsantwort mit HTTP %i',
+    async (status) => {
+      let finishOldRequest!: (response: Response) => void
+      const oldRequest = new Promise<Response>((resolve) => {
+        finishOldRequest = resolve
+      })
+      const latest = {
+        ...overview,
+        timetables: [{ ...overview.timetables[0]!, name: 'Aktueller Plan' }]
+      }
+      const scrollTo = vi.spyOn(window, 'scrollTo').mockImplementation(() => {})
+      fetchMock
+        .mockReturnValueOnce(oldRequest)
+        .mockResolvedValueOnce(respond(200, latest))
+
+      const wrapper = mountAs('admin', document.body)
+      try {
+        window.dispatchEvent(new Event('management:changed'))
+        await flushPromises()
+        expect(fetchMock.mock.calls[0]?.[1].signal.aborted).toBe(true)
+        expect(wrapper.text()).toContain('Aktueller Plan')
+
+        finishOldRequest(respond(status, overview))
+        await flushPromises()
+        expect(wrapper.text()).toContain('Aktueller Plan')
+        expect(wrapper.find('[role="alert"]').exists()).toBe(false)
+        expect(scrollTo).not.toHaveBeenCalled()
+      } finally {
+        wrapper.unmount()
+      }
+    }
+  )
 
   it('füllt die Slotbearbeitung vor und zeigt den ersten geänderten Termin', async () => {
     fetchMock
