@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import PageError from '@/components/PageError.vue'
 import { ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import Button from 'primevue/button'
@@ -48,6 +49,7 @@ async function handleSubmit() {
         </div>
         <form class="login__form" @submit.prevent="handleSubmit">
           <h1>Anmelden</h1>
+          <PageError :message="auth.errorMessage" />
 
           <div class="login__field">
             <label for="login-username">Benutzername</label>
@@ -89,10 +91,6 @@ async function handleSubmit() {
               />
             </div>
           </div>
-
-          <p v-if="auth.errorMessage" class="login__error" role="alert">
-            {{ auth.errorMessage }}
-          </p>
 
           <Button
             type="submit"
@@ -196,15 +194,6 @@ async function handleSubmit() {
 .login__field label {
   font-size: 0.85rem;
   font-weight: 650;
-}
-
-.login__error {
-  margin: 0;
-  padding: 10px 12px;
-  border-radius: 8px;
-  background: #fff2f2;
-  color: #8c3038;
-  font-size: 0.85rem;
 }
 
 .login__submit {

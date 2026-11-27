@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed, nextTick, ref, watch } from 'vue'
+import PageError, { pageErrorTarget } from '@/components/PageError.vue'
+import { provide, computed, nextTick, ref, watch } from 'vue'
 import { useRoute, type RouteLocationRaw } from 'vue-router'
 import AssistantCommandDraft from './AssistantCommandDraft.vue'
 import {
@@ -42,6 +43,8 @@ const scrollArea = ref<HTMLElement>()
 const messages = ref<TranscriptItem[]>([])
 const input = ref('')
 const error = ref('')
+const dialogErrors = ref<HTMLElement>()
+provide(pageErrorTarget, dialogErrors)
 const answering = ref(false)
 const draft = ref<ExcusalHint>()
 const draftVersion = ref(0)
@@ -275,6 +278,13 @@ function onCommandSaved(result: CommandResult, changed: boolean) {
           />
         </header>
 
+        <div ref="dialogErrors" class="assistant__errors" />
+        <PageError
+          v-if="availabilityError"
+          message="Der Chat konnte nicht geladen werden."
+        />
+        <PageError :message="error" />
+
         <div ref="scrollArea" class="assistant__scroll">
           <div
             v-if="!messages.length && !command && !draft"
@@ -302,13 +312,12 @@ function onCommandSaved(result: CommandResult, changed: boolean) {
               </button>
             </template>
             <template v-else>
-              <p v-if="availabilityError" role="alert">
-                Der Chat konnte nicht geladen werden.
-              </p>
-              <p v-else-if="demoEnabled === false">
+              <p v-if="demoEnabled === false && !availabilityError">
                 Der Chat ist zurzeit deaktiviert.
               </p>
-              <p v-else role="status">Klassenlotse wird geladen …</p>
+              <p v-else-if="!availabilityError" role="status">
+                Klassenlotse wird geladen …
+              </p>
               <RouterLink
                 v-for="item in quickLinks"
                 :key="item.routeName"
@@ -347,7 +356,6 @@ function onCommandSaved(result: CommandResult, changed: boolean) {
             <i class="pi pi-ellipsis-h" aria-hidden="true" /> Klassenlotse
             antwortet …
           </p>
-          <p v-if="error" class="assistant__error" role="alert">{{ error }}</p>
           <details
             v-if="!command && !draft && !answering"
             class="assistant__actions"
@@ -496,7 +504,7 @@ function onCommandSaved(result: CommandResult, changed: boolean) {
 
 .assistant__panel {
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr) auto;
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
   position: fixed;
   inset: auto max(16px, env(safe-area-inset-right))
     max(16px, env(safe-area-inset-bottom)) auto;
@@ -645,9 +653,10 @@ function onCommandSaved(result: CommandResult, changed: boolean) {
   overflow: hidden;
 }
 
-.assistant__error {
-  margin: 0;
-  font-size: 0.875rem;
+.assistant__errors:not(:empty) {
+  display: grid;
+  gap: 8px;
+  padding: 0 14px 8px;
 }
 
 .assistant__welcome p {
@@ -725,10 +734,6 @@ function onCommandSaved(result: CommandResult, changed: boolean) {
 
 .assistant__link i {
   font-size: 0.75rem;
-}
-
-.assistant__error {
-  color: #8c3038;
 }
 
 .assistant__composer {

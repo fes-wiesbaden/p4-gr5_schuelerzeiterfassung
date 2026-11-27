@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import PageError from '@/components/PageError.vue'
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import Button from 'primevue/button'
 import Checkbox from 'primevue/checkbox'
@@ -348,14 +349,12 @@ onUnmounted(() => classRequest.abort())
       <p v-if="loadingClasses || loadingStudents" role="status">
         Auswahl wird geladen …
       </p>
-      <p v-else-if="selectionError" class="excusal__error" role="alert">
-        {{ selectionError }}
-      </p>
+      <PageError v-else-if="selectionError" :message="selectionError" />
       <p v-else-if="!classes.length">Es sind keine Klassen verfügbar.</p>
       <p v-else-if="classId && !students.length">
         In dieser Klasse sind keine Personen erfasst.
       </p>
-      <p v-if="error" class="excusal__error" role="alert">{{ error }}</p>
+      <PageError :message="error" />
       <div class="excusal__actions">
         <Button
           type="submit"
@@ -490,10 +489,6 @@ form,
   display: flex;
   gap: 6px;
   flex-wrap: wrap;
-}
-
-.excusal__error {
-  color: #8c3038;
 }
 
 .excusal__preview {

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import PageError from '@/components/PageError.vue'
 import { computed, nextTick, onMounted, onUnmounted, ref } from 'vue'
 import Button from 'primevue/button'
 import InputText from 'primevue/inputtext'
@@ -263,7 +264,7 @@ onUnmounted(() => request.abort())
       <h3 tabindex="-1">{{ definition?.title ?? 'Aktion nicht verfügbar' }}</h3>
     </div>
     <p v-if="busy && !context" role="status">Auswahl wird geladen …</p>
-    <p v-if="error" class="command__error" role="alert">{{ error }}</p>
+    <PageError :message="error" />
 
     <div
       v-if="prepared"
@@ -495,8 +496,5 @@ dt {
 }
 dd {
   font-weight: 650;
-}
-.command__error {
-  color: #8c3038;
 }
 </style>
