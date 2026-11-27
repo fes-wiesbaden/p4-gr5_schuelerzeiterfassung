@@ -1,5 +1,6 @@
 package de.feswiesbaden.attendance;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
@@ -11,11 +12,14 @@ import java.util.List;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.system.CapturedOutput;
+import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.mock.web.MockHttpSession;
@@ -121,6 +125,15 @@ class LogsIntegrationTest {
         .andExpect(jsonPath("$.total").value(3))
         .andExpect(jsonPath("$.items.length()").value(1))
         .andExpect(jsonPath("$.items[0].rfidUid").value("UNBEKANNT-99"));
+  }
+
+  /** Weder Antwort noch gebundener Suchbegriff geben die UID in technischen Logs aus */
+  @Test
+  @ExtendWith({OutputCaptureExtension.class, RfidLoggingExtension.class})
+  void keepsUidOutOfTechnicalLogs(CapturedOutput output) throws Exception {
+    mvc.perform(get(RAW_SCANS + "&search=TEST-UID-002").session(staffSession("test.admin")))
+        .andExpect(jsonPath("$.items[0].rfidUid").value("TEST-UID-002"));
+    assertThat(output.getAll()).doesNotContain("TEST-UID-002", "Verspaetet");
   }
 
   /** Das Änderungsprotokoll bleibt Lehrkräften verschlossen */

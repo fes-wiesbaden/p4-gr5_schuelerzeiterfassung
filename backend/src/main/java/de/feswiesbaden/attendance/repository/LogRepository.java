@@ -64,7 +64,13 @@ public class LogRepository {
 
   /** Rohscan mit dem Schüler, dem die Karte aktuell zugeordnet ist */
   public record RawScanEntry(
-      String scanId, Instant scannedAt, String rfidUid, String student, String classCode) {}
+      String scanId, Instant scannedAt, String rfidUid, String student, String classCode) {
+    /** Hält UID und Schülerdaten aus der Textdarstellung für technische Logs heraus */
+    @Override
+    public String toString() {
+      return "RawScanEntry[scanId=" + scanId + "]";
+    }
+  }
 
   /** Protokolleintrag mit auslösendem Mitarbeiter oder Terminal */
   public record AuditEntry(
@@ -80,7 +86,13 @@ public class LogRepository {
       String oldStatus,
       String newStatus,
       int unexcusedMinutesDelta,
-      int excusedMinutesDelta) {}
+      int excusedMinutesDelta) {
+    /** Hält Schüler- und Mitarbeiterdaten aus der Textdarstellung für technische Logs heraus */
+    @Override
+    public String toString() {
+      return "AuditEntry[id=" + id + "]";
+    }
+  }
 
   /** Eine Seite der Ergebnisse und die Gesamtzahl aller Treffer */
   public record Page<T>(List<T> items, long total) {}
