@@ -22,8 +22,7 @@ const route = useRoute()
 const classes = ref<SchoolClass[]>()
 const classId = ref<number>()
 const date = ref(todayInBerlin())
-const view = ref<'week' | 'regular'>('week')
-const weekViewButton = ref<HTMLButtonElement>()
+const blockSelect = ref<HTMLSelectElement>()
 const schedule = ref<ClassSchedule>()
 const days = ref<ClassWeekDay[]>([])
 const classError = ref('')
@@ -95,23 +94,16 @@ function refreshWeek() {
 function jumpToBlock(startsOn: string) {
   if (!startsOn) return
   date.value = startsOn
-  view.value = 'week'
 }
 
 async function jumpToNextBlock() {
   if (!nextBlock.value) return
   jumpToBlock(nextBlock.value.startsOn)
   await nextTick()
-  weekViewButton.value?.focus()
+  blockSelect.value?.focus()
 }
 
-watch(
-  () => [route?.query.klasse, route?.query.datum],
-  () => {
-    useRouteSelection()
-    view.value = 'week'
-  }
-)
+watch(() => [route?.query.klasse, route?.query.datum], useRouteSelection)
 watch([classId, revision], async ([id], _previous, onCleanup) => {
   schedule.value = undefined
   scheduleError.value = ''
@@ -160,13 +152,10 @@ onUnmounted(() => {
     <header class="class-week__header">
       <div>
         <h2 id="class-week-title">Wochenstundenplan</h2>
-        <p
-          v-if="yearLabel || (view === 'week' && weekLabel)"
-          class="class-week__period"
-        >
+        <p v-if="yearLabel || weekLabel" class="class-week__period">
           <strong v-if="yearLabel">{{ yearLabel }}</strong>
-          <span v-if="view === 'week'">{{ weekLabel }}</span>
-          <span v-if="view === 'week' && days.length">
+          <span v-if="weekLabel">{{ weekLabel }}</span>
+          <span v-if="days.length">
             {{ formatDate(days[0]!.date) }} –
             {{ formatDate(days.at(-1)!.date) }}
           </span>
@@ -181,32 +170,12 @@ onUnmounted(() => {
         </select>
       </label>
     </header>
-    <div v-if="schedule" class="class-week__controls">
-      <div
-        class="class-week__views"
-        role="group"
-        aria-label="Stundenplanansicht"
-      >
-        <button
-          ref="weekViewButton"
-          type="button"
-          :aria-pressed="view === 'week'"
-          @click="view = 'week'"
-        >
-          Kalenderwoche
-        </button>
-        <button
-          type="button"
-          :aria-pressed="view === 'regular'"
-          @click="view = 'regular'"
-        >
-          Regelstundenplan
-        </button>
-      </div>
-      <label v-if="schedule.blocks.length">
+    <div v-if="schedule?.blocks.length" class="class-week__controls">
+      <label>
         Unterrichtsblock
         <select
-          :value="view === 'week' ? (weekBlock?.startsOn ?? '') : ''"
+          ref="blockSelect"
+          :value="weekBlock?.startsOn ?? ''"
           @change="jumpToBlock(($event.target as HTMLSelectElement).value)"
         >
           <option disabled value="">Block auswählen</option>
@@ -220,10 +189,7 @@ onUnmounted(() => {
         </select>
       </label>
     </div>
-    <div
-      v-if="view === 'week' && classes?.length"
-      class="class-week__navigation"
-    >
+    <div v-if="classes?.length" class="class-week__navigation">
       <Button
         type="button"
         icon="pi pi-chevron-left"
@@ -247,7 +213,7 @@ onUnmounted(() => {
       />
     </div>
     <p v-if="scheduleError" role="status">{{ scheduleError }}</p>
-    <div v-if="classError || (view === 'week' && weekError)" role="alert">
+    <div v-if="classError || weekError" role="alert">
       <p>{{ classError || weekError }}</p>
       <Button
         type="button"
@@ -256,24 +222,10 @@ onUnmounted(() => {
         @click="classError ? fetchClasses() : refreshWeek()"
       />
     </div>
-    <p v-else-if="!classes || (view === 'week' && loadingWeek)" role="status">
+    <p v-else-if="!classes || loadingWeek" role="status">
       Wochenstundenplan wird geladen …
     </p>
     <p v-else-if="!classes.length">Dir ist keine Klasse zugeordnet.</p>
-    <template v-else-if="view === 'regular' && schedule">
-      <p class="class-week__hint">
-        Dieses Wochenraster gilt in den Unterrichtsblöcken der Klasse.
-      </p>
-      <TimetableGrid
-        key="regular"
-        :days="schedule.regularWeek"
-        :periods="schedule.periods"
-        :caption="`Regelstundenplan für ${selectedClass?.classCode}`"
-      />
-    </template>
-    <p v-else-if="view === 'regular' && !scheduleError" role="status">
-      Regelstundenplan wird geladen …
-    </p>
     <p v-else-if="!date">Wähle ein Datum aus der gewünschten Woche.</p>
     <div
       v-else-if="days.length && schedule && !weekBlock"
@@ -292,7 +244,6 @@ onUnmounted(() => {
     </div>
     <TimetableGrid
       v-else-if="days.length"
-      key="week"
       :days="days"
       :periods="days[0]?.periods"
       :caption="`Wochenstundenplan für ${selectedClass?.classCode}`"
@@ -341,33 +292,6 @@ p {
   gap: 12px 20px;
 }
 
-.class-week__views {
-  display: inline-flex;
-  flex-wrap: wrap;
-  gap: 4px;
-  padding: 4px;
-  border-radius: 11px;
-  background: var(--paper);
-}
-
-.class-week__views button {
-  min-height: 40px;
-  padding: 5px 12px;
-  border: 0;
-  border-radius: 8px;
-  background: transparent;
-  color: var(--muted);
-  font: inherit;
-  font-size: 0.86rem;
-  font-weight: 650;
-  cursor: pointer;
-}
-
-.class-week__views button:is(:hover, [aria-pressed='true']) {
-  background: var(--accent-soft);
-  color: var(--accent-ink);
-}
-
 .class-week__break {
   display: grid;
   justify-items: start;
@@ -375,10 +299,6 @@ p {
   padding: 15px;
   border-radius: 10px;
   background: var(--paper);
-}
-
-.class-week__hint,
-.class-week__break {
   color: var(--muted);
   font-size: 0.875rem;
 }

@@ -271,8 +271,6 @@ export interface TeachingBlock {
 
 export interface ClassSchedule {
   schoolYear: number
-  periods: TimetablePeriod[]
-  regularWeek: { lessons: ScheduledLesson[] }[]
   blocks: TeachingBlock[]
 }
 

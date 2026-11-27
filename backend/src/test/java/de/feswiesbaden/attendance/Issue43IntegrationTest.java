@@ -136,16 +136,12 @@ class Issue43IntegrationTest {
   }
 
   @Test
-  void theSameSchoolYearTemplateAppliesToEveryAssignedBlockOnly() throws Exception {
+  void readsTheSchoolYearAndOnlyTheAssignedBlocks() throws Exception {
     jdbc.update("UPDATE block_plan SET ends_on = '2027-07-31' WHERE id = 1");
     jdbc.update(
         "INSERT INTO block_assignment (id, block_plan_id, starts_on, ends_on)"
             + " VALUES (3, 1, '2027-06-14', '2027-06-25')");
     jdbc.update("INSERT INTO class_block_assignment VALUES (1, 3)");
-    jdbc.update("UPDATE timetable_slot SET valid_until = '2027-08-01' WHERE id = 1");
-    jdbc.update(
-        "INSERT INTO timetable_slot (timetable_id, room_id, weekday, start_time, end_time, valid_from)"
-            + " VALUES (1, 1, 'MONTAG', '07:00:00', '09:00:00', '2027-08-01')");
     var teacher = staffSession("test.teacher.a");
     mvc.perform(get("/api/planning/classes/1/schedule")).andExpect(status().isUnauthorized());
     mvc.perform(get("/api/planning/classes/2/schedule").session(teacher))
@@ -153,8 +149,8 @@ class Issue43IntegrationTest {
     mvc.perform(get("/api/planning/classes/1/schedule").session(teacher))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.schoolYear").value(2026))
-        .andExpect(jsonPath("$.regularWeek.length()").value(5))
-        .andExpect(jsonPath("$.regularWeek[0].lessons[0].startsAt").value("07:30:00"))
+        .andExpect(jsonPath("$.regularWeek").doesNotExist())
+        .andExpect(jsonPath("$.periods").doesNotExist())
         .andExpect(jsonPath("$.blocks.length()").value(2))
         .andExpect(jsonPath("$.blocks[0].startsOn").value("2026-09-14"))
         .andExpect(jsonPath("$.blocks[1].startsOn").value("2027-06-14"));

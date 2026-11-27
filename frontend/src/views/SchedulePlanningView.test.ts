@@ -100,8 +100,6 @@ describe('SchedulePlanningView', () => {
       .mockResolvedValueOnce(
         respond(200, {
           schoolYear: 2026,
-          periods: [],
-          regularWeek: [],
           blocks: [{ startsOn: '2026-09-14', endsOn: '2026-09-18' }]
         })
       )
@@ -140,6 +138,7 @@ describe('SchedulePlanningView', () => {
     expect(wrapper.text()).toContain('Raum R01')
     expect(wrapper.text()).toContain('38. KW 2026')
     expect(wrapper.text()).toContain('Schuljahr 2026/27')
+    expect(wrapper.text()).not.toContain('Regelstundenplan')
     expect(wrapper.text()).not.toContain('Stundenpläne bearbeiten')
     wrapper.unmount()
   })
@@ -155,8 +154,6 @@ describe('SchedulePlanningView', () => {
       .mockResolvedValueOnce(
         respond(200, {
           schoolYear: 2026,
-          periods: [],
-          regularWeek: [],
           blocks: [{ startsOn: '2026-09-14', endsOn: '2026-09-18' }]
         })
       )
@@ -194,7 +191,7 @@ describe('SchedulePlanningView', () => {
     }
   })
 
-  it('zeigt die Jahresvorlage in einer blockfreien Woche und springt zum nächsten Block', async () => {
+  it('zeigt den Blockzeitraum und springt aus einer blockfreien Woche zum nächsten Block', async () => {
     const lessons = [
       {
         startsAt: '07:30',
@@ -207,8 +204,6 @@ describe('SchedulePlanningView', () => {
       .mockResolvedValueOnce(
         respond(200, {
           schoolYear: 2026,
-          periods: [],
-          regularWeek: [{ lessons }],
           blocks: [{ startsOn: '2026-09-28', endsOn: '2026-10-02' }]
         })
       )
@@ -220,17 +215,17 @@ describe('SchedulePlanningView', () => {
     try {
       await flushPromises()
       expect(wrapper.text()).toContain('kein Unterrichtsblock zugeordnet')
-      const mode = wrapper.get('.class-week__views button:last-child')
-      await mode.trigger('click')
-      expect(mode.attributes('aria-pressed')).toBe('true')
-      expect(wrapper.get('table').text()).toContain('Unterricht')
-      await wrapper.get('.class-week__controls select').setValue('2026-09-28')
+      expect(wrapper.get('.class-week__controls select').text()).toContain(
+        '28.09.2026 – 02.10.2026'
+      )
+      await wrapper.get('.class-week__break button').trigger('click')
       await flushPromises()
       expect(fetchMock.mock.lastCall?.[0]).toBe(
         '/api/planning/classes/1/week?date=2026-09-28'
       )
       expect(wrapper.text()).toContain('40. KW 2026')
       expect(wrapper.text()).not.toContain('kein Unterrichtsblock zugeordnet')
+      expect(wrapper.get('table').text()).toContain('Unterricht')
     } finally {
       wrapper.unmount()
     }

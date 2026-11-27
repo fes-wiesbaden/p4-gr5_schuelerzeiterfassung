@@ -69,7 +69,7 @@ public class PlanningController {
     return planning.readWeek(classId, date);
   }
 
-  /** Liefert das Wochenraster und die Unterrichtsblöcke einer zugänglichen Klasse. */
+  /** Liefert Schuljahr und Unterrichtsblöcke einer zugänglichen Klasse. */
   @GetMapping("/classes/{classId}/schedule")
   public ClassSchedule schedule(@PathVariable Long classId) {
     return planning.readSchedule(classId);
