@@ -4,7 +4,6 @@ import PrimeVue from 'primevue/config'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import LogsView from './LogsView.vue'
-import { berlinDayStart } from '@/api/logs'
 import { useAuthStore, type Role } from '@/stores/auth'
 
 const scans = {
@@ -28,10 +27,7 @@ const audits = {
       eventType: 'STATUS_CHANGE',
       student: 'Beispiel, Erika',
       classCode: 'KL-A',
-      staffName: 'Kraft, Lena',
-      staffUsername: 'l.kraft',
-      terminalId: null,
-      roomNumber: null,
+      actor: 'Kraft, Lena (l.kraft)',
       oldStatus: 'ANWESEND',
       newStatus: 'ENTSCHULDIGT',
       unexcusedMinutesDelta: -60,
@@ -50,7 +46,12 @@ describe('LogsView', () => {
     // 08:00 Berliner Sommerzeit
     vi.setSystemTime(new Date('2026-09-14T06:00:00Z'))
     vi.stubGlobal('fetch', fetchMock)
-    // jsdom kennt keinen ResizeObserver, den die Reiterleiste für ihre Markierung nutzt
+    // jsdom kennt weder ResizeObserver (Reiterleiste) noch matchMedia (Auswahlfeld)
+    vi.stubGlobal('matchMedia', () => ({
+      matches: false,
+      addEventListener() {},
+      removeEventListener() {}
+    }))
     vi.stubGlobal(
       'ResizeObserver',
       class {
@@ -100,15 +101,19 @@ describe('LogsView', () => {
     wrapper.unmount()
   })
 
-  it('zeigt Administratoren, welche Lehrkraft einen Eintrag ausgelöst hat', async () => {
+  it('lädt die Audit-Logs erst beim Öffnen ihres Reiters', async () => {
     const wrapper = await mountAs('admin')
+    expect(urls().map((url) => url.pathname)).toEqual(['/api/logs/raw-scans'])
 
-    expect(wrapper.text()).toContain('Audit-Logs')
-    expect(urls().map((url) => url.pathname)).toContain('/api/logs/audits')
     const tab = wrapper
       .findAll('[role="tab"]')
       .find((element) => element.text() === 'Audit-Logs')!
     await tab.trigger('click')
+    await flushPromises()
+    expect(urls().map((url) => url.pathname)).toEqual([
+      '/api/logs/raw-scans',
+      '/api/logs/audits'
+    ])
     expect(wrapper.text()).toContain('Kraft, Lena (l.kraft)')
     expect(wrapper.text()).toContain('unentschuldigt -60, entschuldigt +60')
     wrapper.unmount()
@@ -116,7 +121,7 @@ describe('LogsView', () => {
 
   it('sendet Suche und Sortierung an das Backend und beginnt wieder bei Seite 1', async () => {
     const wrapper = await mountAs('lehrkraft')
-    await wrapper.find('.logs__search input').setValue(' Erika ')
+    await wrapper.find('.log-filter__search input').setValue(' Erika ')
     await wrapper.find('form').trigger('submit')
     await flushPromises()
     expect(urls().at(-1)!.searchParams.get('search')).toBe('Erika')
@@ -130,13 +135,5 @@ describe('LogsView', () => {
     expect(params.get('sort')).toBe('rfidUid')
     expect(params.get('page')).toBe('0')
     wrapper.unmount()
-  })
-
-  it.each([
-    ['2026-01-15', '2026-01-14T23:00:00.000Z'],
-    ['2026-03-29', '2026-03-28T23:00:00.000Z'],
-    ['2026-03-30', '2026-03-29T22:00:00.000Z']
-  ])('berechnet den Beginn des Berliner Tags %s', (day, start) => {
-    expect(berlinDayStart(day)).toBe(start)
   })
 })

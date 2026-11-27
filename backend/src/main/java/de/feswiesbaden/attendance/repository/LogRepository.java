@@ -1,11 +1,11 @@
 package de.feswiesbaden.attendance.repository;
 
+import de.feswiesbaden.attendance.enums.AuditEventType;
 import java.sql.PreparedStatement;
 import java.sql.SQLException;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
-import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
@@ -15,21 +15,30 @@ import org.springframework.stereotype.Repository;
 /** Liest Rohscans und Änderungsprotokoll gefiltert, sortiert und seitenweise */
 @Repository
 public class LogRepository {
-  /** Erlaubte Sortierschlüssel der Rohscans, damit kein Anfragewert ins SQL gelangt */
-  public static final Map<String, String> RAW_SCAN_SORT =
+  /** Erlaubte Sortierschlüssel, damit kein Anfragewert ins SQL gelangt */
+  private static final Map<String, String> RAW_SCAN_SORT =
       Map.of(
           "scannedAt", "r.scanned_at",
           "rfidUid", "r.rfid_uid",
           "student", "student_name",
           "classCode", "c.class_code");
 
-  /** Erlaubte Sortierschlüssel des Änderungsprotokolls */
-  public static final Map<String, String> AUDIT_SORT =
+  private static final Map<String, String> AUDIT_SORT =
       Map.of(
           "occurredAt", "a.occurred_at",
           "eventType", "a.event_type",
           "student", "student_name",
-          "actor", "actor_name");
+          "actor", "actor");
+
+  // "Nachname, Vorname Nachname" findet beide Schreibweisen mit einem einzigen LIKE
+  private static final String STUDENT_SEARCH =
+      "CONCAT(s.last_name, ', ', s.first_name, ' ', s.last_name)";
+
+  private static final String ACTOR =
+      """
+      COALESCE(CONCAT(st.last_name, ', ', st.first_name, ' (', st.username, ')'),
+               CONCAT('Terminal ', a.terminal_id, ' (Raum ', rm.room_number, ')'), 'System')
+      """;
 
   private static final String RAW_SCAN_FROM =
       """
@@ -37,9 +46,9 @@ public class LogRepository {
        LEFT JOIN student s ON s.rfid_uid = r.rfid_uid
        LEFT JOIN school_class c ON c.id = s.school_class_id
        WHERE r.scanned_at >= ? AND r.scanned_at < ?
-         AND (? IS NULL OR r.rfid_uid LIKE ? OR CONCAT(s.last_name, ', ', s.first_name) LIKE ?
-              OR c.class_code LIKE ?)
-      """;
+         AND (? IS NULL OR CONCAT_WS(' | ', r.rfid_uid, %s, c.class_code) LIKE ?)
+      """
+          .formatted(STUDENT_SEARCH);
 
   private static final String AUDIT_FROM =
       """
@@ -51,15 +60,25 @@ public class LogRepository {
        LEFT JOIN room rm ON rm.id = t.room_id
        WHERE a.occurred_at >= ? AND a.occurred_at < ?
          AND (? IS NULL OR a.event_type = ?)
-         AND (? IS NULL OR CONCAT(s.last_name, ', ', s.first_name) LIKE ?
-              OR CONCAT(st.last_name, ', ', st.first_name) LIKE ? OR st.username LIKE ?
-              OR c.class_code LIKE ?)
-      """;
+         AND (? IS NULL OR CONCAT_WS(' | ', %s, c.class_code, %s,
+                                     CONCAT(st.first_name, ' ', st.last_name)) LIKE ?)
+      """
+          .formatted(STUDENT_SEARCH, ACTOR);
 
   private final JdbcTemplate jdbc;
 
   public LogRepository(JdbcTemplate jdbc) {
     this.jdbc = jdbc;
+  }
+
+  /** Filter-, Sortier- und Seitenangaben einer Logabfrage */
+  public record LogQuery(
+      Instant from, Instant to, String search, String sort, boolean ascending, int page, int size) {
+    /** Der Suchbegriff kann eine UID sein und bleibt deshalb aus technischen Logs heraus */
+    @Override
+    public String toString() {
+      return "LogQuery[sort=" + sort + ", page=" + page + "]";
+    }
   }
 
   /** Rohscan mit dem Schüler, dem die Karte aktuell zugeordnet ist */
@@ -72,17 +91,14 @@ public class LogRepository {
     }
   }
 
-  /** Protokolleintrag mit auslösendem Mitarbeiter oder Terminal */
+  /** Protokolleintrag mit auslösender Lehrkraft, auslösendem Terminal oder System */
   public record AuditEntry(
       Long id,
       Instant occurredAt,
       String eventType,
       String student,
       String classCode,
-      String staffName,
-      String staffUsername,
-      Integer terminalId,
-      String roomNumber,
+      String actor,
       String oldStatus,
       String newStatus,
       int unexcusedMinutesDelta,
@@ -101,18 +117,16 @@ public class LogRepository {
    * Liefert Rohscans im Zeitraum. Suchbegriff und UID werden über den Setter gebunden, damit Spring
    * sie nicht im JDBC-Trace ausgibt
    */
-  public Page<RawScanEntry> findRawScans(
-      Instant from, Instant to, String search, String sortColumn, boolean asc, int size, int page) {
-    var like = like(search);
-    var params = new ArrayList<Object>(Arrays.asList(utc(from), utc(to), like, like, like, like));
-    Long total = count(RAW_SCAN_FROM, params);
+  public Page<RawScanEntry> findRawScans(LogQuery query) {
+    var like = like(query.search());
+    var params = Arrays.<Object>asList(utc(query.from()), utc(query.to()), like, like);
     var items =
         jdbc.query(
             "SELECT r.scan_id, r.scanned_at, r.rfid_uid, c.class_code,"
                 + " CONCAT(s.last_name, ', ', s.first_name) AS student_name"
                 + RAW_SCAN_FROM
-                + order(sortColumn, asc, "r.scan_id"),
-            statement -> bind(statement, params, size, page),
+                + order(RAW_SCAN_SORT, query, "r.scan_id"),
+            statement -> bind(statement, params, query),
             (row, index) ->
                 new RawScanEntry(
                     row.getString("scan_id"),
@@ -120,36 +134,26 @@ public class LogRepository {
                     row.getString("rfid_uid"),
                     row.getString("student_name"),
                     row.getString("class_code")));
-    return new Page<>(items, total);
+    return new Page<>(items, count(RAW_SCAN_FROM, params));
   }
 
   /** Liefert Protokolleinträge im Zeitraum, optional auf einen Ereignistyp beschränkt */
-  public Page<AuditEntry> findAudits(
-      Instant from,
-      Instant to,
-      String eventType,
-      String search,
-      String sortColumn,
-      boolean asc,
-      int size,
-      int page) {
-    var like = like(search);
-    var params =
-        new ArrayList<Object>(
-            Arrays.asList(utc(from), utc(to), eventType, eventType, like, like, like, like, like));
-    Long total = count(AUDIT_FROM, params);
+  public Page<AuditEntry> findAudits(LogQuery query, AuditEventType eventType) {
+    var type = eventType == null ? null : eventType.name();
+    var like = like(query.search());
+    var params = Arrays.<Object>asList(utc(query.from()), utc(query.to()), type, type, like, like);
     var items =
         jdbc.query(
             """
             SELECT a.id, a.occurred_at, a.event_type, a.old_status, a.new_status,
-                   a.unexcused_minutes_delta, a.excused_minutes_delta, a.terminal_id,
-                   c.class_code, rm.room_number, st.username,
+                   a.unexcused_minutes_delta, a.excused_minutes_delta, c.class_code,
                    CONCAT(s.last_name, ', ', s.first_name) AS student_name,
-                   CONCAT(st.last_name, ', ', st.first_name) AS actor_name
             """
+                + ACTOR
+                + " AS actor"
                 + AUDIT_FROM
-                + order(sortColumn, asc, "a.id"),
-            statement -> bind(statement, params, size, page),
+                + order(AUDIT_SORT, query, "a.id"),
+            statement -> bind(statement, params, query),
             (row, index) ->
                 new AuditEntry(
                     row.getLong("id"),
@@ -157,29 +161,29 @@ public class LogRepository {
                     row.getString("event_type"),
                     row.getString("student_name"),
                     row.getString("class_code"),
-                    row.getString("actor_name"),
-                    row.getString("username"),
-                    row.getObject("terminal_id", Integer.class),
-                    row.getString("room_number"),
+                    row.getString("actor"),
                     row.getString("old_status"),
                     row.getString("new_status"),
                     row.getInt("unexcused_minutes_delta"),
                     row.getInt("excused_minutes_delta")));
-    return new Page<>(items, total);
+    return new Page<>(items, count(AUDIT_FROM, params));
   }
 
-  private Long count(String from, List<Object> params) {
+  private long count(String from, List<Object> params) {
     return jdbc.query(
         "SELECT COUNT(*)" + from,
         statement -> setParams(statement, params),
-        rs -> rs.next() ? rs.getLong(1) : 0L);
+        rs -> {
+          rs.next();
+          return rs.getLong(1);
+        });
   }
 
-  private static void bind(PreparedStatement statement, List<Object> params, int size, int page)
+  private static void bind(PreparedStatement statement, List<Object> params, LogQuery query)
       throws SQLException {
     setParams(statement, params);
-    statement.setInt(params.size() + 1, size);
-    statement.setLong(params.size() + 2, (long) page * size);
+    statement.setInt(params.size() + 1, query.size());
+    statement.setLong(params.size() + 2, (long) query.page() * query.size());
   }
 
   private static void setParams(PreparedStatement statement, List<Object> params)
@@ -189,9 +193,13 @@ public class LogRepository {
     }
   }
 
-  /** Die Spalte stammt aus einer der Whitelists, die Richtung ist fest */
-  private static String order(String column, boolean asc, String tieBreaker) {
-    var direction = asc ? " ASC" : " DESC";
+  /** Die Spalte stammt aus der Whitelist, die Richtung ist fest */
+  private static String order(Map<String, String> allowed, LogQuery query, String tieBreaker) {
+    var column = allowed.get(query.sort());
+    if (column == null) {
+      throw new IllegalArgumentException("Unknown sort key");
+    }
+    var direction = query.ascending() ? " ASC" : " DESC";
     return " ORDER BY " + column + direction + ", " + tieBreaker + direction + " LIMIT ? OFFSET ?";
   }
 

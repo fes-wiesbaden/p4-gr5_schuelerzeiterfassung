@@ -1,26 +1,26 @@
 <script setup lang="ts">
-import { onMounted, reactive } from 'vue'
-import Button from 'primevue/button'
+import { reactive } from 'vue'
 import Column from 'primevue/column'
 import DataTable, {
   type DataTablePageEvent,
   type DataTableSortEvent
 } from 'primevue/datatable'
-import InputText from 'primevue/inputtext'
+import Select from 'primevue/select'
 import Tab from 'primevue/tab'
 import TabList from 'primevue/tablist'
 import TabPanel from 'primevue/tabpanel'
 import TabPanels from 'primevue/tabpanels'
 import Tabs from 'primevue/tabs'
 
+import LogFilterForm from '@/components/LogFilterForm.vue'
 import {
   STATUS_LABELS,
   berlinDate,
+  berlinInstant,
   type AttendanceStatus
 } from '@/api/attendance'
 import {
   EVENT_LABELS,
-  berlinDayStart,
   formatDateTime,
   loadLogPage,
   nextDay,
@@ -32,16 +32,23 @@ import { useAuthStore } from '@/stores/auth'
 const auth = useAuthStore()
 const PAGE_SIZE = 25
 
+const EVENT_OPTIONS = [
+  { label: 'Alle', value: '' },
+  ...Object.entries(EVENT_LABELS).map(([value, label]) => ({ label, value }))
+]
+
 // Filter, Sortierung und aktuelle Seite eines Reiters. Gefiltert, sortiert und
 // geblättert wird im Backend, die Tabelle zeigt nur die geladene Seite
-function logTable<T>(kind: 'raw-scans' | 'audits', defaultSort: string) {
-  const today = berlinDate(new Date())
-  const weekAgo = berlinDate(new Date(Date.now() - 6 * 24 * 60 * 60 * 1000))
+function logTable<T>(
+  kind: 'raw-scans' | 'audits',
+  defaultSort: string,
+  extraFilters: Record<string, string> = {}
+) {
   const state = reactive({
-    from: weekAgo,
-    to: today,
+    from: berlinDate(new Date(Date.now() - 6 * 24 * 60 * 60 * 1000)),
+    to: berlinDate(new Date()),
     search: '',
-    eventType: '',
+    filters: extraFilters,
     sortField: defaultSort,
     sortOrder: -1 as 1 | -1,
     first: 0,
@@ -60,16 +67,16 @@ function logTable<T>(kind: 'raw-scans' | 'audits', defaultSort: string) {
     state.error = ''
     try {
       const page = await loadLogPage<T>(kind, {
-        from: berlinDayStart(state.from),
-        to: berlinDayStart(nextDay(state.to)),
+        ...state.filters,
+        from: berlinInstant(state.from, '00:00'),
+        to: berlinInstant(nextDay(state.to), '00:00'),
         search: state.search.trim(),
-        eventType: kind === 'audits' ? state.eventType : undefined,
         sort: state.sortField,
         direction: state.sortOrder === 1 ? 'asc' : 'desc',
         page: state.first / PAGE_SIZE,
         size: PAGE_SIZE
       })
-      state.rows = page.items as T[]
+      state.rows = page.items
       state.total = page.total
     } catch {
       state.error = 'Einträge konnten nicht geladen werden.'
@@ -99,14 +106,16 @@ function logTable<T>(kind: 'raw-scans' | 'audits', defaultSort: string) {
 }
 
 const scans = logTable<RawScanEntry>('raw-scans', 'scannedAt')
-const audits = logTable<AuditEntry>('audits', 'occurredAt')
+const audits = logTable<AuditEntry>('audits', 'occurredAt', { eventType: '' })
+scans.load()
 
-function actor(entry: AuditEntry): string {
-  if (entry.staffName) return `${entry.staffName} (${entry.staffUsername})`
-  if (entry.terminalId !== null) {
-    return `Terminal ${entry.terminalId} (Raum ${entry.roomNumber})`
+// Die Audit-Logs werden erst beim ersten Öffnen ihres Reiters geladen
+let auditsOpened = false
+function openTab(value: string | number) {
+  if (value === 'audits' && !auditsOpened) {
+    auditsOpened = true
+    audits.load()
   }
-  return 'System'
 }
 
 function statusLabel(status: string | null): string {
@@ -127,18 +136,13 @@ function minutes(entry: AuditEntry): string {
 function signed(value: number): string {
   return value > 0 ? `+${value}` : String(value)
 }
-
-onMounted(() => {
-  scans.load()
-  if (auth.isAdmin) audits.load()
-})
 </script>
 
 <template>
   <section class="logs">
     <h1>Logs</h1>
 
-    <Tabs value="raw-scans">
+    <Tabs value="raw-scans" @update:value="openTab">
       <TabList>
         <Tab value="raw-scans">RawScans</Tab>
         <Tab v-if="auth.isAdmin" value="audits">Audit-Logs</Tab>
@@ -146,25 +150,13 @@ onMounted(() => {
       <TabPanels>
         <TabPanel value="raw-scans">
           <article class="logs__card">
-            <form class="logs__filter" @submit.prevent="scans.filter">
-              <label>
-                <span>Von</span>
-                <InputText v-model="scans.state.from" type="date" required />
-              </label>
-              <label>
-                <span>Bis</span>
-                <InputText v-model="scans.state.to" type="date" required />
-              </label>
-              <label class="logs__search">
-                <span>Suche</span>
-                <InputText
-                  v-model="scans.state.search"
-                  placeholder="Schüler, Klasse oder RFID-UID"
-                  maxlength="100"
-                />
-              </label>
-              <Button type="submit" label="Filtern" icon="pi pi-filter" />
-            </form>
+            <LogFilterForm
+              v-model:from="scans.state.from"
+              v-model:to="scans.state.to"
+              v-model:search="scans.state.search"
+              placeholder="Schüler, Klasse oder RFID-UID"
+              @submit="scans.filter"
+            />
             <p v-if="scans.state.error" class="logs__error" role="alert">
               {{ scans.state.error }}
             </p>
@@ -209,38 +201,23 @@ onMounted(() => {
 
         <TabPanel v-if="auth.isAdmin" value="audits">
           <article class="logs__card">
-            <form class="logs__filter" @submit.prevent="audits.filter">
-              <label>
-                <span>Von</span>
-                <InputText v-model="audits.state.from" type="date" required />
-              </label>
-              <label>
-                <span>Bis</span>
-                <InputText v-model="audits.state.to" type="date" required />
-              </label>
+            <LogFilterForm
+              v-model:from="audits.state.from"
+              v-model:to="audits.state.to"
+              v-model:search="audits.state.search"
+              placeholder="Schüler, Klasse, Lehrkraft, Benutzername oder Raum"
+              @submit="audits.filter"
+            >
               <label>
                 <span>Ereignis</span>
-                <select v-model="audits.state.eventType">
-                  <option value="">Alle</option>
-                  <option
-                    v-for="(label, type) in EVENT_LABELS"
-                    :key="type"
-                    :value="type"
-                  >
-                    {{ label }}
-                  </option>
-                </select>
-              </label>
-              <label class="logs__search">
-                <span>Suche</span>
-                <InputText
-                  v-model="audits.state.search"
-                  placeholder="Schüler, Klasse, Lehrkraft oder Benutzername"
-                  maxlength="100"
+                <Select
+                  v-model="audits.state.filters.eventType"
+                  :options="EVENT_OPTIONS"
+                  option-label="label"
+                  option-value="value"
                 />
               </label>
-              <Button type="submit" label="Filtern" icon="pi pi-filter" />
-            </form>
+            </LogFilterForm>
             <p v-if="audits.state.error" class="logs__error" role="alert">
               {{ audits.state.error }}
             </p>
@@ -271,10 +248,12 @@ onMounted(() => {
                   }}
                 </template>
               </Column>
-              <Column field="actor" header="Ausgelöst von" sortable>
-                <template #body="{ data }">{{ actor(data) }}</template>
-              </Column>
-              <Column field="student" header="Schüler" sortable>
+              <Column field="actor" header="Ausgelöst von" sortable />
+              <Column
+                field="student"
+                header="Schüler (aktuelle Klasse)"
+                sortable
+              >
                 <template #body="{ data }">
                   {{ data.student }} ({{ data.classCode }})
                 </template>
@@ -315,31 +294,6 @@ onMounted(() => {
   background: white;
   border: 1px solid var(--line);
   border-radius: 14px;
-}
-
-.logs__filter {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: flex-end;
-  gap: 12px;
-}
-
-.logs__filter label {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  font-size: 0.85rem;
-}
-
-.logs__filter select {
-  padding: 8px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  font: inherit;
-}
-
-.logs__search {
-  flex: 1 1 240px;
 }
 
 .logs__error {

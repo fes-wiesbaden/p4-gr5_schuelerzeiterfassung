@@ -10,6 +10,7 @@ import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.method.annotation.HandlerMethodValidationException;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 
 /** Übersetzt bekannte Fehler der Mitarbeiter-API in HTTP-Status und feste Fehlercodes */
@@ -26,7 +27,8 @@ class StaffApiErrors {
     HttpMessageNotReadableException.class,
     MethodArgumentNotValidException.class,
     MethodArgumentTypeMismatchException.class,
-    MissingServletRequestParameterException.class
+    MissingServletRequestParameterException.class,
+    HandlerMethodValidationException.class
   })
   ResponseEntity<Map<String, String>> invalidRequest() {
     return error(HttpStatus.BAD_REQUEST, "INVALID_REQUEST");
@@ -92,8 +94,7 @@ class StaffApiErrors {
               "INVALID_BLOCK_ASSIGNMENT",
               "INVALID_STATUS_TIME",
               "INVALID_ATTENDANCE_DATE",
-              "INVALID_ATTENDANCE_STATUS",
-              "INVALID_LOG_QUERY" ->
+              "INVALID_ATTENDANCE_STATUS" ->
           error(HttpStatus.BAD_REQUEST, code);
       case "RFID_UID_UPDATE_FAILED" -> error(HttpStatus.INTERNAL_SERVER_ERROR, code);
       default -> throw exception;

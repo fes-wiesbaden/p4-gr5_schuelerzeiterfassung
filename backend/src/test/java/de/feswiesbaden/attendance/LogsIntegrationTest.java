@@ -118,7 +118,7 @@ class LogsIntegrationTest {
   @Test
   void filtersSortsAndPagesRawScans() throws Exception {
     var admin = staffSession("test.admin");
-    mvc.perform(get(RAW_SCANS + "&search=verspae").session(admin))
+    mvc.perform(get(RAW_SCANS).param("search", "Test Verspaetet").session(admin))
         .andExpect(jsonPath("$.total").value(1))
         .andExpect(jsonPath("$.items[0].rfidUid").value("TEST-UID-002"));
     mvc.perform(get(RAW_SCANS + "&sort=rfidUid&direction=asc&size=2&page=1").session(admin))
@@ -151,12 +151,12 @@ class LogsIntegrationTest {
     mvc.perform(get(AUDITS + "&sort=occurredAt&direction=asc").session(admin))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.total").value(2))
-        .andExpect(jsonPath("$.items[0].terminalId").value(9001))
-        .andExpect(jsonPath("$.items[0].roomNumber").value("TEST-R01"))
-        .andExpect(jsonPath("$.items[1].staffUsername").value("test.teacher.a"))
-        .andExpect(jsonPath("$.items[1].staffName").value("Lehrkraft-A, Test"));
-    mvc.perform(get(AUDITS + "&search=test.teacher.a").session(admin))
-        .andExpect(jsonPath("$.total").value(1));
+        .andExpect(jsonPath("$.items[0].actor").value("Terminal 9001 (Raum TEST-R01)"))
+        .andExpect(jsonPath("$.items[1].actor").value("Lehrkraft-A, Test (test.teacher.a)"));
+    for (var search : List.of("test.teacher.a", "Test Lehrkraft-A", "Raum TEST-R01")) {
+      mvc.perform(get(AUDITS).param("search", search).session(admin))
+          .andExpect(jsonPath("$.total").value(1));
+    }
     mvc.perform(get(AUDITS + "&eventType=SCAN").session(admin))
         .andExpect(jsonPath("$.total").value(1))
         .andExpect(jsonPath("$.items[0].eventType").value("SCAN"));
@@ -169,13 +169,12 @@ class LogsIntegrationTest {
         "/api/logs/raw-scans" + RANGE + "&sort=scan_id;DROP",
         "/api/logs/raw-scans" + RANGE + "&direction=sideways",
         "/api/logs/raw-scans" + RANGE + "&size=1000",
-        "/api/logs/raw-scans?from=2026-09-15T00:00:00Z&to=2026-09-14T00:00:00Z",
         "/api/logs/audits" + RANGE + "&eventType=UNKNOWN"
       })
   void rejectsInvalidQueries(String url) throws Exception {
     mvc.perform(get(url).session(staffSession("test.admin")))
         .andExpect(status().isBadRequest())
-        .andExpect(content().json("{\"code\":\"INVALID_LOG_QUERY\"}"));
+        .andExpect(content().json("{\"code\":\"INVALID_REQUEST\"}"));
   }
 
   /** Ohne Anmeldung liefern beide Endpunkte nichts */

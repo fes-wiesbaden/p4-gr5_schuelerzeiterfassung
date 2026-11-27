@@ -15,10 +15,8 @@ export interface AuditEntry {
   eventType: AuditEventType
   student: string
   classCode: string
-  staffName: string | null
-  staffUsername: string | null
-  terminalId: number | null
-  roomNumber: string | null
+  // Lehrkraft mit Benutzername, Terminal mit Raum oder System
+  actor: string
   oldStatus: string | null
   newStatus: string | null
   unexcusedMinutesDelta: number
@@ -42,28 +40,13 @@ export type AuditEventType = keyof typeof EVENT_LABELS
 
 export function loadLogPage<T>(
   kind: 'raw-scans' | 'audits',
-  params: Record<string, string | number | undefined>
+  params: Record<string, string | number>
 ): Promise<LogPage<T>> {
   const query = new URLSearchParams()
   for (const [key, value] of Object.entries(params)) {
-    if (value !== undefined && value !== '') query.set(key, String(value))
+    if (value !== '') query.set(key, String(value))
   }
   return loadData(`/api/logs/${kind}?${query}`)
-}
-
-// Beginn des Berliner Kalendertags YYYY-MM-DD als UTC-Zeitpunkt. Um Mitternacht
-// gilt immer derselbe Versatz wie am restlichen Tag, die Umstellung ist erst um 2 Uhr
-export function berlinDayStart(day: string): string {
-  const utc = new Date(`${day}T00:00:00Z`)
-  const berlinWallClock = new Date(
-    utc.toLocaleString('en-US', { timeZone: BERLIN })
-  )
-  const utcWallClock = new Date(
-    utc.toLocaleString('en-US', { timeZone: 'UTC' })
-  )
-  return new Date(
-    utc.getTime() - (berlinWallClock.getTime() - utcWallClock.getTime())
-  ).toISOString()
 }
 
 export function nextDay(day: string): string {
