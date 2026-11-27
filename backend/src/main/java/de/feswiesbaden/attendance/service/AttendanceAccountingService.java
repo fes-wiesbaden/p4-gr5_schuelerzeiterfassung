@@ -271,25 +271,39 @@ public class AttendanceAccountingService {
         throw new IllegalArgumentException("INVALID_EXPORT_SELECTION");
       }
       var slots = accounting.findSlots(plan.timetableId());
+      var resets = accounting.findLatestAccountResets(classId);
+      var auditDays = accounting.findAuditDays(classId, plan.startsOn(), today, today);
       Map<Long, List<ExportDay>> days = new HashMap<>();
-      for (var date = start; !date.isAfter(today); date = date.plusDays(1)) {
+      Map<Long, List<ExportDay>> bookedFullDays = new HashMap<>();
+      for (var date = plan.startsOn(); !date.isAfter(today); date = date.plusDays(1)) {
         var daySlots = slotsFor(plan, periods, slots, date);
-        var audits = accounting.findDayAudits(classId, date, today);
+        boolean inExportBlock = !date.isBefore(start);
+        if (daySlots.isEmpty() && !inExportBlock) {
+          continue;
+        }
+        var audits = auditDays.getOrDefault(date, Map.of());
         for (var student : roster) {
-          var day =
-              readStudentDay(
-                  date,
-                  now,
-                  daySlots,
-                  audits.getOrDefault(student.id(), List.of()),
-                  student.createdAt());
-          if (day != null) {
+          var dayAudits = audits.getOrDefault(student.id(), List.of());
+          var day = readStudentDay(date, now, daySlots, dayAudits, student.createdAt());
+          if (day == null) {
+            continue;
+          }
+          if (inExportBlock) {
             days.computeIfAbsent(student.id(), id -> new ArrayList<>()).add(day);
+          }
+          var reset = resets.get(student.id());
+          if (day.fullAbsence() != null
+              && !dayAudits.isEmpty()
+              && (reset == null || date.isAfter(berlinDate(reset)))
+              && day.unexcusedMinutes() == dayAudits.stream().mapToLong(Audit::unexcusedDelta).sum()
+              && day.excusedMinutes() == dayAudits.stream().mapToLong(Audit::excusedDelta).sum()) {
+            bookedFullDays.computeIfAbsent(student.id(), id -> new ArrayList<>()).add(day);
           }
         }
       }
       for (var student : students.findByClassId(classId)) {
         if (ids.isEmpty() || ids.contains(student.id())) {
+          var fullDays = bookedFullDays.getOrDefault(student.id(), List.of());
           result.add(
               new StudentExport(
                   schoolClass.classCode(),
@@ -297,6 +311,18 @@ public class AttendanceAccountingService {
                   student.lastName(),
                   student.unexcusedMinutes(),
                   student.excusedMinutes(),
+                  (student.unexcusedMinutes()
+                          - fullDays.stream().mapToLong(ExportDay::unexcusedMinutes).sum())
+                      / 45,
+                  (student.excusedMinutes()
+                          - fullDays.stream().mapToLong(ExportDay::excusedMinutes).sum())
+                      / 45,
+                  fullDays.stream()
+                      .filter(day -> day.fullAbsence() == AttendanceStatus.ABWESEND)
+                      .count(),
+                  fullDays.stream()
+                      .filter(day -> day.fullAbsence() == AttendanceStatus.ENTSCHULDIGT)
+                      .count(),
                   days.getOrDefault(student.id(), List.of())));
         }
       }
@@ -368,20 +394,18 @@ public class AttendanceAccountingService {
       long excusedMinutes,
       AttendanceStatus fullAbsence) {}
 
-  /** Enthält die Minutenkonten und Blockanwesenheiten eines Schülers. */
+  /** Enthält die Minutenkonten, Zeugniswerte und Blockanwesenheiten eines Schülers. */
   public record StudentExport(
       String classCode,
       String firstName,
       String lastName,
       int unexcusedMinutes,
       int excusedMinutes,
-      List<ExportDay> days) {
-
-    /** Zählt ganze Fehltage im exportierten Blockzeitraum. */
-    public long countFullAbsences(AttendanceStatus status) {
-      return days.stream().filter(day -> day.fullAbsence() == status).count();
-    }
-  }
+      long unexcusedHours,
+      long excusedHours,
+      long unexcusedDays,
+      long excusedDays,
+      List<ExportDay> days) {}
 
   /**
    * Ermittelt die zugängliche Klasse, deren Slot am heutigen Berliner Tag gerade läuft. Ohne

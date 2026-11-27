@@ -171,29 +171,64 @@ public class AttendanceAccountingRepository {
         studentId);
   }
 
-  /** Liest die noch aufbewahrten Audits eines Klassentags nach Schüler gruppiert */
-  public Map<Long, List<Audit>> findDayAudits(Long classId, LocalDate date, LocalDate today) {
+  /** Liest den letzten Kontenreset je Schüler der Klasse in UTC. */
+  public Map<Long, LocalDateTime> findLatestAccountResets(Long classId) {
     return jdbc.query(
         """
-        SELECT h.id, h.student_id, h.attendance_id, h.deletion_date_id, h.event_type, h.occurred_at,
+        SELECT h.student_id, h.occurred_at
+        FROM attendance_audit h
+        JOIN (
+            SELECT a.student_id, MAX(a.id) AS id
+            FROM attendance_audit a
+            JOIN student s ON s.id = a.student_id
+            WHERE s.school_class_id = ? AND a.event_type = 'ACCOUNT_RESET'
+            GROUP BY a.student_id
+        ) latest ON latest.id = h.id
+        """,
+        rows -> {
+          Map<Long, LocalDateTime> resets = new HashMap<>();
+          while (rows.next()) {
+            resets.put(
+                rows.getLong("student_id"), rows.getObject("occurred_at", LocalDateTime.class));
+          }
+          return resets;
+        },
+        classId);
+  }
+
+  /** Liest die noch aufbewahrten Audits eines Klassentags nach Schüler gruppiert */
+  public Map<Long, List<Audit>> findDayAudits(Long classId, LocalDate date, LocalDate today) {
+    return findAuditDays(classId, date, date, today).getOrDefault(date, Map.of());
+  }
+
+  /** Liest aufbewahrte Audits einer Klasse nach Datum und Schüler gruppiert. */
+  public Map<LocalDate, Map<Long, List<Audit>>> findAuditDays(
+      Long classId, LocalDate start, LocalDate end, LocalDate today) {
+    return jdbc.query(
+        """
+        SELECT a.attendance_date, h.id, h.student_id, h.attendance_id, h.deletion_date_id,
+               h.event_type, h.occurred_at,
                h.old_status, h.new_status, h.unexcused_minutes_delta, h.excused_minutes_delta
         FROM attendance_audit h
         JOIN attendance a ON a.id = h.attendance_id AND a.student_id = h.student_id
         JOIN student s ON s.id = a.student_id
         JOIN deletion_date d ON d.id = h.deletion_date_id
-        WHERE s.school_class_id = ? AND a.attendance_date = ? AND d.delete_after > ?
+        WHERE s.school_class_id = ? AND a.attendance_date BETWEEN ? AND ? AND d.delete_after > ?
         """,
         rows -> {
-          Map<Long, List<Audit>> audits = new HashMap<>();
+          Map<LocalDate, Map<Long, List<Audit>>> audits = new HashMap<>();
           while (rows.next()) {
             audits
+                .computeIfAbsent(
+                    rows.getObject("attendance_date", LocalDate.class), date -> new HashMap<>())
                 .computeIfAbsent(rows.getLong("student_id"), id -> new ArrayList<>())
                 .add(audit(rows));
           }
           return audits;
         },
         classId,
-        date,
+        start,
+        end,
         today);
   }
 
