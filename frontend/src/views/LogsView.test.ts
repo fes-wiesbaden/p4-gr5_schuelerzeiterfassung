@@ -184,6 +184,37 @@ describe('LogsView', () => {
     wrapper.unmount()
   })
 
+  it('akzeptiert Uhrzeiten mit Sekunden', async () => {
+    const wrapper = await mountAs('lehrkraft')
+    const [from] = wrapper.findAll('input[type="datetime-local"]')
+    await from.setValue('2026-09-14T08:00:00')
+    await wrapper.find('form').trigger('submit')
+    await flushPromises()
+    expect(urls().at(-1)!.searchParams.get('from')).toBe(
+      '2026-09-14T06:00:00.000Z'
+    )
+    wrapper.unmount()
+  })
+
+  it('zeigt Zeitraum- und Ladefehler gemeinsam an', async () => {
+    const wrapper = await mountAs('lehrkraft')
+    fetchMock.mockRejectedValueOnce(new Error('offline'))
+    const header = wrapper
+      .findAll('th')
+      .find((element) => element.text().includes('RFID-UID'))!
+    await header.trigger('click')
+    await flushPromises()
+    const [from, to] = wrapper.findAll('input[type="datetime-local"]')
+    await from.setValue('2026-09-14T10:00')
+    await to.setValue('2026-09-14T09:00')
+    await wrapper.find('form').trigger('submit')
+
+    const alert = wrapper.get('[role="alert"]').text()
+    expect(alert).toContain('gültigen Zeitraum')
+    expect(alert).toContain('konnten nicht geladen werden')
+    wrapper.unmount()
+  })
+
   it('zeigt nur die Antwort der neuesten Anfrage', async () => {
     const wrapper = await mountAs('lehrkraft')
     let answerSlowRequest: (response: Response) => void = () => {}

@@ -39,7 +39,8 @@ const EVENT_OPTIONS = [
 // Wandelt einen Wert aus datetime-local (YYYY-MM-DDTHH:MM) in einen UTC-Zeitpunkt um
 function utcInstant(local: string, addMinutes = 0): string {
   const [date, time] = local.split('T')
-  const at = new Date(berlinInstant(date, time))
+  // Manche Browser liefern HH:MM:SS, berlinInstant erwartet HH:MM
+  const at = new Date(berlinInstant(date, time.slice(0, 5)))
   return new Date(at.getTime() + addMinutes * 60_000).toISOString()
 }
 
@@ -64,7 +65,7 @@ function logTable<T>(kind: 'raw-scans' | 'audits', defaultSort: string) {
     total: 0,
     loading: false,
     error: '',
-    // Bleibt beim Blättern stehen, solange der eingegebene Zeitraum ungültig ist
+    // Bleibt beim Blättern stehen, bis ein gültiger Zeitraum abgeschickt wird
     rangeError: ''
   })
   // Nur die Antwort der neuesten Anfrage wird angezeigt
@@ -137,6 +138,11 @@ function openTab(value: string | number) {
   }
 }
 
+// Zeitraum- und Ladefehler können gleichzeitig vorliegen
+function messages(state: { rangeError: string; error: string }): string {
+  return [state.rangeError, state.error].filter(Boolean).join(' ')
+}
+
 function statusLabel(status: string | null): string {
   return status ? (STATUS_LABELS[status as AttendanceStatus] ?? status) : '–'
 }
@@ -181,7 +187,7 @@ function signed(value: number): string {
               class="logs__error"
               role="alert"
             >
-              {{ scans.state.rangeError || scans.state.error }}
+              {{ messages(scans.state) }}
             </p>
             <DataTable
               :value="scans.state.rows"
@@ -246,7 +252,7 @@ function signed(value: number): string {
               class="logs__error"
               role="alert"
             >
-              {{ audits.state.rangeError || audits.state.error }}
+              {{ messages(audits.state) }}
             </p>
             <DataTable
               :value="audits.state.rows"
