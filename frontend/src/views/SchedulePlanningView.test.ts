@@ -143,8 +143,7 @@ describe('SchedulePlanningView', () => {
     expect(table.text()).toContain('Freitag')
     expect(table.text()).toContain('Unterricht')
     expect(table.find('td[rowspan="2"]').exists()).toBe(true)
-    expect(table.text()).not.toContain('Raum R01')
-    expect(wrapper.text()).toContain('Raum R01')
+    expect(table.get('.week-grid__lesson').text()).toContain('Raum R01')
     expect(wrapper.text()).toContain('38. KW 2026')
     expect(wrapper.text()).toContain('Schuljahr 2026/27')
     expect(wrapper.text()).not.toContain('Regelstundenplan')
@@ -178,7 +177,12 @@ describe('SchedulePlanningView', () => {
             ],
             lessons: [
               firstLesson,
-              { ...firstLesson, startsAt: '08:30', endsAt: '09:15' }
+              {
+                ...firstLesson,
+                startsAt: '08:30',
+                endsAt: '09:15',
+                roomNumber: 'A 214'
+              }
             ]
           },
           { date: '2026-09-15', lessons: [] },
@@ -190,12 +194,13 @@ describe('SchedulePlanningView', () => {
     const wrapper = mountAs('lehrkraft')
     try {
       await flushPromises()
-      expect(wrapper.findAll('.week-grid__lesson')).toHaveLength(2)
+      expect(
+        wrapper.findAll('.week-grid__lesson small').map((room) => room.text())
+      ).toEqual(['Raum A 213', 'Raum A 214'])
       expect(wrapper.get('table').text()).toContain('Pause')
       expect(
         wrapper.findAll('.week-grid__period').map((period) => period.text())
       ).toEqual(['1', '2', '3'])
-      expect(wrapper.get('.week-grid__room').text()).toBe('Raum A 213')
     } finally {
       wrapper.unmount()
     }

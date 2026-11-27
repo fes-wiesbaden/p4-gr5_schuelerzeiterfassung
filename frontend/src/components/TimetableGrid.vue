@@ -44,22 +44,6 @@ watch(
   { immediate: true }
 )
 
-const allLessons = computed(() => props.days.flatMap((day) => day.lessons))
-const room = computed(() => {
-  const counts = new Map<string, number>()
-  for (const { roomNumber } of allLessons.value) {
-    if (roomNumber) counts.set(roomNumber, (counts.get(roomNumber) ?? 0) + 1)
-  }
-  const common = [...counts].find(
-    ([, count]) => count > allLessons.value.length / 2
-  )
-  return common ? { name: common[0], shared: counts.size === 1 } : undefined
-})
-
-function showRoom(roomNumber: string) {
-  return roomNumber && roomNumber !== room.value?.name
-}
-
 const days = computed(() => props.days.map((day, index) => ({ ...day, index })))
 const visibleDays = computed(() =>
   mobile.value
@@ -170,28 +154,22 @@ const rows = computed(() => {
 
 <template>
   <div class="week-grid">
-    <div v-if="hasLessons && (room || mobile)" class="week-grid__summary">
-      <div
-        v-if="mobile"
-        class="week-grid__days"
-        role="group"
-        aria-label="Unterrichtstag auswählen"
+    <div
+      v-if="hasLessons && mobile"
+      class="week-grid__days"
+      role="group"
+      aria-label="Unterrichtstag auswählen"
+    >
+      <button
+        v-for="day in days"
+        :key="day.index"
+        type="button"
+        :aria-label="dayLabels[day.index]?.accessible"
+        :aria-pressed="selectedDay === day.index"
+        @click="selectedDay = day.index"
       >
-        <button
-          v-for="day in days"
-          :key="day.index"
-          type="button"
-          :aria-label="dayLabels[day.index]?.accessible"
-          :aria-pressed="selectedDay === day.index"
-          @click="selectedDay = day.index"
-        >
-          {{ dayLabels[day.index]?.short }}
-        </button>
-      </div>
-      <span v-if="room" class="week-grid__room">
-        <i class="pi pi-map-marker" aria-hidden="true" />
-        {{ room.shared ? 'Raum' : 'Stammraum' }} {{ room.name }}
-      </span>
+        {{ dayLabels[day.index]?.short }}
+      </button>
     </div>
 
     <div v-if="hasVisibleLessons" class="week-grid__table">
@@ -242,7 +220,7 @@ const rows = computed(() => {
               >
                 <div v-if="cell.entry" class="week-grid__lesson">
                   <strong>Unterricht</strong>
-                  <small v-if="showRoom(cell.entry.roomNumber)">
+                  <small v-if="cell.entry.roomNumber">
                     Raum {{ cell.entry.roomNumber }}
                   </small>
                   <small v-if="cell.entry.slot?.validFrom">
@@ -291,27 +269,6 @@ const rows = computed(() => {
   display: grid;
   gap: 10px;
   min-width: 0;
-}
-
-.week-grid__summary {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-}
-
-.week-grid__room {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 0.84rem;
-  color: var(--muted);
-}
-
-.week-grid__room i {
-  font-size: 0.82rem;
-  color: var(--accent-ink);
 }
 
 .week-grid__days {

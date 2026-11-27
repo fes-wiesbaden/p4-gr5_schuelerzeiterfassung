@@ -289,7 +289,6 @@ onUnmounted(() =>
                     </button>
                     <button
                       :disabled="busy"
-                      :data-delete-id="row.id"
                       :aria-label="'Löschen: ' + label(row)"
                       @click="remove(row)"
                     >
