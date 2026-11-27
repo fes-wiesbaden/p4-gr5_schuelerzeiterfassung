@@ -12,6 +12,16 @@ Die Planung zeigt das Schuljahr und die gewählte Kalenderwoche. Über die Block
 
 DM Sans wird als variable WOFF2-Datei zusammen mit ihrer SIL Open Font License ausgeliefert. Symbole stammen aus PrimeIcons. [Schriftquelle](https://github.com/google/fonts/tree/main/ofl/dmsans)
 
+## Rückmeldungen und Rückfragen
+
+Folgenreiche Aktionen wie Löschen, das Zurücksetzen von Fehlzeitenkonten oder händische Fehlminuten fragen über einen eigenen Dialog nach. Der sichere Knopf „Abbrechen“ erhält den Fokus. Im Chat übernimmt die Vorschau des Auftrags mit eigener Bestätigung diese Rückfrage. Erfolgreiche Änderungen bestätigt eine grüne Meldung am oberen Seitenrand, die nach wenigen Sekunden verschwindet. Fehler stehen an derselben Stelle und nennen die Ursache in Alltagssprache.
+
+Unbekannte Adressen zeigen „Seite nicht gefunden“, Verwaltungsseiten ohne Berechtigung „Kein Zugriff“. Nach einer abgelaufenen Sitzung erklärt die Anmeldung, warum sie erscheint.
+
+## Kalender im Schülerprofil
+
+Die Wochenauswahl der Anwesenheitshistorie markiert Unterrichtstage blau und Tage mit Fehlminuten orange. Tage außerhalb der zugeordneten Unterrichtsblöcke sind ausgegraut. Eine Legende steht unter dem Kalender. Korrekturen öffnen sich über „Korrigieren“ direkt unter dem jeweiligen Tag.
+
 ## Farben und Formen
 
 Die gemeinsamen Werte stehen in `frontend/src/styles.css`. Der Hintergrund ist `#f7f5fa`, Flächen sind weiß, die Hauptschrift ist `#261d34` und der Akzent ist `#6344ad`. Karten haben einen Radius von 14 Pixeln. Zustände verwenden Text und ein Symbol sowie eine passende Farbfläche.
