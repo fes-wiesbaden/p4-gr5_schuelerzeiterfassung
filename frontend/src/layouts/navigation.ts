@@ -17,7 +17,7 @@ export const mainNavItems: NavItem[] = [
     routeName: 'planung',
     icon: 'pi-calendar'
   },
-  { label: 'Auswertungen', routeName: 'auswertungen', icon: 'pi-chart-bar' }
+  { label: 'CSV-Export', routeName: 'auswertungen', icon: 'pi-download' }
 ]
 
 export const administrationNavItems: NavItem[] = [

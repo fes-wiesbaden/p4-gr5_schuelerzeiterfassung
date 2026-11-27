@@ -37,6 +37,7 @@ describe('AppLayout Navigation', () => {
     expect(wrapper.text()).toContain('Administration')
     expect(wrapper.text()).toContain('Räume')
     expect(wrapper.find('a[href="/personal"]').exists()).toBe(true)
+    expect(wrapper.get('a[href="/auswertungen"]').text()).toBe('CSV-Export')
     wrapper.unmount()
   })
 
@@ -50,6 +51,7 @@ describe('AppLayout Navigation', () => {
 
     expect(wrapper.text()).not.toContain('Administration')
     expect(wrapper.find('a[href="/personal"]').exists()).toBe(false)
+    expect(wrapper.get('a[href="/auswertungen"]').text()).toBe('CSV-Export')
     wrapper.unmount()
   })
 

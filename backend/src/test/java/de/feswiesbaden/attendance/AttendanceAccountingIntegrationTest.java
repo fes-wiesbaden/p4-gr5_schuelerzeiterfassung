@@ -3,6 +3,7 @@ package de.feswiesbaden.attendance;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.hamcrest.Matchers.contains;
+import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.hasItem;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.when;
@@ -25,6 +26,7 @@ import de.feswiesbaden.attendance.service.AttendanceAccountingService;
 import de.feswiesbaden.attendance.service.RetentionService;
 import de.feswiesbaden.attendance.service.SchoolClassService;
 import jakarta.servlet.http.Cookie;
+import java.nio.charset.StandardCharsets;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.LocalDate;
@@ -216,6 +218,75 @@ class AttendanceAccountingIntegrationTest {
         .containsEntry("deletion_date_id", 2L)
         .containsEntry("old_status", "ABWESEND")
         .containsEntry("new_status", "ANWESEND");
+  }
+
+  /** Prüft die drei Exportumfänge, den Berliner Blockbeginn und die Klassengrenze. */
+  @Test
+  void exportsBlockAttendanceAndEnforcesClassAccess() throws Exception {
+    String export = "/api/attendance/export";
+    var teacher = staffSession("test.teacher.a");
+    var admin = staffSession("test.admin");
+    setTime("2026-09-14T05:50:00Z");
+    assertThat(scan(3, "2026-09-14T05:50:00Z")).isTrue();
+    setTime("2026-09-14T06:30:00Z");
+    write(post(CORRECTION), teacher, EXCUSE).andExpect(status().isOk());
+    write(post(CORRECTION.replace("/1/", "/2/")), teacher, EXCUSE.replace("05:45", "05:30"))
+        .andExpect(status().isOk());
+    write(post(export), teacher, "{\"classes\":{\"1\":[1,2]}}")
+        .andExpect(status().isOk())
+        .andExpect(content().string(containsString("\"Verspaetet\";0;60;0;1;0;0;")));
+    jdbc.update(
+        "UPDATE student SET first_name = ?, last_name = ? WHERE id = 1",
+        "=1+1",
+        "Müller; \"Test\"");
+    jdbc.update(
+        "INSERT INTO timetable_slot (id, timetable_id, room_id, weekday, start_time, end_time)"
+            + " VALUES (5, 1, 1, 'DIENSTAG', '10:30:00', '11:15:00')");
+    setTime("2026-09-15T08:45:00Z");
+    accounting.closeDueDays();
+
+    var csv =
+        write(post(export), teacher, "{\"classes\":{\"1\":[1]}}")
+            .andExpect(status().isOk())
+            .andExpect(content().contentType("text/csv;charset=UTF-8"))
+            .andExpect(header().string("Cache-Control", "no-store"))
+            .andExpect(
+                header().string("Content-Disposition", "attachment; filename=anwesenheit.csv"))
+            .andReturn()
+            .getResponse()
+            .getContentAsString(StandardCharsets.UTF_8);
+    assertThat(csv.lines().toList())
+        .hasSize(2)
+        .first()
+        .asString()
+        .startsWith("\uFEFFKlasse;")
+        .endsWith("Unentschuldigte Fehltage;Entschuldigte Fehltage;Tagesdetails (Berliner Datum)");
+    assertThat(csv.lines().toList().getLast())
+        .isEqualTo(
+            "\"26TEST-A\";\"'=1+1\";\"Müller; \"\"Test\"\"\";15;165;0;0;1;0;"
+                + "\"2026-09-14 | ENTSCHULDIGT | 15 min unentschuldigt | 165 min entschuldigt"
+                + " / 2026-09-15 | ABWESEND | 15 min unentschuldigt | 0 min entschuldigt\"");
+
+    write(post(export), teacher, "{\"classes\":{\"1\":[]}}")
+        .andExpect(status().isOk())
+        .andExpect(content().string(containsString("\"Verspaetet\";0;180;0;0;0;1;")))
+        .andExpect(content().string(containsString("\"Statuswechsel\";20;0;0;0;0;0;")));
+    String group = "{\"classes\":{\"1\":[1],\"2\":[7]}}";
+    write(post(export), teacher, group).andExpect(status().isNotFound());
+    write(post(export), teacher, "{\"classes\":{\"1\":[1,7]}}").andExpect(status().isBadRequest());
+    write(post(export), admin, group)
+        .andExpect(status().isOk())
+        .andExpect(content().string(containsString("Raum-B")));
+    write(post(export), teacher, "{\"classes\":{\"3\":[]}}")
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.code").value("NO_ACTIVE_EXPORT_BLOCK"));
+
+    setTime("2026-09-15T09:30:00Z");
+    write(post(RESET), admin, "{\"expectedBlockPlanId\":1}").andExpect(status().isOk());
+    write(post(export), teacher, "{\"classes\":{\"1\":[2]}}")
+        .andExpect(status().isOk())
+        .andExpect(content().string(containsString("\"Verspaetet\";0;0;0;0;0;0;")))
+        .andExpect(content().string(containsString("2026-09-14 | ENTSCHULDIGT")));
   }
 
   /** Prüft Klassengrenzen und die Verwaltungsrechte der Klassenleitung über HTTP */

@@ -77,7 +77,9 @@ class StaffApiErrors {
               "CLASS_HAS_NO_STUDENTS",
               "ATTENDANCE_DAY_LOCKED_OR_UNPLANNED" ->
           error(HttpStatus.CONFLICT, code);
-      case "INVALID_TEACHER_PASSWORD",
+      case "NO_ACTIVE_EXPORT_BLOCK",
+              "INVALID_EXPORT_SELECTION",
+              "INVALID_TEACHER_PASSWORD",
               "INVALID_CLASS",
               "INVALID_RFID_UID",
               "INVALID_STUDENT",
