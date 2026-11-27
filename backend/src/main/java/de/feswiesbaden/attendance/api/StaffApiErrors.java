@@ -14,7 +14,12 @@ import org.springframework.web.method.annotation.MethodArgumentTypeMismatchExcep
 
 /** Übersetzt bekannte Fehler der Mitarbeiter-API in HTTP-Status und feste Fehlercodes */
 @RestControllerAdvice(
-    assignableTypes = {StaffController.class, MasterDataController.class, PlanningController.class})
+    assignableTypes = {
+      StaffController.class,
+      MasterDataController.class,
+      PlanningController.class,
+      LogController.class
+    })
 class StaffApiErrors {
   /** Meldet ungültige Anfragen ohne Eingabewerte in der Antwort */
   @ExceptionHandler({
@@ -87,7 +92,8 @@ class StaffApiErrors {
               "INVALID_BLOCK_ASSIGNMENT",
               "INVALID_STATUS_TIME",
               "INVALID_ATTENDANCE_DATE",
-              "INVALID_ATTENDANCE_STATUS" ->
+              "INVALID_ATTENDANCE_STATUS",
+              "INVALID_LOG_QUERY" ->
           error(HttpStatus.BAD_REQUEST, code);
       case "RFID_UID_UPDATE_FAILED" -> error(HttpStatus.INTERNAL_SERVER_ERROR, code);
       default -> throw exception;
