@@ -12,7 +12,8 @@
       ]
     },
     "answer": {
-      "type": "string"
+      "type": "string",
+      "minLength": 1
     },
     "route": {
       "type": [
@@ -263,6 +264,12 @@
                 "string",
                 "null"
               ]
+            },
+            "note": {
+              "type": [
+                "string",
+                "null"
+              ]
             }
           },
           "required": [
@@ -285,7 +292,8 @@
             "blockPlan",
             "block",
             "teacher",
-            "username"
+            "username",
+            "note"
           ]
         }
       },

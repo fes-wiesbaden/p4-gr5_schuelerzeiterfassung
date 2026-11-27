@@ -3,6 +3,7 @@ package de.feswiesbaden.attendance.api;
 import de.feswiesbaden.attendance.enums.AttendanceStatus;
 import de.feswiesbaden.attendance.repository.StudentRepository.RfidAssignment;
 import de.feswiesbaden.attendance.service.AttendanceAccountingService;
+import de.feswiesbaden.attendance.service.AttendanceAccountingService.CalendarDay;
 import de.feswiesbaden.attendance.service.AttendanceAccountingService.CurrentClass;
 import de.feswiesbaden.attendance.service.AttendanceAccountingService.DailyStudent;
 import de.feswiesbaden.attendance.service.AttendanceAccountingService.HistoryWeek;
@@ -172,7 +173,28 @@ public class StaffController {
       @Valid @RequestBody ManualAbsenceRequest request) {
     return new CorrectionResult(
         attendance.addManualAbsence(
-            studentId, date, request.minutes().intValueExact(), request.requestId()));
+            studentId,
+            date,
+            request.minutes().intValueExact(),
+            request.requestId(),
+            request.note()));
+  }
+
+  /** Nimmt alle händisch erfassten Fehlminuten des Berliner Tags zurück */
+  @DeleteMapping("/students/{studentId}/attendance/{date}/manual-absence-minutes")
+  public CorrectionResult removeManualAbsence(
+      @PathVariable Long studentId,
+      @PathVariable @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date) {
+    return new CorrectionResult(attendance.removeManualAbsence(studentId, date));
+  }
+
+  /** Liefert je Kalendertag des Zeitraums Unterrichts- und Fehlzeitkennzeichen des Schülers */
+  @GetMapping("/students/{studentId}/attendance/calendar")
+  public List<CalendarDay> readCalendar(
+      @PathVariable Long studentId,
+      @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
+      @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to) {
+    return attendance.readCalendar(studentId, from, to);
   }
 
   /** Entschuldigt den gesamten geplanten Unterrichtstag */
@@ -244,11 +266,15 @@ public class StaffController {
   /** Enthält den gewünschten Status und den Zeitpunkt, ab dem er gelten soll */
   public record CorrectionRequest(@NotBlank String status, @NotNull Instant occurredAt) {}
 
-  /** Enthält den Tagesbetrag und die ID zur Wiederholung desselben Buchungsauftrags */
+  /**
+   * Enthält den Tagesbetrag, die ID zur Wiederholung desselben Buchungsauftrags und den
+   * Pflichtvermerk
+   */
   public record ManualAbsenceRequest(
       @NotNull @Positive @Max(Integer.MAX_VALUE) @Digits(integer = 10, fraction = 0)
           BigDecimal minutes,
-      @NotNull UUID requestId) {}
+      @NotNull UUID requestId,
+      String note) {}
 
   /** Enthält den neuen Status und die lokalen Berliner Grenzen des Zeitabschnitts */
   public record StatusPeriodRequest(

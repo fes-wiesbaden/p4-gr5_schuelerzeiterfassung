@@ -1,5 +1,7 @@
 package de.feswiesbaden.attendance.api;
 
+import de.feswiesbaden.attendance.service.TimetableImportException;
+import java.util.LinkedHashMap;
 import java.util.Map;
 import org.springframework.dao.PessimisticLockingFailureException;
 import org.springframework.http.HttpStatus;
@@ -11,6 +13,8 @@ import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
+import org.springframework.web.multipart.MaxUploadSizeExceededException;
+import org.springframework.web.multipart.MultipartException;
 
 /** Übersetzt bekannte Fehler der Mitarbeiter-API in HTTP-Status und feste Fehlercodes */
 @RestControllerAdvice(
@@ -32,6 +36,31 @@ class StaffApiErrors {
     return error(HttpStatus.BAD_REQUEST, "INVALID_REQUEST");
   }
 
+  /** Meldet ein Bild oberhalb der Upload-Grenze, ohne Angaben zur Datei zu wiederholen */
+  @ExceptionHandler(MaxUploadSizeExceededException.class)
+  ResponseEntity<Map<String, String>> uploadTooLarge() {
+    return error(HttpStatus.PAYLOAD_TOO_LARGE, "TIMETABLE_IMAGE_TOO_LARGE");
+  }
+
+  /** Meldet einen unvollständigen Upload als ungültiges Bild */
+  @ExceptionHandler(MultipartException.class)
+  ResponseEntity<Map<String, String>> invalidUpload() {
+    return error(HttpStatus.BAD_REQUEST, "INVALID_TIMETABLE_IMAGE");
+  }
+
+  /** Nennt beim Stundenplan-Import zusätzlich die Position der fehlerhaften Unterrichtszeit */
+  @ExceptionHandler(TimetableImportException.class)
+  ResponseEntity<Map<String, Object>> importError(TimetableImportException exception) {
+    var body = new LinkedHashMap<String, Object>();
+    body.put("code", exception.getMessage());
+    body.put("slotIndex", exception.slotIndex());
+    // Fehler einer Unterrichtszeit sind 400; Fehler des Plans oder der Klasse behalten ihren
+    // üblichen Status, etwa 403, 404 oder 409
+    var known = exception.slotIndex() == null ? known(exception.getMessage()) : null;
+    return ResponseEntity.status(known == null ? HttpStatus.BAD_REQUEST : known.getStatusCode())
+        .body(body);
+  }
+
   /** Meldet eine wegen gleichzeitiger Änderung abgebrochene Transaktion */
   @ExceptionHandler(PessimisticLockingFailureException.class)
   ResponseEntity<Map<String, String>> concurrentChange() {
@@ -47,8 +76,16 @@ class StaffApiErrors {
   ResponseEntity<Map<String, String>> serviceError(RuntimeException exception) {
     // Sobald weitere Fehlerfälle dazukommen, soll die HTTP-Zuordnung typisierte Fehlercodes aus
     // einem Enum verwenden
-    String code = String.valueOf(exception.getMessage());
-    return switch (code) {
+    var known = known(exception.getMessage());
+    if (known == null) {
+      throw exception;
+    }
+    return known;
+  }
+
+  /** Ordnet einem bekannten Fehlercode Status und Antwort zu, sonst null */
+  private static ResponseEntity<Map<String, String>> known(String code) {
+    return switch (String.valueOf(code)) {
       case "MASTER_DATA_NOT_FOUND",
               "CLASS_ACCESS_DENIED",
               "CLASS_NOT_FOUND",
@@ -100,20 +137,27 @@ class StaffApiErrors {
               "INVALID_STATUS_TIME",
               "INVALID_ATTENDANCE_DATE",
               "INVALID_MANUAL_ABSENCE_MINUTES",
+              "MANUAL_ABSENCE_EXCEEDS_SCHOOL_DAY",
+              "INVALID_MANUAL_ABSENCE_NOTE",
+              "BIRTH_DATE_IN_FUTURE",
+              "INVALID_LESSON_CANCELLATION",
+              "INVALID_TIMETABLE_IMAGE",
               "INVALID_PLANNED_ATTENDANCE_DATE",
               "INVALID_PLANNED_ATTENDANCE_STATUS",
               "INVALID_PLANNED_ATTENDANCE_TIME",
               "INVALID_ATTENDANCE_STATUS" ->
           error(HttpStatus.BAD_REQUEST, code);
+      case "TIMETABLE_IMAGE_TOO_LARGE" -> error(HttpStatus.PAYLOAD_TOO_LARGE, code);
+      case "TIMETABLE_NOT_RECOGNIZED" -> error(HttpStatus.UNPROCESSABLE_ENTITY, code);
       case "ASSISTANT_BUSY" -> error(HttpStatus.TOO_MANY_REQUESTS, code);
       case "ASSISTANT_UNAVAILABLE" -> error(HttpStatus.SERVICE_UNAVAILABLE, code);
       case "RFID_UID_UPDATE_FAILED" -> error(HttpStatus.INTERNAL_SERVER_ERROR, code);
-      default -> throw exception;
+      default -> null;
     };
   }
 
   /** Erstellt die Antwort mit einem maschinenlesbaren Fehlercode */
-  private ResponseEntity<Map<String, String>> error(HttpStatus status, String code) {
+  private static ResponseEntity<Map<String, String>> error(HttpStatus status, String code) {
     return ResponseEntity.status(status).body(Map.of("code", code));
   }
 }

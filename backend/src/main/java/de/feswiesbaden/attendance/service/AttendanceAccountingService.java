@@ -7,8 +7,10 @@ import de.feswiesbaden.attendance.enums.ScanResult;
 import de.feswiesbaden.attendance.repository.AttendanceAccountingRepository;
 import de.feswiesbaden.attendance.repository.AttendanceAccountingRepository.Account;
 import de.feswiesbaden.attendance.repository.AttendanceAccountingRepository.Audit;
+import de.feswiesbaden.attendance.repository.AttendanceAccountingRepository.Cancellation;
 import de.feswiesbaden.attendance.repository.AttendanceAccountingRepository.DayAttendance;
 import de.feswiesbaden.attendance.repository.AttendanceAccountingRepository.FullDay;
+import de.feswiesbaden.attendance.repository.AttendanceAccountingRepository.ManualAbsence;
 import de.feswiesbaden.attendance.repository.AttendanceAccountingRepository.Period;
 import de.feswiesbaden.attendance.repository.AttendanceAccountingRepository.PlannedStatus;
 import de.feswiesbaden.attendance.repository.AttendanceAccountingRepository.Slot;
@@ -37,6 +39,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.TreeMap;
 import java.util.UUID;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -53,6 +56,9 @@ import org.springframework.transaction.support.TransactionTemplate;
 @Service
 public class AttendanceAccountingService {
   static final ZoneId BERLIN = ZoneId.of("Europe/Berlin");
+
+  /** Ab dieser Berliner Uhrzeit zählt ein Scan auch vor Beginn der nächsten Stunde */
+  private static final LocalTime EARLIEST_CHECK_IN = LocalTime.of(7, 30);
 
   private static final Logger LOG = LoggerFactory.getLogger(AttendanceAccountingService.class);
 
@@ -97,9 +103,11 @@ public class AttendanceAccountingService {
 
   /**
    * Prüft die Terminalzuordnung und speichert Rohscan und Fachänderungen atomar. Neue Scans buchen
-   * nur im zugeordneten Raum und Block aus ABWESEND oder BETRIEBLICH_ENTSCHULDIGT. Überlappende
-   * Slots am Tag des Scans, ein durch eine andere Klasse zur selben Zeit belegter Raum oder eine
-   * Blockzuordnung zu einem fremden Plan gelten als Datenproblem und lehnen den Scan neutral ab
+   * nur im zugeordneten Raum und Block aus ABWESEND oder BETRIEBLICH_ENTSCHULDIGT. Vor einer
+   * Stunde, in Pausen und während ausgefallener Stunden zählt der Scan ab 07:30 Uhr für die nächste
+   * stattfindende Stunde des Tages. Überlappende Slots am Tag des Scans, ein durch eine andere
+   * Klasse zur selben Zeit belegter Raum oder eine Blockzuordnung zu einem fremden Plan gelten als
+   * Datenproblem und lehnen den Scan neutral ab
    */
   @Transactional
   public ScanResult recordScan(String verifiedSubject, RawScanDTO scan, Instant receivedAt) {
@@ -122,7 +130,7 @@ public class AttendanceAccountingService {
     var berlinTime = capturedAt.atZone(BERLIN).toLocalTime();
     Day day;
     try {
-      day = lockDay(studentId, berlinDate(at));
+      day = lockDay(studentId, berlinDate(at), false);
     } catch (InvalidClassBlockAssignmentException dataProblem) {
       // Ein Datenproblem, das der Scan nicht lösen kann. Der Rohscan bleibt gespeichert und das
       // Terminal wiederholt ihn nicht. Technische Fehler rollen dagegen zurück, damit das Terminal
@@ -132,16 +140,25 @@ public class AttendanceAccountingService {
     if (day == null) {
       return ScanResult.REJECTED;
     }
+    // Läuft gerade eine stattfindende Stunde, zählt der Scan nur in deren Raum. Außerhalb der
+    // Stunden gilt er ab 07:30 Uhr für die nächste stattfindende Stunde und deren Raum
     var slot =
         day.slots().stream()
             .filter(
                 candidate ->
-                    candidate.roomId() == roomId
-                        && !berlinTime.isBefore(candidate.startsAt())
+                    !berlinTime.isBefore(candidate.startsAt())
                         && berlinTime.isBefore(candidate.endsAt()))
             .findFirst()
-            .orElse(null);
+            .orElseGet(
+                () ->
+                    berlinTime.isBefore(EARLIEST_CHECK_IN)
+                        ? null
+                        : day.slots().stream()
+                            .filter(candidate -> candidate.startsAt().isAfter(berlinTime))
+                            .findFirst()
+                            .orElse(null));
     if (slot == null
+        || slot.roomId() != roomId
         || hasOverlappingSlots(day.slots())
         || accounting.roomDoubleBooked(
             day.plan().classId(), roomId, slot.startsAt(), slot.endsAt(), day.date())) {
@@ -181,7 +198,7 @@ public class AttendanceAccountingService {
         || !occurredAt.atZone(BERLIN).toLocalDate().equals(date)) {
       throw new IllegalArgumentException("INVALID_STATUS_TIME");
     }
-    var day = lockDay(studentId, date);
+    var day = lockDay(studentId, date, false);
     if (day == null) {
       throw new IllegalArgumentException("ATTENDANCE_DAY_LOCKED_OR_UNPLANNED");
     }
@@ -212,16 +229,24 @@ public class AttendanceAccountingService {
     return !changes.isEmpty() && reconcile(day, changes, null).changed();
   }
 
-  /** Bucht zusätzliche unentschuldigte Minuten ohne Änderung des Statusverlaufs */
+  /**
+   * Bucht zusätzliche unentschuldigte Minuten mit einem Pflichtvermerk ohne Änderung des
+   * Statusverlaufs
+   */
   @Transactional
-  public boolean addManualAbsence(Long studentId, LocalDate date, int minutes, UUID requestId) {
+  public boolean addManualAbsence(
+      Long studentId, LocalDate date, int minutes, UUID requestId, String note) {
     var actor = authorization.currentStaff();
     requireStudentClassAccess(studentId, actor);
     if (minutes < 1 || requestId == null) {
       throw new IllegalArgumentException("INVALID_MANUAL_ABSENCE_MINUTES");
     }
+    if (note == null || note.isBlank() || note.strip().length() > 200) {
+      throw new IllegalArgumentException("INVALID_MANUAL_ABSENCE_NOTE");
+    }
     var day = lockEditableDay(studentId, date);
-    if (!date.isBefore(berlinDate(day.now()))
+    // Nach Unterrichtsende ist der Tag buchbar, vorher nur nach erfasster Anwesenheit
+    if (!lessonsOver(date, day.slots(), day.now())
         && !(date.equals(berlinDate(day.now()))
             && wasPresent(day.audits())
             && teachingTime(date, day.slots().getFirst().startsAt()).isBefore(day.now()))) {
@@ -236,13 +261,64 @@ public class AttendanceAccountingService {
         return false;
       }
     }
-    if (minutes > Integer.MAX_VALUE - day.account().unexcused()) {
-      throw new IllegalArgumentException("INVALID_MANUAL_ABSENCE_MINUTES");
+    if (minutes > manualAbsenceLimit(date, day.slots(), day.timeline(), day.now())) {
+      throw new IllegalArgumentException("MANUAL_ABSENCE_EXCEEDS_SCHOOL_DAY");
     }
+    return reconcile(
+            day,
+            List.of(manualAbsenceChange(date, actor.id())),
+            new ManualBooking(minutes, requestId, note.strip()))
+        .changed();
+  }
+
+  /**
+   * Nimmt alle händisch erfassten Fehlminuten des Berliner Tags zurück. Die bisherigen Buchungen
+   * bleiben im Protokoll erhalten; eine Gegenbuchung gleicht sie auf den Konten und in der
+   * Tageszählung aus. Liefert false, wenn der Tag keine händischen Fehlminuten enthält
+   */
+  @Transactional
+  public boolean removeManualAbsence(Long studentId, LocalDate date) {
+    var actor = authorization.currentStaff();
+    requireStudentClassAccess(studentId, actor);
+    // Auch nach einem Ausfall des ganzen Tages bleiben die Minuten so entfernbar
+    var day = lockEditableDay(studentId, date, true);
+    long recorded = manualAbsenceMinutes(day.audits());
+    if (recorded <= 0) {
+      return false;
+    }
+    return reconcile(
+            day,
+            List.of(manualAbsenceChange(date, actor.id())),
+            new ManualBooking(Math.toIntExact(-recorded), null, null))
+        .changed();
+  }
+
+  private static Change manualAbsenceChange(LocalDate date, Long staffId) {
     var datedAt = LocalDateTime.ofInstant(date.atStartOfDay(BERLIN).toInstant(), ZoneOffset.UTC);
-    var change =
-        new Change(AuditEventType.MANUAL_ABSENCE_MINUTES, null, null, datedAt, actor.id(), null);
-    return reconcile(day, List.of(change), new ManualBooking(minutes, requestId)).changed();
+    return new Change(AuditEventType.MANUAL_ABSENCE_MINUTES, null, null, datedAt, staffId, null);
+  }
+
+  /**
+   * Liefert die noch zulässigen händischen Minuten: geplante Unterrichtsminuten abzüglich der bis
+   * now berechneten und der bereits händisch gebuchten Fehlminuten des Tages
+   */
+  static long manualAbsenceLimit(
+      LocalDate date, List<Slot> slots, List<Audit> timeline, LocalDateTime now) {
+    var booked = calculate(date, slots, timeline, now);
+    return Math.max(
+        0,
+        plannedMinutes(slots)
+            - booked.unexcused()
+            - booked.excused()
+            - manualAbsenceMinutes(timeline));
+  }
+
+  /** Summiert die geplanten Unterrichtsminuten der Slots eines Tages ohne Pausen */
+  static long plannedMinutes(List<Slot> slots) {
+    return slots.stream()
+            .mapToLong(slot -> Duration.between(slot.startsAt(), slot.endsAt()).getSeconds())
+            .sum()
+        / 60;
   }
 
   /** Ändert den Status im halboffenen Zeitraum und belässt die übrigen Statusereignisse */
@@ -251,8 +327,8 @@ public class AttendanceAccountingService {
       Long studentId, LocalDate date, AttendanceStatus status, LocalTime start, LocalTime end) {
     var actor = authorization.currentStaff();
     requireStudentClassAccess(studentId, actor);
-    var from = berlinTime(date, start);
-    var until = berlinTime(date, end);
+    var from = berlinTime(date, start, "INVALID_STATUS_TIME");
+    var until = berlinTime(date, end, "INVALID_STATUS_TIME");
     if (status == null || !from.isBefore(until)) {
       throw new IllegalArgumentException("INVALID_STATUS_TIME");
     }
@@ -315,7 +391,7 @@ public class AttendanceAccountingService {
     if (!planned.start().isAfter(now) || planned.date().isAfter(lastPreviewDate(berlinDate(now)))) {
       throw new IllegalArgumentException("INVALID_PLANNED_ATTENDANCE_DATE");
     }
-    var day = lockDay(planned.studentId(), planned.date());
+    var day = lockDay(planned.studentId(), planned.date(), false);
     if (day == null || hasOverlappingSlots(day.slots())) {
       throw new IllegalArgumentException("ATTENDANCE_DAY_LOCKED_OR_UNPLANNED");
     }
@@ -392,27 +468,43 @@ public class AttendanceAccountingService {
     }
   }
 
-  private static LocalDateTime berlinTime(LocalDate date, LocalTime time) {
+  /** Wandelt eine eindeutige, sekundengenaue Berliner Uhrzeit in UTC um, sonst gilt der Code */
+  private static LocalDateTime berlinTime(LocalDate date, LocalTime time, String invalidCode) {
     if (time == null || time.getNano() != 0) {
-      throw new IllegalArgumentException("INVALID_STATUS_TIME");
+      throw new IllegalArgumentException(invalidCode);
     }
     var local = date.atTime(time);
     var offsets = BERLIN.getRules().getValidOffsets(local);
     if (offsets.size() != 1) {
-      throw new IllegalArgumentException("INVALID_STATUS_TIME");
+      throw new IllegalArgumentException(invalidCode);
     }
     return LocalDateTime.ofInstant(local.toInstant(offsets.getFirst()), ZoneOffset.UTC);
   }
 
+  /** Sperrt einen Tag, dessen stattfindender Unterricht bereits vollständig beendet ist */
   private Day lockHistoryDay(Long studentId, LocalDate date) {
-    if (!date.isBefore(berlinDate(now()))) {
+    if (date.isAfter(berlinDate(now()))) {
       throw new IllegalArgumentException("INVALID_ATTENDANCE_DATE");
     }
-    return lockEditableDay(studentId, date);
+    var day = lockEditableDay(studentId, date);
+    if (!lessonsOver(day.date(), day.slots(), day.now())) {
+      throw new IllegalArgumentException("INVALID_ATTENDANCE_DATE");
+    }
+    return day;
+  }
+
+  /** Prüft, ob die letzte stattfindende Stunde des Tages bis now beendet ist */
+  private static boolean lessonsOver(LocalDate date, List<Slot> slots, LocalDateTime now) {
+    return !slots.isEmpty() && !teachingTime(date, slots.getLast().endsAt()).isAfter(now);
   }
 
   private Day lockEditableDay(Long studentId, LocalDate date) {
-    var day = lockDay(studentId, date);
+    return lockEditableDay(studentId, date, false);
+  }
+
+  /** Wie oben; mit withoutLessons auch für einen Tag, dessen Unterricht ganz ausgefallen ist */
+  private Day lockEditableDay(Long studentId, LocalDate date, boolean withoutLessons) {
+    var day = lockDay(studentId, date, withoutLessons);
     if (day == null || hasOverlappingSlots(day.slots())) {
       throw new IllegalArgumentException("ATTENDANCE_DAY_LOCKED_OR_UNPLANNED");
     }
@@ -432,26 +524,71 @@ public class AttendanceAccountingService {
       Day day, AttendanceStatus status, Instant occurredAt, Long staffId) {
     requireAllowedStatus(day, status);
     var at = LocalDateTime.ofInstant(occurredAt, ZoneOffset.UTC);
-    return reconcile(
-            day,
-            new Change(
-                AuditEventType.STATUS_CHANGE,
-                statusAt(day.timeline(), at),
-                status,
-                at,
-                staffId,
-                null))
-        .changed();
+    var changes = new ArrayList<Change>();
+    if (status == AttendanceStatus.ABWESEND) {
+      // Rücknahme eines Fehlklicks: Jede händisch gesetzte Anwesenheit ab dem neuen Zeitpunkt wird
+      // zu ihrem eigenen Zeitpunkt überschrieben. Frühere Anwesenheit bleibt bestehen
+      day.audits().stream()
+          .filter(
+              audit ->
+                  manualPresence(audit)
+                      && !audit.occurredAt().isBefore(at)
+                      && !retracted(audit, day.audits()))
+          .map(Audit::occurredAt)
+          .distinct()
+          .sorted()
+          .forEach(
+              time ->
+                  addStatusChange(changes, statusAt(day.audits(), time), status, time, staffId));
+    }
+    addStatusChange(changes, statusAt(projectChanges(day, changes), at), status, at, staffId);
+    if (changes.isEmpty()) {
+      // Ohne Statuswechsel gleicht der Abgleich wie bisher nur offene Minuten aus
+      changes.add(new Change(AuditEventType.STATUS_CHANGE, status, status, at, staffId, null));
+    }
+    return reconcile(day, changes, null).changed();
   }
 
   private static void requireAllowedStatus(Day day, AttendanceStatus status) {
-    if (status == AttendanceStatus.ABWESEND && wasPresent(day.audits())) {
+    if (status == AttendanceStatus.ABWESEND && !canMarkAbsent(day.audits())) {
       throw new IllegalArgumentException("ATTENDANCE_ALREADY_PRESENT");
     }
   }
 
+  /**
+   * ABWESEND bleibt als Korrektur zulässig, solange kein RFID-Scan des Tages vorliegt. Eine nur
+   * händisch gesetzte Anwesenheit lässt sich damit zurücknehmen
+   */
+  static boolean canMarkAbsent(List<Audit> audits) {
+    return audits.stream().noneMatch(audit -> audit.type() == AuditEventType.SCAN);
+  }
+
+  /** Prüft, ob am Tag eine nicht zurückgenommene Anwesenheit erfasst ist */
   static boolean wasPresent(List<Audit> audits) {
-    return audits.stream().anyMatch(audit -> audit.status() == AttendanceStatus.ANWESEND);
+    return audits.stream()
+        .anyMatch(
+            audit -> audit.status() == AttendanceStatus.ANWESEND && !retracted(audit, audits));
+  }
+
+  private static boolean manualPresence(Audit audit) {
+    return audit.type() == AuditEventType.STATUS_CHANGE
+        && audit.status() == AttendanceStatus.ANWESEND;
+  }
+
+  /**
+   * Eine händisch gesetzte Anwesenheit gilt als zurückgenommen, wenn eine spätere Korrektur sie zum
+   * selben Zeitpunkt mit ABWESEND überschreibt. Scans lassen sich nicht zurücknehmen
+   */
+  static boolean retracted(Audit presence, List<Audit> audits) {
+    return manualPresence(presence)
+        && audits.stream()
+            .anyMatch(
+                later ->
+                    later.status() == AttendanceStatus.ABWESEND
+                        && later.id() != null
+                        && presence.id() != null
+                        && later.id() > presence.id()
+                        && later.occurredAt().equals(presence.occurredAt()));
   }
 
   /** Berechnet die Auswirkungen einer Entschuldigung ohne Buchung. */
@@ -527,6 +664,7 @@ public class AttendanceAccountingService {
     var periods = accounting.findPeriods(request.classId(), lock);
     requirePlanPeriods(plan, periods);
     var slots = accounting.findSlots(plan.timetableId(), lock);
+    var cancellations = accounting.findCancellations(request.classId());
     var now = now();
     if (!retained(plan, now)) {
       throw new IllegalArgumentException("ATTENDANCE_DAY_LOCKED_OR_UNPLANNED");
@@ -546,7 +684,7 @@ public class AttendanceAccountingService {
     var bookings = new ArrayList<ExcusalBooking>();
     boolean scheduled = false;
     for (var date = request.date(); !date.isAfter(endDate); date = date.plusDays(1)) {
-      var daySlots = slotsFor(plan, periods, slots, date);
+      var daySlots = slotsFor(plan, periods, slots, cancellations, date);
       if (daySlots.isEmpty()) {
         continue;
       }
@@ -570,11 +708,11 @@ public class AttendanceAccountingService {
               now);
       var start =
           timed
-              ? excusalBoundary(date, request.startsAt())
+              ? berlinTime(date, request.startsAt(), "INVALID_EXCUSAL_TIME")
               : teachingTime(date, day.slots().getFirst().startsAt());
       var end =
           timed
-              ? excusalBoundary(date, request.endsAt())
+              ? berlinTime(date, request.endsAt(), "INVALID_EXCUSAL_TIME")
               : teachingTime(date, day.slots().getLast().endsAt());
       if (!start.isBefore(end) || (timed && end.isAfter(day.now()))) {
         throw new IllegalArgumentException("INVALID_EXCUSAL_TIME");
@@ -616,15 +754,6 @@ public class AttendanceAccountingService {
     return bookings;
   }
 
-  private static LocalDateTime excusalBoundary(LocalDate date, LocalTime time) {
-    var local = date.atTime(time);
-    var offsets = BERLIN.getRules().getValidOffsets(local);
-    if (offsets.size() != 1 || time.getNano() != 0) {
-      throw new IllegalArgumentException("INVALID_EXCUSAL_TIME");
-    }
-    return LocalDateTime.ofInstant(local.toInstant(offsets.getFirst()), ZoneOffset.UTC);
-  }
-
   private static ExcusalImpact excusalImpact(List<ExcusalBooking> bookings) {
     var days = bookings.stream().map(ExcusalBooking::impact).toList();
     return new ExcusalImpact(
@@ -642,11 +771,8 @@ public class AttendanceAccountingService {
     if (date == null || date.isAfter(today)) {
       throw new IllegalArgumentException("INVALID_ATTENDANCE_DATE");
     }
-    var plan =
-        classes
-            .findPlan(classId, false)
-            .orElseThrow(() -> new IllegalArgumentException("CLASS_NOT_FOUND"));
-    var slots = readDaySlots(plan, date, now);
+    var plan = readPlan(classId);
+    var slots = daySlots(plan, now).apply(date);
     var audits = accounting.findDayAudits(classId, date, today);
     var plannedStatuses =
         accounting.findClassPlannedStatuses(classId, date, today).stream()
@@ -683,7 +809,12 @@ public class AttendanceAccountingService {
               minutes,
               present,
               full,
-              manualAbsenceMinutes(dayAudits)));
+              manualAbsenceMinutes(dayAudits),
+              planned
+                  ? contribution.excused()
+                  : dayAudits.stream().mapToLong(Audit::excusedDelta).sum(),
+              planned && canMarkAbsent(dayAudits),
+              student.birthDate()));
     }
     return result;
   }
@@ -711,7 +842,12 @@ public class AttendanceAccountingService {
                 audit.excusalStatus() == null
                     ? AttendanceStatus.ENTSCHULDIGT
                     : audit.excusalStatus())
-        .orElse(AttendanceStatus.ABWESEND);
+        // Eine ganztägige Statuskorrektur endet mit der letzten Stunde; sie bleibt danach sichtbar
+        .orElseGet(
+            () -> {
+              var status = statusAt(timeline, at);
+              return excused(status) ? status : AttendanceStatus.ABWESEND;
+            });
   }
 
   /** Liefert vergangene Berliner Tagesdaten der Woche eines autorisierten Schülers */
@@ -723,20 +859,15 @@ public class AttendanceAccountingService {
     if (date.isAfter(lastPreviewDate(today))) {
       throw new IllegalArgumentException("INVALID_ATTENDANCE_DATE");
     }
-    var joined =
-        students
-            .findCreatedAt(studentId, classId)
-            .map(AttendanceAccountingService::berlinDate)
-            .orElseThrow(() -> new IllegalArgumentException("STUDENT_NOT_FOUND"));
-    var plan =
-        classes
-            .findPlan(classId, false)
-            .orElseThrow(() -> new IllegalArgumentException("CLASS_NOT_FOUND"));
+    var joined = joinedOn(studentId, classId);
+    var plan = readPlan(classId);
     var weekStart = date.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY));
     var weekEnd = weekStart.plusDays(6);
+    var lessons = daySlots(plan, now);
     var audits = accounting.findStudentDayAudits(studentId, weekStart, weekEnd, today);
     var fullAbsences = accounting.findFullAbsences(studentId, weekStart, weekEnd, today);
     var plannedStatuses = plannedByDate(studentId, weekStart, weekEnd, today, false);
+    var manualEntries = accounting.findManualEntries(studentId, weekStart, weekEnd, today);
     var resetDay =
         accounting
             .latestResetAt(studentId)
@@ -752,7 +883,7 @@ public class AttendanceAccountingService {
               .sorted(Comparator.comparing(Audit::occurredAt))
               .map(ExcusalView::from)
               .toList();
-      var slots = day.isBefore(joined) ? List.<Slot>of() : readDaySlots(plan, day, now);
+      var slots = day.isBefore(joined) ? List.<Slot>of() : lessons.apply(day);
       if (hasOverlappingSlots(slots)) {
         slots = List.of();
       }
@@ -765,13 +896,16 @@ public class AttendanceAccountingService {
       boolean lessonsRemaining =
           slots.stream().anyMatch(slot -> teachingTime(dayDate, slot.endsAt()).isAfter(now));
       boolean unlocked = day.isAfter(resetDay);
+      // Nach der letzten Stunde ist der heutige Tag wie ein vergangener bearbeitbar
+      boolean finished = past || (day.equals(today) && lessonsOver(day, slots, now));
       boolean canCorrectStatus = unlocked && !slots.isEmpty() && (past || elapsedToday);
       boolean canPlanStatus = unlocked && !past && lessonsRemaining;
       var preview =
           past
               ? List.<PlannedStatusView>of()
               : dayPlans.stream().map(PlannedStatusView::from).toList();
-      if (past || (elapsedToday && !lessonsRemaining)) {
+      if (past || elapsedToday) {
+        // Ein noch laufender Unterrichtstag liefert den Zwischenstand bis jetzt
         var timeline = slots.isEmpty() ? dayAudits : includePlannedStatuses(dayAudits, dayPlans);
         days.add(
             AttendanceHistory.describe(
@@ -779,11 +913,14 @@ public class AttendanceAccountingService {
                 slots,
                 timeline,
                 now,
-                past && unlocked,
+                finished && unlocked,
                 canCorrectStatus,
+                canPlanStatus,
+                elapsedToday && lessonsRemaining,
                 preview,
                 fullAbsences.get(day),
-                excusals));
+                excusals,
+                effectiveManualEntries(manualEntries.getOrDefault(day, List.of()))));
       } else {
         days.add(
             new HistoryDay(
@@ -802,11 +939,79 @@ public class AttendanceAccountingService {
                 null,
                 wasPresent(dayAudits),
                 unlocked && elapsedToday && wasPresent(dayAudits),
-                excusals));
+                excusals,
+                plannedMinutes(slots),
+                false,
+                false,
+                effectiveManualEntries(manualEntries.getOrDefault(day, List.of())),
+                0));
       }
     }
     return new HistoryWeek(weekStart, weekEnd, days);
   }
+
+  /**
+   * Liefert je Kalendertag, ob Unterricht geplant ist und ob Fehlminuten angefallen sind. Der
+   * Zeitraum umfasst höchstens 93 Tage. Künftige Tage gelten nie als Fehltag, der heutige Tag zählt
+   * mit dem Zwischenstand bis jetzt
+   */
+  @Transactional(readOnly = true)
+  public List<CalendarDay> readCalendar(Long studentId, LocalDate from, LocalDate to) {
+    var classId = requireStudentClassAccess(studentId, authorization.currentStaff());
+    if (from == null
+        || to == null
+        || to.isBefore(from)
+        || ChronoUnit.DAYS.between(from, to) >= 93) {
+      throw new IllegalArgumentException("INVALID_ATTENDANCE_DATE");
+    }
+    var now = now();
+    var today = berlinDate(now);
+    var joined = joinedOn(studentId, classId);
+    var plan = readPlan(classId);
+    var lessons = daySlots(plan, now);
+    var audits = accounting.findStudentDayAudits(studentId, from, to, today);
+    var plannedStatuses = plannedByDate(studentId, from, to, today, false);
+    var days = new ArrayList<CalendarDay>();
+    for (var date = from; !date.isAfter(to); date = date.plusDays(1)) {
+      var daySlots = lessons.apply(date);
+      var dayAudits = audits.getOrDefault(date, List.of());
+      boolean absent = false;
+      if (!date.isAfter(today)) {
+        if (daySlots.isEmpty() || hasOverlappingSlots(daySlots) || date.isBefore(joined)) {
+          absent =
+              dayAudits.stream()
+                      .mapToLong(audit -> (long) audit.unexcusedDelta() + audit.excusedDelta())
+                      .sum()
+                  > 0;
+        } else {
+          var timeline =
+              includePlannedStatuses(dayAudits, plannedStatuses.getOrDefault(date, List.of()));
+          var minutes = calculate(date, daySlots, timeline, now);
+          absent = minutes.unexcused() + minutes.excused() + manualAbsenceMinutes(dayAudits) > 0;
+        }
+      }
+      days.add(new CalendarDay(date, !daySlots.isEmpty(), absent));
+    }
+    return days;
+  }
+
+  /** Liefert den Berliner Tag der Schüleranlage in der angegebenen Klasse */
+  private LocalDate joinedOn(Long studentId, Long classId) {
+    return students
+        .findCreatedAt(studentId, classId)
+        .map(AttendanceAccountingService::berlinDate)
+        .orElseThrow(() -> new IllegalArgumentException("STUDENT_NOT_FOUND"));
+  }
+
+  /** Liest den aktuellen Plan der Klasse ohne Sperre */
+  private ClassPlan readPlan(Long classId) {
+    return classes
+        .findPlan(classId, false)
+        .orElseThrow(() -> new IllegalArgumentException("CLASS_NOT_FOUND"));
+  }
+
+  /** Ein Kalendertag des Schülerprofils mit Unterrichts- und Fehlzeitkennzeichen */
+  public record CalendarDay(LocalDate date, boolean lessonDay, boolean absent) {}
 
   public record HistoryWeek(LocalDate startsOn, LocalDate endsOn, List<HistoryDay> days) {}
 
@@ -826,7 +1031,43 @@ public class AttendanceAccountingService {
       AttendanceStatus fullAbsence,
       boolean wasPresent,
       boolean canBookMinutes,
-      List<ExcusalView> excusals) {}
+      List<ExcusalView> excusals,
+      long plannedMinutes,
+      boolean interim,
+      boolean canMarkAbsent,
+      List<ManualAbsenceEntry> manualAbsenceEntries,
+      long manualAbsenceLimit) {
+    /** Ein Tag ohne Unterricht und ohne Buchungen */
+    static HistoryDay empty(
+        LocalDate date, List<ExcusalView> excusals, List<ManualAbsenceEntry> entries) {
+      return new HistoryDay(
+          date, null, null, null, false, null, false, false, 0, false, false, List.of(), null,
+          false, false, excusals, 0, false, false, entries, 0);
+    }
+  }
+
+  /** Eine wirksame händische Fehlminutenbuchung mit ihrem Vermerk; Altbestand hat keinen */
+  public record ManualAbsenceEntry(long minutes, String note) {}
+
+  /** Behält nur die Buchungen nach der letzten Rücknahme des Tages */
+  private static List<ManualAbsenceEntry> effectiveManualEntries(List<ManualAbsenceEntry> entries) {
+    var effective = new ArrayList<ManualAbsenceEntry>();
+    for (var entry : entries) {
+      if (entry.minutes() < 0) {
+        effective.clear();
+      } else if (entry.minutes() > 0) {
+        effective.add(entry);
+      }
+    }
+    return effective;
+  }
+
+  /** Nennt die Schüler der Klasse mit wirksamen händischen Fehlminuten an diesem Tag */
+  @Transactional(readOnly = true)
+  public List<ManualAbsence> findManualAbsences(Long classId, LocalDate date) {
+    authorization.requireClassAccess(classId, authorization.currentStaff());
+    return accounting.findManualAbsences(classId, date, berlinDate(now()));
+  }
 
   public record ExcusalView(
       LocalTime startsAt, LocalTime endsAt, AttendanceStatus status, String reason) {
@@ -875,14 +1116,18 @@ public class AttendanceAccountingService {
     var serverTime = now.toInstant(ZoneOffset.UTC);
     Long nextClassId = null;
     LocalTime nextStart = null;
-    for (var schoolClass : classes.findAccessible(actor.id(), actor.administrator())) {
+    var accessible =
+        classes.findAccessible(actor.id(), actor.administrator()).stream()
+            .sorted(Comparator.comparing(SchoolClassRepository.ClassData::id))
+            .toList();
+    for (var schoolClass : accessible) {
       var plan = classes.findPlan(schoolClass.id(), false).orElse(null);
       if (plan == null) {
         continue;
       }
       List<Slot> slots;
       try {
-        slots = readDaySlots(plan, today, now);
+        slots = daySlots(plan, now).apply(today);
       } catch (InvalidClassBlockAssignmentException dataProblem) {
         LOG.warn("CURRENT_CLASS_SKIPPED_INVALID_BLOCK_ASSIGNMENT classId={}", schoolClass.id());
         continue;
@@ -911,32 +1156,165 @@ public class AttendanceAccountingService {
   @Transactional(readOnly = true)
   public ClassWeek readClassWeek(Long classId, LocalDate date) {
     authorization.requireClassAccess(classId, authorization.currentStaff());
-    var plan =
-        classes
-            .findPlan(classId, false)
-            .orElseThrow(() -> new IllegalArgumentException("CLASS_NOT_FOUND"));
+    var plan = readPlan(classId);
     var monday = date.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY));
     var days = new TreeMap<LocalDate, List<Slot>>();
     var periods = accounting.findPeriods(classId, false);
     requirePlanPeriods(plan, periods);
     var slots = accounting.findSlots(plan.timetableId(), false);
+    var cancellations = accounting.findCancellations(classId);
+    var cancelled = new TreeMap<LocalDate, List<LocalTime>>();
     for (int index = 0; index < 5; index++) {
       var day = monday.plusDays(index);
-      days.put(day, slotsFor(plan, periods, slots, day));
+      var daySlots = scheduledSlots(plan, periods, slots, day);
+      days.put(day, daySlots);
+      cancelled.put(
+          day,
+          daySlots.stream()
+              .filter(slot -> cancellations.stream().anyMatch(known -> cancels(known, day, slot)))
+              .map(Slot::startsAt)
+              .toList());
     }
-    return new ClassWeek(plan.timetableId(), days);
+    return new ClassWeek(plan.timetableId(), days, cancelled);
   }
 
-  public record ClassWeek(Long timetableId, Map<LocalDate, List<Slot>> days) {}
+  /**
+   * Enthält die Unterrichtszeiten der Woche einschließlich ausgefallener Stunden. cancelled nennt
+   * je Tag die Anfangszeiten der ausgefallenen Unterrichtszeiten
+   */
+  public record ClassWeek(
+      Long timetableId,
+      Map<LocalDate, List<Slot>> days,
+      Map<LocalDate, List<LocalTime>> cancelled) {}
 
-  /** Liefert geplante Slots des Tages, solange die Aufbewahrungsfrist des Plans läuft */
-  private List<Slot> readDaySlots(ClassPlan plan, LocalDate date, LocalDateTime now) {
+  /**
+   * Markiert die Unterrichtszeit eines Tages, die um startsAt beginnt, als ausgefallen. Ohne
+   * startsAt fallen alle Unterrichtszeiten des Tages aus. Bereits gebuchte Fehlminuten der Klasse
+   * werden für diesen Tag neu abgerechnet. Liefert false, wenn alles schon ausgefallen war
+   */
+  @Transactional
+  public boolean cancelLessons(Long classId, LocalDate date, LocalTime startsAt) {
+    return changeCancellations(classId, date, startsAt, true);
+  }
+
+  /** Nimmt den Unterrichtsausfall zurück und rechnet den Tag der Klasse neu ab */
+  @Transactional
+  public boolean restoreLessons(Long classId, LocalDate date, LocalTime startsAt) {
+    return changeCancellations(classId, date, startsAt, false);
+  }
+
+  private boolean changeCancellations(
+      Long classId, LocalDate date, LocalTime startsAt, boolean cancel) {
+    var actor = authorization.currentStaff();
+    authorization.requireClassAccess(classId, actor);
+    if (date == null) {
+      throw new IllegalArgumentException("INVALID_LESSON_CANCELLATION");
+    }
+    var plan =
+        classes
+            .lockPlan(classId)
+            .orElseThrow(() -> new IllegalArgumentException("CLASS_NOT_FOUND"));
+    var now = now();
+    var periods = accounting.findPeriods(classId, true);
+    requirePlanPeriods(plan, periods);
+    var slots = accounting.findSlots(plan.timetableId(), true);
+    var targets =
+        scheduledSlots(plan, periods, slots, date).stream()
+            .filter(slot -> startsAt == null || slot.startsAt().equals(startsAt))
+            .toList();
+    // Ein Ausfall gilt für jede Stunde, mit der sich seine gespeicherte Zeitspanne überschneidet
+    var recorded =
+        accounting.findCancellations(classId).stream()
+            .filter(
+                cancellation ->
+                    cancellation.date().equals(date)
+                        && (startsAt == null
+                            || cancellation.startsAt().equals(startsAt)
+                            || targets.stream()
+                                .anyMatch(slot -> cancels(cancellation, date, slot))))
+            .toList();
+    List<Slot> added = List.of();
+    if (cancel) {
+      if (targets.isEmpty()) {
+        throw new IllegalArgumentException("INVALID_LESSON_CANCELLATION");
+      }
+      added =
+          targets.stream()
+              .filter(slot -> recorded.stream().noneMatch(known -> cancels(known, date, slot)))
+              .toList();
+      if (added.isEmpty()) {
+        return false;
+      }
+    } else if (recorded.isEmpty()) {
+      return false;
+    }
+    // Abgelaufene Aufbewahrung, ein anderer Blockplan oder ein Kontenreset sperren den Tag
     if (!retained(plan, now) || date.isBefore(plan.startsOn()) || date.isAfter(plan.endsOn())) {
-      return List.of();
+      throw new IllegalArgumentException("ATTENDANCE_DAY_LOCKED_OR_UNPLANNED");
+    }
+    var deadlineId = deletionDates.getOrCreate(plan.endsOn()).getId();
+    var accounts = accounting.lockAccounts(classId);
+    var histories = new ArrayList<History>();
+    for (var account : accounts) {
+      var history = history(plan, account, deadlineId, now);
+      if (!date.isAfter(history.resetDay())) {
+        throw new IllegalArgumentException("ATTENDANCE_DAY_LOCKED_OR_UNPLANNED");
+      }
+      histories.add(history);
+    }
+    if (cancel) {
+      for (var slot : added) {
+        accounting.insertCancellation(
+            classId, date, slot.startsAt(), slot.endsAt(), actor.id(), now);
+      }
+    } else {
+      for (var cancellation : recorded) {
+        accounting.deleteCancellation(classId, date, cancellation.startsAt());
+      }
+    }
+    var today = berlinDate(now);
+    if (date.isAfter(today)) {
+      return true;
+    }
+    // Nur Tage mit vorhandener Buchung brauchen eine Korrektur; alle übrigen rechnet der
+    // Tagesabschluss mit den jetzt gültigen Unterrichtszeiten ab
+    var daySlots = slotsFor(plan, periods, slots, accounting.findCancellations(classId), date);
+    for (int index = 0; index < accounts.size(); index++) {
+      var account = accounts.get(index);
+      var history = histories.get(index);
+      var attendance = history.attendances().get(date);
+      if (attendance == null) {
+        continue;
+      }
+      reconcile(
+          new Day(
+              plan,
+              account,
+              date,
+              deadlineId,
+              daySlots,
+              attendance,
+              history.dayAudits(attendance),
+              accounting.findPlannedStatuses(account.id(), date, date, today, true),
+              now),
+          new Change(AuditEventType.LESSON_CANCELLATION, null, null, now, actor.id(), null));
+    }
+    return true;
+  }
+
+  /**
+   * Lädt Blöcke, Slots und Ausfälle der Klasse einmal und liefert danach je Tag die stattfindenden
+   * Slots. Nach Ablauf der Aufbewahrungsfrist des Plans gibt es keine
+   */
+  private Function<LocalDate, List<Slot>> daySlots(ClassPlan plan, LocalDateTime now) {
+    if (!retained(plan, now)) {
+      return date -> List.of();
     }
     var periods = accounting.findPeriods(plan.classId(), false);
     requirePlanPeriods(plan, periods);
-    return slotsFor(plan, periods, accounting.findSlots(plan.timetableId(), false), date);
+    var slots = accounting.findSlots(plan.timetableId(), false);
+    var cancellations = accounting.findCancellations(plan.classId());
+    return date -> slotsFor(plan, periods, slots, cancellations, date);
   }
 
   /** Enthält sichtbare Schülerdaten mit Tagesstatus und unentschuldigten Fehlminuten des Tages */
@@ -948,7 +1326,10 @@ public class AttendanceAccountingService {
       long unexcusedMinutes,
       boolean wasPresent,
       AttendanceStatus fullAbsence,
-      long manualAbsenceMinutes) {}
+      long manualAbsenceMinutes,
+      long excusedMinutes,
+      boolean canMarkAbsent,
+      LocalDate birthDate) {}
 
   /**
    * Rechnet beendete geplante Unterrichtstage je Schüler ab, je Klasse in einer eigenen
@@ -986,9 +1367,10 @@ public class AttendanceAccountingService {
     if (!retained(plan, now)) {
       return 0;
     }
-    var periods = accounting.findPeriods(plan.classId());
+    var periods = accounting.findPeriods(plan.classId(), true);
     requirePlanPeriods(plan, periods);
-    var slots = accounting.findSlots(plan.timetableId());
+    var slots = accounting.findSlots(plan.timetableId(), true);
+    var cancellations = accounting.findCancellations(plan.classId());
     int changed = 0;
     for (Account original : accounts) {
       var history = history(plan, original, deletionDateId, now);
@@ -998,7 +1380,7 @@ public class AttendanceAccountingService {
       var end = plan.endsOn().isBefore(today) ? plan.endsOn() : today;
       var planned = plannedByDate(account.id(), start, end, today, true);
       for (var date = start; !date.isAfter(end); date = date.plusDays(1)) {
-        var daySlots = slotsFor(plan, periods, slots, date);
+        var daySlots = slotsFor(plan, periods, slots, cancellations, date);
         if (daySlots.isEmpty()) {
           continue;
         }
@@ -1040,9 +1422,10 @@ public class AttendanceAccountingService {
   /**
    * Lädt und sperrt die Abrechnungsdaten eines geplanten Schülertags. Liefert null bei fehlendem
    * Schüler, ungeplantem Tag, abgelaufener Aufbewahrungsfrist oder einem Tag vor der Schüleranlage
-   * beziehungsweise am oder vor dem letzten Berliner Resettag
+   * beziehungsweise am oder vor dem letzten Berliner Resettag. Mit withoutLessons genügt ein Tag im
+   * Plan, dessen Unterricht vollständig ausgefallen ist
    */
-  private Day lockDay(Long studentId, LocalDate date) {
+  private Day lockDay(Long studentId, LocalDate date, boolean withoutLessons) {
     var classId = students.findClassId(studentId, false).orElse(null);
     if (classId == null) {
       return null;
@@ -1055,7 +1438,7 @@ public class AttendanceAccountingService {
       return null;
     }
     var deadline = deletionDates.getOrCreate(plan.endsOn());
-    var account = accounting.lockAccount(studentId, classId).orElse(null);
+    var account = accounting.findAccount(studentId, classId, true).orElse(null);
     var now = now();
     if (account == null || !retained(plan, now) || date.isBefore(berlinDate(account.createdAt()))) {
       return null;
@@ -1064,10 +1447,16 @@ public class AttendanceAccountingService {
     if (!date.isAfter(history.resetDay())) {
       return null;
     }
-    var periods = accounting.findPeriods(classId);
+    var periods = accounting.findPeriods(classId, true);
     requirePlanPeriods(plan, periods);
-    var slots = slotsFor(plan, periods, accounting.findSlots(plan.timetableId()), date);
-    if (slots.isEmpty()) {
+    var slots =
+        slotsFor(
+            plan,
+            periods,
+            accounting.findSlots(plan.timetableId(), true),
+            accounting.findCancellations(classId),
+            date);
+    if (slots.isEmpty() && !(withoutLessons && active(periods, date))) {
       return null;
     }
     var attendance = history.attendances().get(date);
@@ -1152,7 +1541,8 @@ public class AttendanceAccountingService {
           change.staffId(),
           change.terminalId(),
           day.now(),
-          manual == null ? null : manual.requestId());
+          manual == null ? null : manual.requestId(),
+          manual == null ? null : manual.note());
     }
     accounting.updateTotals(account, attendanceId, status, day.now());
     if (!full.equals(previous)) {
@@ -1231,7 +1621,7 @@ public class AttendanceAccountingService {
         statusChange ? change.before() : null);
   }
 
-  private record ManualBooking(int minutes, UUID requestId) {}
+  private record ManualBooking(int minutes, UUID requestId, String note) {}
 
   /**
    * Prüft, ob ein Zeitpunkt angegeben ist, keine Sekundenbruchteile hat und nicht in der Zukunft
@@ -1260,8 +1650,33 @@ public class AttendanceAccountingService {
     }
   }
 
-  /** Liefert die Slots des Wochentags innerhalb des Plans und eines zugeordneten Blocks */
+  /**
+   * Liefert die stattfindenden Slots des Tages. Ausgefallene Unterrichtszeiten zählen nicht als
+   * geplanter Unterricht. Ein Ausfall gilt für jeden Slot des Datums, mit dem sich seine
+   * gespeicherte Zeitspanne überschneidet, auch nach einer späteren Verschiebung der Stunde
+   */
   private static List<Slot> slotsFor(
+      ClassPlan plan,
+      List<Period> periods,
+      List<Slot> slots,
+      List<Cancellation> cancellations,
+      LocalDate date) {
+    return scheduledSlots(plan, periods, slots, date).stream()
+        .filter(
+            slot ->
+                cancellations.stream().noneMatch(cancellation -> cancels(cancellation, date, slot)))
+        .toList();
+  }
+
+  /** Prüft, ob der Ausfall am Datum zeitlich in den Slot fällt */
+  private static boolean cancels(Cancellation cancellation, LocalDate date, Slot slot) {
+    return cancellation.date().equals(date)
+        && cancellation.startsAt().isBefore(slot.endsAt())
+        && cancellation.endsAt().isAfter(slot.startsAt());
+  }
+
+  /** Liefert die Slots des Wochentags innerhalb des Plans und eines zugeordneten Blocks */
+  private static List<Slot> scheduledSlots(
       ClassPlan plan, List<Period> periods, List<Slot> slots, LocalDate date) {
     if (date.isBefore(plan.startsOn()) || date.isAfter(plan.endsOn()) || !active(periods, date)) {
       return List.of();
@@ -1429,8 +1844,9 @@ public class AttendanceAccountingService {
    */
   void requireFullyAccounted(
       ClassPlan plan, List<Account> accounts, Long deletionDateId, LocalDateTime now) {
-    var periods = accounting.findPeriods(plan.classId());
-    var slots = accounting.findSlots(plan.timetableId());
+    var periods = accounting.findPeriods(plan.classId(), true);
+    var slots = accounting.findSlots(plan.timetableId(), true);
+    var cancellations = accounting.findCancellations(plan.classId());
     requirePlanPeriods(plan, periods);
     LocalDate today = berlinDate(now);
     if (accounts.stream().anyMatch(account -> account.unexcused() < 0 || account.excused() < 0)) {
@@ -1444,7 +1860,7 @@ public class AttendanceAccountingService {
       var start = firstAccountingDate(plan, account, history.resetDay());
       var planned = plannedByDate(account.id(), start, today, today, true);
       for (LocalDate date = start; !date.isAfter(today); date = date.plusDays(1)) {
-        var daySlots = slotsFor(plan, periods, slots, date);
+        var daySlots = slotsFor(plan, periods, slots, cancellations, date);
         var attendance = history.attendances().get(date);
         var dayAudits = history.dayAudits(attendance);
         var timeline = includePlannedStatuses(dayAudits, planned.getOrDefault(date, List.of()));
@@ -1473,10 +1889,15 @@ public class AttendanceAccountingService {
    * beendet ist
    */
   void requireNoRemainingSlots(ClassPlan plan, LocalDateTime now) {
-    var periods = accounting.findPeriods(plan.classId());
+    var periods = accounting.findPeriods(plan.classId(), true);
     requirePlanPeriods(plan, periods);
     var berlinNow = now.atOffset(ZoneOffset.UTC).atZoneSameInstant(BERLIN);
-    if (slotsFor(plan, periods, accounting.findSlots(plan.timetableId()), berlinNow.toLocalDate())
+    if (slotsFor(
+            plan,
+            periods,
+            accounting.findSlots(plan.timetableId(), true),
+            accounting.findCancellations(plan.classId()),
+            berlinNow.toLocalDate())
         .stream()
         .anyMatch(slot -> slot.endsAt().isAfter(berlinNow.toLocalTime()))) {
       throw new IllegalStateException("CLASS_HAS_REMAINING_SLOTS");

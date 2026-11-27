@@ -50,6 +50,8 @@ class Issue25IntegrationTest {
 
   @BeforeEach
   void prepare() {
+    // Die Schüleranlage prüft das Geburtsdatum gegen den heutigen Berliner Tag
+    when(clock.instant()).thenReturn(Instant.parse("2026-09-14T08:45:00Z"));
     when(clock.withZone(any()))
         .thenAnswer(invocation -> Clock.fixed(clock.instant(), invocation.getArgument(0)));
   }

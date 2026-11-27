@@ -119,7 +119,7 @@ class Issue23IntegrationTest {
     assertThat(students.get(id))
         .isEqualTo(
             new StudentService.StudentView(
-                id, "Neu", "Schueler", LocalDate.of(2008, 2, 3), 1L, 0, 0, 0, 0, 0, 0));
+                id, "Neu", "Schueler", LocalDate.of(2008, 2, 3), 1L, 0, 0, 0, 0, 0, 0, 0, 0));
     assertThat(students.list(1L)).extracting(StudentService.StudentView::id).contains(id);
     assertThat(jdbc.queryForObject("SELECT rfid_uid FROM student WHERE id = ?", String.class, id))
         .isNull();
@@ -276,7 +276,9 @@ class Issue23IntegrationTest {
                 before.unexcusedDays(),
                 before.excusedDays(),
                 before.unexcusedHours(),
-                before.excusedHours()));
+                before.excusedHours(),
+                before.unexcusedPartialMinutes(),
+                before.excusedPartialMinutes()));
     assertThat(jdbc.queryForObject("SELECT rfid_uid FROM student WHERE id = 7", String.class))
         .isEqualTo("TEST-UID-007");
     Long id = students.create(3L, "Test", "Neu", LocalDate.of(2008, 1, 1));
@@ -386,7 +388,9 @@ class Issue23IntegrationTest {
             "unexcusedDays",
             "excusedDays",
             "unexcusedHours",
-            "excusedHours");
+            "excusedHours",
+            "unexcusedPartialMinutes",
+            "excusedPartialMinutes");
     assertThat(mapper.writeValueAsString(students.list(1L))).doesNotContain("TEST-UID", "rfid");
     assertThat(mapper.writeValueAsString(classes.list())).doesNotContain("TEST-UID", "rfid");
     assertThatThrownBy(() -> students.delete(1L)).hasMessage("STUDENT_HAS_HISTORY").hasNoCause();

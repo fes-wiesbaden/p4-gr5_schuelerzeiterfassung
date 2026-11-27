@@ -8,6 +8,7 @@ import de.feswiesbaden.attendance.repository.AttendanceAccountingRepository.Slot
 import de.feswiesbaden.attendance.service.AttendanceAccountingService.AbsenceLevel;
 import de.feswiesbaden.attendance.service.AttendanceAccountingService.ExcusalView;
 import de.feswiesbaden.attendance.service.AttendanceAccountingService.HistoryDay;
+import de.feswiesbaden.attendance.service.AttendanceAccountingService.ManualAbsenceEntry;
 import de.feswiesbaden.attendance.service.AttendanceAccountingService.PlannedStatusView;
 import java.time.Duration;
 import java.time.Instant;
@@ -28,16 +29,17 @@ final class AttendanceHistory {
       LocalDateTime now,
       boolean editable,
       boolean canCorrectStatus,
+      boolean canPlanStatus,
+      boolean interim,
       List<PlannedStatusView> preview,
       AttendanceStatus storedFullAbsence,
-      List<ExcusalView> excusals) {
+      List<ExcusalView> excusals,
+      List<ManualAbsenceEntry> manualEntries) {
     var presence = firstPresence(audits);
     long manual = AttendanceAccountingService.manualAbsenceMinutes(audits);
     if (slots.isEmpty()) {
       if (audits.isEmpty()) {
-        return new HistoryDay(
-            date, null, null, null, false, null, false, false, 0, false, false, List.of(), null,
-            false, false, excusals);
+        return HistoryDay.empty(date, excusals, manualEntries);
       }
       long unexcused = audits.stream().mapToLong(Audit::unexcusedDelta).sum();
       long excused = audits.stream().mapToLong(Audit::excusedDelta).sum();
@@ -57,7 +59,12 @@ final class AttendanceHistory {
           storedFullAbsence,
           AttendanceAccountingService.wasPresent(audits),
           false,
-          excusals);
+          excusals,
+          0,
+          false,
+          false,
+          manualEntries,
+          0);
     }
 
     var teaching = teachingWindows(date, slots);
@@ -83,12 +90,17 @@ final class AttendanceHistory {
         editable,
         manual,
         canCorrectStatus,
-        false,
+        canPlanStatus,
         preview,
         AttendanceAccountingService.fullAbsenceStatus(date, slots, audits, minutes, now),
         AttendanceAccountingService.wasPresent(audits),
         editable || (canCorrectStatus && AttendanceAccountingService.wasPresent(audits)),
-        excusals);
+        excusals,
+        AttendanceAccountingService.plannedMinutes(slots),
+        interim,
+        canCorrectStatus && AttendanceAccountingService.canMarkAbsent(audits),
+        manualEntries,
+        AttendanceAccountingService.manualAbsenceLimit(date, slots, audits, now));
   }
 
   static List<OpenAbsence> openAbsences(LocalDate date, List<Slot> slots, List<Audit> audits) {
@@ -156,7 +168,8 @@ final class AttendanceHistory {
     return audits.stream()
         .filter(
             audit ->
-                audit.status() == AttendanceStatus.ANWESEND
+                (audit.status() == AttendanceStatus.ANWESEND
+                        && !AttendanceAccountingService.retracted(audit, audits))
                     || audit.status() == AttendanceStatus.BETRIEB)
         .min(Comparator.comparing(Audit::occurredAt).thenComparing(Audit::id))
         .orElse(null);

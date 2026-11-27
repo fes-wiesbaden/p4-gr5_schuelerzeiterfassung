@@ -77,9 +77,6 @@ public class AttendanceAudit {
   @Column(name = "occurred_at", nullable = false)
   private LocalDateTime occurredAt;
 
-  @Column(name = "excusal_ends_at")
-  private LocalDateTime excusalEndsAt;
-
   @NotNull
   @Column(name = "unexcused_minutes_delta", nullable = false)
   private Integer unexcusedMinutesDelta;

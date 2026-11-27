@@ -7,12 +7,15 @@ import de.feswiesbaden.attendance.service.AttendanceAccountingService.ExcusalImp
 import de.feswiesbaden.attendance.service.CodexAssistantService;
 import de.feswiesbaden.attendance.service.CodexAssistantService.Message;
 import de.feswiesbaden.attendance.service.CodexAssistantService.Reply;
+import de.feswiesbaden.attendance.service.TimetableDraftService;
+import de.feswiesbaden.attendance.service.TimetableDraftService.Draft;
 import jakarta.servlet.http.HttpSession;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotEmpty;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
+import java.io.IOException;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -24,7 +27,9 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.util.WebUtils;
 
 /** Liefert Assistentenvorschläge und verarbeitet ausdrücklich bestätigte Entschuldigungen */
@@ -41,11 +46,17 @@ public class AssistantController {
 
   private final Clock clock;
 
+  private final TimetableDraftService timetableDrafts;
+
   public AssistantController(
-      CodexAssistantService codex, AttendanceAccountingService attendance, Clock clock) {
+      CodexAssistantService codex,
+      AttendanceAccountingService attendance,
+      Clock clock,
+      TimetableDraftService timetableDrafts) {
     this.codex = codex;
     this.attendance = attendance;
     this.clock = clock;
+    this.timetableDrafts = timetableDrafts;
   }
 
   /** Liefert die Verfügbarkeit der Demo für die angemeldete Weboberfläche */
@@ -58,6 +69,16 @@ public class AssistantController {
   @PostMapping("/messages")
   public Reply message(@Valid @RequestBody ChatPrompt prompt) {
     return codex.suggest(prompt.messages(), prompt.page());
+  }
+
+  /**
+   * Liest einen Stundenplan aus dem hochgeladenen Bild und liefert einen Entwurf. Gespeichert wird
+   * erst nach Bestätigung über den Import der Planung. Rechte, Typ und Größe prüft der Service
+   */
+  @PostMapping("/timetable-drafts")
+  public Draft timetableDraft(@RequestParam(name = "image", required = false) MultipartFile image)
+      throws IOException {
+    return timetableDrafts.read(image == null ? null : image.getBytes());
   }
 
   /** Berechnet die Minuten und bindet das Ergebnis für fünf Minuten an die Websitzung */

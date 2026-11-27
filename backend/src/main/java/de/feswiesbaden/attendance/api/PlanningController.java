@@ -1,14 +1,22 @@
 package de.feswiesbaden.attendance.api;
 
+import com.fasterxml.jackson.annotation.JsonProperty;
+import com.fasterxml.jackson.annotation.JsonSetter;
 import de.feswiesbaden.attendance.api.StaffController.Created;
 import de.feswiesbaden.attendance.enums.Weekday;
 import de.feswiesbaden.attendance.service.BlockPlanService;
 import de.feswiesbaden.attendance.service.PlanningService;
+import de.feswiesbaden.attendance.service.PlanningService.CancellationOutcome;
 import de.feswiesbaden.attendance.service.PlanningService.ClassSchedule;
 import de.feswiesbaden.attendance.service.PlanningService.Overview;
 import de.feswiesbaden.attendance.service.PlanningService.WeekDay;
 import de.feswiesbaden.attendance.service.SchoolClassService;
+import de.feswiesbaden.attendance.service.TimetableImportService;
+import de.feswiesbaden.attendance.service.TimetableImportService.ClassTarget;
+import de.feswiesbaden.attendance.service.TimetableImportService.Imported;
 import de.feswiesbaden.attendance.service.TimetableService;
+import de.feswiesbaden.attendance.service.TimetableService.ImportSlot;
+import de.feswiesbaden.attendance.service.TimetableService.SlotDetails;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Positive;
@@ -43,16 +51,20 @@ public class PlanningController {
 
   private final SchoolClassService classes;
 
+  private final TimetableImportService imports;
+
   /** Übernimmt die Services für Übersicht, Stundenpläne, Blockpläne und Klassen */
   public PlanningController(
       PlanningService planning,
       TimetableService timetables,
       BlockPlanService blockPlans,
-      SchoolClassService classes) {
+      SchoolClassService classes,
+      TimetableImportService imports) {
     this.planning = planning;
     this.timetables = timetables;
     this.blockPlans = blockPlans;
     this.classes = classes;
+    this.imports = imports;
   }
 
   /** Liefert Stundenpläne, Blockpläne, Räume und Klassen für Administratoren */
@@ -75,11 +87,34 @@ public class PlanningController {
     return planning.readSchedule(classId);
   }
 
+  /** Markiert eine Unterrichtszeit oder ohne Uhrzeit den ganzen Tag als ausgefallen */
+  @PostMapping("/classes/{classId}/lesson-cancellations")
+  public CancellationOutcome cancelLessons(
+      @PathVariable Long classId, @Valid @RequestBody CancellationRequest request) {
+    return planning.cancelLessons(classId, request.date(), request.startsAt());
+  }
+
+  /** Nimmt den Ausfall einer Unterrichtszeit oder ohne Uhrzeit des ganzen Tages zurück */
+  @DeleteMapping("/classes/{classId}/lesson-cancellations")
+  public CancellationResult restoreLessons(
+      @PathVariable Long classId,
+      @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date,
+      @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.TIME)
+          LocalTime startsAt) {
+    return new CancellationResult(planning.restoreLessons(classId, date, startsAt));
+  }
+
   /** Legt einen leeren Stundenplan an */
   @PostMapping("/timetables")
   @ResponseStatus(HttpStatus.CREATED)
   public Created createTimetable(@RequestBody NameRequest request) {
     return new Created(timetables.create(request.name()));
+  }
+
+  /** Legt einen neuen Stundenplan samt Unterrichtszeiten in einem Schritt an */
+  @PostMapping("/timetables/import")
+  public Imported importTimetable(@RequestBody ImportRequest request) {
+    return imports.importTimetable(request.name(), request.slots(), request.schoolClass());
   }
 
   /** Fügt dem Stundenplan einen nicht überlappenden Slot hinzu */
@@ -92,7 +127,9 @@ public class PlanningController {
             request.weekday(),
             request.startsAt(),
             request.endsAt(),
-            request.roomId()));
+            request.roomId(),
+            request.subject(),
+            request.teacherId()));
   }
 
   /** Ändert einen Slot ab einem zukünftigen Termin */
@@ -106,7 +143,12 @@ public class PlanningController {
             request.weekday(),
             request.startsAt(),
             request.endsAt(),
-            request.roomId()));
+            request.roomId(),
+            new SlotDetails(
+                !request.subjectGiven(),
+                request.subject(),
+                !request.teacherGiven(),
+                request.teacherId())));
   }
 
   /** Löscht die zukünftigen Termine des Slots */
@@ -145,11 +187,87 @@ public class PlanningController {
     classes.changeBlockPlan(classId, request.expectedBlockPlanId(), request.nextBlockPlanId());
   }
 
+  /** Enthält das Datum und optional die Anfangszeit der ausfallenden Unterrichtszeit */
+  public record CancellationRequest(@NotNull LocalDate date, LocalTime startsAt) {}
+
+  /** Zeigt an, ob sich der Unterrichtsausfall geändert hat */
+  public record CancellationResult(boolean changed) {}
+
+  /**
+   * Enthält Namen und Unterrichtszeiten eines neu anzulegenden Stundenplans sowie optional die
+   * Klasse, die ihn erhält
+   */
+  public record ImportRequest(String name, List<ImportSlot> slots, ClassTarget schoolClass) {}
+
   /** Enthält den Namen eines Stundenplans */
   public record NameRequest(String name) {}
 
-  /** Enthält Wochentag, Beginn, Ende und Raum eines Slots */
-  public record SlotRequest(Weekday weekday, LocalTime startsAt, LocalTime endsAt, Long roomId) {}
+  /**
+   * Enthält Wochentag, Beginn, Ende und Raum eines Slots sowie optional Fach und Lehrkraft. Die
+   * Klasse merkt sich, ob subject und teacherId in der Anfrage vorkamen: Fehlen sie beim Ändern,
+   * bleiben die bisherigen Werte erhalten, ein ausdrückliches null entfernt sie
+   */
+  public static final class SlotRequest {
+    @JsonProperty private Weekday weekday;
+
+    @JsonProperty private LocalTime startsAt;
+
+    @JsonProperty private LocalTime endsAt;
+
+    @JsonProperty private Long roomId;
+
+    private String subject;
+
+    private boolean subjectGiven;
+
+    private Long teacherId;
+
+    private boolean teacherGiven;
+
+    public Weekday weekday() {
+      return weekday;
+    }
+
+    public LocalTime startsAt() {
+      return startsAt;
+    }
+
+    public LocalTime endsAt() {
+      return endsAt;
+    }
+
+    public Long roomId() {
+      return roomId;
+    }
+
+    public String subject() {
+      return subject;
+    }
+
+    public Long teacherId() {
+      return teacherId;
+    }
+
+    public boolean subjectGiven() {
+      return subjectGiven;
+    }
+
+    public boolean teacherGiven() {
+      return teacherGiven;
+    }
+
+    @JsonSetter("subject")
+    void setSubject(String value) {
+      subject = value;
+      subjectGiven = true;
+    }
+
+    @JsonSetter("teacherId")
+    void setTeacherId(Long value) {
+      teacherId = value;
+      teacherGiven = true;
+    }
+  }
 
   /** Enthält das Datum des ersten geänderten oder gelöschten Termins */
   public record SlotChange(LocalDate effectiveOn) {}

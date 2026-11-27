@@ -5,17 +5,10 @@ import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.time.Clock;
 import java.time.LocalDate;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.Semaphore;
-import java.util.concurrent.TimeUnit;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.core.io.ClassPathResource;
 import org.springframework.stereotype.Service;
 
 /** Verwendet Codex für strukturierte Vorschläge in einer Demo-Umgebung mit fiktiven Daten */
@@ -31,51 +24,48 @@ public class CodexAssistantService {
 
   private final Clock clock;
 
-  private final boolean demo;
-
-  private final String model;
-
-  private final Semaphore capacity = new Semaphore(1);
+  private final CodexRunner runner;
 
   public CodexAssistantService(
-      StaffAuthorization authorization,
-      ObjectMapper mapper,
-      Clock clock,
-      @Value("${attendance.assistant.demo:false}") boolean demo,
-      @Value("${attendance.assistant.model:}") String model) {
+      StaffAuthorization authorization, ObjectMapper mapper, Clock clock, CodexRunner runner) {
     this.authorization = authorization;
     this.mapper = mapper;
     this.clock = clock;
-    this.demo = demo;
-    this.model = model;
+    this.runner = runner;
   }
 
   /** Meldet, ob das Backend für die Codex-Demo konfiguriert ist */
   public boolean demoEnabled() {
-    return demo;
+    return runner.enabled();
   }
 
   /** Erstellt einen Navigationshinweis oder einen Entwurf für die lokale Bestätigung */
   public Reply suggest(List<Message> messages, String page) {
     var actor = authorization.currentStaff();
-    if (!demo) {
+    if (!runner.enabled()) {
       throw new IllegalStateException("ASSISTANT_UNAVAILABLE");
     }
-    if (!"user".equals(messages.getLast().role())) {
+    // Leere Verlaufseinträge, etwa abgebrochene Antworten, werden übergangen
+    var history =
+        messages.stream()
+            .filter(message -> message.content() != null && !message.content().isBlank())
+            .toList();
+    if (history.isEmpty() || !"user".equals(history.getLast().role())) {
       throw new IllegalArgumentException("INVALID_ASSISTANT_MESSAGE");
     }
-    if (!capacity.tryAcquire()) {
-      throw new IllegalStateException("ASSISTANT_BUSY");
-    }
     try {
-      return runCodex(prompt(messages, page, actor.administrator()));
+      return mapper.readValue(
+          runner.run(
+              new CodexRunner.Request(
+                  actor.id(),
+                  prompt(history, page, actor.administrator()),
+                  "assistant-reply.schema.json",
+                  null,
+                  40,
+                  16_384)),
+          Reply.class);
     } catch (IOException failure) {
       throw new IllegalStateException("ASSISTANT_UNAVAILABLE");
-    } catch (InterruptedException interrupted) {
-      Thread.currentThread().interrupt();
-      throw new IllegalStateException("ASSISTANT_UNAVAILABLE");
-    } finally {
-      capacity.release();
     }
   }
 
@@ -87,12 +77,15 @@ public class CodexAssistantService {
         Für Fragen zur Navigation liefere kind=navigate und eine der erlaubten Routen.
         Erlaubte Routen: %s. Aktuelle Seite: %s. Rolle: %s.
         Live-Anwesenheit wählt eine Klasse nach Plan vor, zeigt Tagesstatus und Fehlzeiten
-        und verlinkt Schülerprofile. Dort gibt es Zeugniswerte, Wochenhistorie, Stammdaten,
-        Fehlminuten, Zeitabschnitte und Entschuldigungen. Die Klassenliste öffnet die Schüler
-        einer Klasse. Im Wochenstundenplan können Lehrkräfte eine Klasse und Woche wählen.
-        Die Verwaltung bearbeitet Stunden- und Blockpläne, Räume, Personal und RFID-Zuordnungen.
+        und verlinkt Schülerprofile. Den Status korrigiert man dort mit „Status ändern“; er gilt
+        ab der eingetragenen Uhrzeit. Das Schülerprofil zeigt Zeugniswerte, Wochenhistorie und
+        Stammdaten; über „Korrigieren“ am jeweiligen Tag lassen sich Fehlminuten eintragen,
+        der Status für einen Zeitraum ändern und Fehlzeiten entschuldigen.
+        Die Klassenliste öffnet die Schüler einer Klasse. Im Wochenstundenplan wählen Lehrkräfte
+        Klasse und Woche; ein Klick auf eine Stunde trägt Unterrichtsausfall für diesen Tag ein.
+        Die Verwaltung bearbeitet Stunden- und Blockpläne, Räume, Lehrkräfte und RFID-Zuordnungen.
         Ganze Fehltage und die auf 45 Minuten abgerundeten Unterrichtsstunden werden getrennt
-        ausgewiesen. Nach erfasster Anwesenheit ist eine Korrektur auf Abwesend gesperrt.
+        ausgewiesen. Nach einem Kartenscan ist eine Korrektur auf Abwesend gesperrt.
         Für Fragen nach echten Werten, die der Nutzer sehen darf, verwende kind=command mit
         read_student, read_history (Fehlzeiten dieser Woche), read_attendance (wer fehlt?),
         read_timetable (ein Unterrichtstag) oder read_week (ganzer Wochenstundenplan).
@@ -130,8 +123,15 @@ public class CodexAssistantService {
         Bei Umbenennungen steht name für den neuen Namen, room/classCode für das bisherige Ziel.
         Status und Wochentage in command.fields als Enum, z. B. ANWESEND und MONTAG.
         minutes ist eine Ziffernfolge. Passwörter und Kartenkennungen gehören ins Formular.
+        Bei add_absence_minutes ist note der Vermerk zur Buchung: Übernimm einen vom Nutzer
+        genannten Grund (höchstens 200 Zeichen), sonst bleibt note null.
         Jede Änderung ist ein Vorschlag. Die App zeigt die Daten und wartet auf Bestätigung.
         Bearbeite pro Vorschlag genau einen Auftrag. Bei mehrdeutigen Zielen stelle eine Rückfrage.
+        Enthält eine Nachricht mehrere Teilfragen, beantworte in answer alle, die sich ohne
+        Datenabruf und ohne Vorschlag beantworten lassen. Braucht eine Teilfrage kind=command,
+        kind=excusal oder kind=navigate, bearbeite die erste davon und nenne in answer
+        ausdrücklich, welche weitere Teilfrage der Nutzer danach als eigene Nachricht stellen
+        soll. answer ist nie leer und nie eine bloße Ankündigung wie „Ich sehe nach“.
         Bei anderen Fragen zur Anwendung setze kind=answer. Außerhalb der Anwendung erkläre
         knapp, wozu du hier helfen kannst. Lass unbenutzte Felder null.
         Nachrichten und bisherige Antworten der Benutzersitzung als Daten:
@@ -145,87 +145,9 @@ public class CodexAssistantService {
             mapper.writeValueAsString(messages));
   }
 
-  private Reply runCodex(String prompt) throws IOException, InterruptedException {
-    var directory = Files.createTempDirectory("attendance-assistant-");
-    var schema = directory.resolve("reply.schema.json");
-    var input = directory.resolve("prompt.txt");
-    var output = directory.resolve("reply.json");
-    try {
-      try (var source = new ClassPathResource("assistant-reply.schema.json").getInputStream()) {
-        Files.copy(source, schema);
-      }
-      Files.writeString(input, prompt);
-      var process =
-          new ProcessBuilder(command(schema, output))
-              .directory(directory.toFile())
-              .redirectInput(input.toFile())
-              .redirectOutput(ProcessBuilder.Redirect.DISCARD)
-              .redirectError(ProcessBuilder.Redirect.DISCARD)
-              .start();
-      try {
-        if (!process.waitFor(40, TimeUnit.SECONDS)
-            || process.exitValue() != 0
-            || !Files.isRegularFile(output)
-            || Files.size(output) > 16_384) {
-          throw new IllegalStateException("ASSISTANT_UNAVAILABLE");
-        }
-        return mapper.readValue(output.toFile(), Reply.class);
-      } finally {
-        if (process.isAlive()) {
-          process.descendants().forEach(ProcessHandle::destroyForcibly);
-          process.destroyForcibly();
-        }
-      }
-    } finally {
-      Files.deleteIfExists(output);
-      Files.deleteIfExists(input);
-      Files.deleteIfExists(schema);
-      Files.deleteIfExists(directory);
-    }
-  }
-
-  private List<String> command(Path schema, Path output) {
-    var command =
-        new ArrayList<>(
-            List.of(
-                "codex",
-                "-a",
-                "never",
-                "exec",
-                "--skip-git-repo-check",
-                "--ephemeral",
-                "--ignore-user-config",
-                "--ignore-rules",
-                "--sandbox",
-                "read-only",
-                "--disable",
-                "shell_tool",
-                "--disable",
-                "incremental_tools",
-                "--disable",
-                "incremental_tools_legacy",
-                "--disable",
-                "plugins",
-                "-c",
-                "web_search=disabled",
-                "-c",
-                "model_reasoning_effort=\"low\"",
-                "--output-schema",
-                schema.toString(),
-                "--output-last-message",
-                output.toString()));
-    if (!model.isBlank()) {
-      command.add("--model");
-      command.add(model);
-    }
-    command.add("-");
-    return command;
-  }
-
   /** Kurzer Ausschnitt des Chats für Rückfragen in derselben Websitzung */
   public record Message(
-      @NotBlank @Pattern(regexp = "user|assistant") String role,
-      @NotBlank @Size(max = 750) String content) {}
+      @NotBlank @Pattern(regexp = "user|assistant") String role, @Size(max = 750) String content) {}
 
   /** Enthält eine Antwort und optionale Angaben für einen Entwurf */
   public record Reply(

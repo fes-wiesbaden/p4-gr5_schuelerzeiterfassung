@@ -2,7 +2,7 @@ package de.feswiesbaden.attendance.service;
 
 import de.feswiesbaden.attendance.entities.Student;
 import de.feswiesbaden.attendance.repository.StudentRepository;
-import de.feswiesbaden.attendance.repository.StudentRepository.StudentData;
+import java.time.Clock;
 import java.time.LocalDate;
 import java.util.List;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -16,25 +16,26 @@ public class StudentService {
 
   private final StaffAuthorization authorization;
 
-  public StudentService(StudentRepository students, StaffAuthorization authorization) {
+  private final Clock clock;
+
+  public StudentService(StudentRepository students, StaffAuthorization authorization, Clock clock) {
     this.students = students;
     this.authorization = authorization;
+    this.clock = clock;
   }
 
   /** Liefert die Schüler einer zugänglichen Klasse ohne Kartenkennungen */
   @Transactional(readOnly = true)
   public List<StudentView> list(Long classId) {
     authorization.requireClassAccess(classId, authorization.currentStaff());
-    return students.findByClassId(classId).stream().map(this::view).toList();
+    return students.findByClassId(classId);
   }
 
   /** Liefert die Schüler aller für den Mitarbeiter zugänglichen Klassen */
   @Transactional(readOnly = true)
   public List<StudentView> listAccessible() {
     var actor = authorization.currentStaff();
-    return students.findAccessible(actor.id(), actor.administrator()).stream()
-        .map(this::view)
-        .toList();
+    return students.findAccessible(actor.id(), actor.administrator());
   }
 
   /** Liefert die Daten eines zugänglichen Schülers ohne Kartenkennung */
@@ -42,7 +43,7 @@ public class StudentService {
   public StudentView get(Long studentId) {
     var actor = authorization.currentStaff();
     authorization.requireClassAccess(classOf(studentId), actor);
-    return view(students.findById(studentId));
+    return students.findById(studentId);
   }
 
   /** Legt als Administrator oder Klassenlehrkraft einen Schüler mit leeren Minutenkonten an */
@@ -99,7 +100,10 @@ public class StudentService {
     }
   }
 
-  /** Prüft Pflichtangaben und Längengrenzen der Schülerstammdaten */
+  /**
+   * Prüft Pflichtangaben und Längengrenzen der Schülerstammdaten. Ein Geburtsdatum nach dem
+   * heutigen Berliner Tag wird abgelehnt
+   */
   private void validate(String firstName, String lastName, LocalDate birthDate) {
     if (firstName == null
         || firstName.isBlank()
@@ -110,22 +114,10 @@ public class StudentService {
         || birthDate == null) {
       throw new IllegalArgumentException("INVALID_STUDENT");
     }
-  }
-
-  /** Erstellt aus den gelesenen Schülerdaten ein Antwortobjekt ohne Kartenkennung */
-  private StudentView view(StudentData student) {
-    return new StudentView(
-        student.id(),
-        student.firstName(),
-        student.lastName(),
-        student.birthDate(),
-        student.classId(),
-        student.unexcusedMinutes(),
-        student.excusedMinutes(),
-        student.unexcusedDays(),
-        student.excusedDays(),
-        student.unexcusedHours(),
-        student.excusedHours());
+    var today = clock.instant().atZone(AttendanceAccountingService.BERLIN).toLocalDate();
+    if (birthDate.isAfter(today)) {
+      throw new IllegalArgumentException("BIRTH_DATE_IN_FUTURE");
+    }
   }
 
   /** Enthält sichtbare Schülerstammdaten, Klasse, Minutenkonten und Zeugniswerte */
@@ -140,5 +132,7 @@ public class StudentService {
       int unexcusedDays,
       int excusedDays,
       int unexcusedHours,
-      int excusedHours) {}
+      int excusedHours,
+      int unexcusedPartialMinutes,
+      int excusedPartialMinutes) {}
 }

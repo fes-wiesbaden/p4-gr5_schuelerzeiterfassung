@@ -177,11 +177,13 @@ public class SecurityConfig {
                         "/api/attendance/current-class",
                         "/api/students/rfid-uids",
                         "/api/students/{studentId}/attendance/week",
+                        "/api/students/{studentId}/attendance/calendar",
                         "/api/students/{studentId}")
                     .authenticated()
                     .requestMatchers(
                         HttpMethod.POST,
                         "/api/assistant/messages",
+                        "/api/assistant/timetable-drafts",
                         "/api/assistant/excusals/preview",
                         "/api/assistant/excusals/{id}/confirm",
                         "/api/teachers",
@@ -204,10 +206,12 @@ public class SecurityConfig {
                     .requestMatchers(
                         HttpMethod.POST,
                         "/api/planning/timetables",
+                        "/api/planning/timetables/import",
                         "/api/planning/timetables/{timetableId}/slots",
                         "/api/planning/block-plans",
                         "/api/planning/block-plans/{blockPlanId}/blocks",
                         "/api/planning/classes/{classId}/blocks",
+                        "/api/planning/classes/{classId}/lesson-cancellations",
                         "/api/planning/classes/{classId}/block-plan-change")
                     .authenticated()
                     .requestMatchers(
@@ -222,11 +226,13 @@ public class SecurityConfig {
                     .requestMatchers(
                         HttpMethod.DELETE,
                         "/api/planning/timetables/{timetableId}/slots/{slotId}",
+                        "/api/planning/classes/{classId}/lesson-cancellations",
                         "/api/classes/{id}",
                         "/api/rooms/{id}",
                         "/api/teachers/{id}",
                         "/api/students/{studentId}",
-                        "/api/students/{studentId}/rfid-uid")
+                        "/api/students/{studentId}/rfid-uid",
+                        "/api/students/{studentId}/attendance/{date}/manual-absence-minutes")
                     .authenticated()
                     .anyRequest()
                     .denyAll())

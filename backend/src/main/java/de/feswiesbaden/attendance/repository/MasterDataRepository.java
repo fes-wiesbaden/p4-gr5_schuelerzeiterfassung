@@ -16,7 +16,7 @@ public class MasterDataRepository {
   public List<Map<String, Object>> teachers() {
     return jdbc.queryForList(
         "SELECT id,first_name AS firstName,last_name AS lastName,username FROM staff "
-            + "WHERE role='LEHRKRAFT' ORDER BY last_name,first_name");
+            + "WHERE role='LEHRKRAFT' ORDER BY last_name,first_name,id");
   }
 
   public List<Map<String, Object>> rooms() {
@@ -47,9 +47,11 @@ public class MasterDataRepository {
     } else {
       requireRow(
           jdbc.update(
-              "UPDATE staff SET first_name=?,last_name=? WHERE id=? AND role='LEHRKRAFT'",
+              "UPDATE staff SET first_name=?,last_name=?,password_hash=COALESCE(?,password_hash)"
+                  + " WHERE id=? AND role='LEHRKRAFT'",
               first.strip(),
               last.strip(),
+              password,
               id));
     }
   }
