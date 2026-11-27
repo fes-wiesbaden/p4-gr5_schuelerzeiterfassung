@@ -23,7 +23,6 @@ import {
   EVENT_LABELS,
   formatDateTime,
   loadLogPage,
-  nextDay,
   type AuditEntry,
   type RawScanEntry
 } from '@/api/logs'
@@ -37,18 +36,27 @@ const EVENT_OPTIONS = [
   ...Object.entries(EVENT_LABELS).map(([value, label]) => ({ label, value }))
 ]
 
+// Wandelt einen Wert aus datetime-local (YYYY-MM-DDTHH:MM) in einen UTC-Zeitpunkt um
+function utcInstant(local: string, addMinutes = 0): string {
+  const [date, time] = local.split('T')
+  const at = new Date(berlinInstant(date, time))
+  return new Date(at.getTime() + addMinutes * 60_000).toISOString()
+}
+
 // Filter, Sortierung und aktuelle Seite eines Reiters. Gefiltert, sortiert und
-// geblättert wird im Backend, die Tabelle zeigt nur die geladene Seite
-function logTable<T>(
-  kind: 'raw-scans' | 'audits',
-  defaultSort: string,
-  extraFilters: Record<string, string> = {}
-) {
-  const state = reactive({
-    from: berlinDate(new Date(Date.now() - 6 * 24 * 60 * 60 * 1000)),
-    to: berlinDate(new Date()),
+// geblättert wird im Backend, die Tabelle zeigt nur die geladene Seite.
+// Blättern und Sortieren verwenden die zuletzt abgeschickten Filter, nicht
+// halb ausgefüllte Eingabefelder
+function logTable<T>(kind: 'raw-scans' | 'audits', defaultSort: string) {
+  const weekAgo = berlinDate(new Date(Date.now() - 6 * 24 * 60 * 60 * 1000))
+  const input = reactive({
+    from: `${weekAgo}T00:00`,
+    to: `${berlinDate(new Date())}T23:59`,
     search: '',
-    filters: extraFilters,
+    eventType: ''
+  })
+  let applied = { ...input }
+  const state = reactive({
     sortField: defaultSort,
     sortOrder: -1 as 1 | -1,
     first: 0,
@@ -57,35 +65,43 @@ function logTable<T>(
     loading: false,
     error: ''
   })
+  // Nur die Antwort der neuesten Anfrage wird angezeigt
+  let latest = 0
 
   async function load() {
-    if (!state.from || !state.to || state.from > state.to) {
-      state.error = 'Bitte einen gültigen Zeitraum wählen.'
-      return
-    }
+    const request = ++latest
     state.loading = true
     state.error = ''
     try {
       const page = await loadLogPage<T>(kind, {
-        ...state.filters,
-        from: berlinInstant(state.from, '00:00'),
-        to: berlinInstant(nextDay(state.to), '00:00'),
-        search: state.search.trim(),
+        from: utcInstant(applied.from),
+        // Bis gilt einschließlich der angegebenen Minute
+        to: utcInstant(applied.to, 1),
+        search: applied.search.trim(),
+        eventType: applied.eventType,
         sort: state.sortField,
         direction: state.sortOrder === 1 ? 'asc' : 'desc',
         page: state.first / PAGE_SIZE,
         size: PAGE_SIZE
       })
+      if (request !== latest) return
       state.rows = page.items
       state.total = page.total
     } catch {
-      state.error = 'Einträge konnten nicht geladen werden.'
+      if (request === latest) {
+        state.error = 'Einträge konnten nicht geladen werden.'
+      }
     } finally {
-      state.loading = false
+      if (request === latest) state.loading = false
     }
   }
 
   function filter() {
+    if (!input.from || !input.to || input.from > input.to) {
+      state.error = 'Bitte einen gültigen Zeitraum wählen.'
+      return
+    }
+    applied = { ...input }
     state.first = 0
     load()
   }
@@ -102,11 +118,11 @@ function logTable<T>(
     load()
   }
 
-  return { state, load, filter, onPage, onSort }
+  return { input, state, load, filter, onPage, onSort }
 }
 
 const scans = logTable<RawScanEntry>('raw-scans', 'scannedAt')
-const audits = logTable<AuditEntry>('audits', 'occurredAt', { eventType: '' })
+const audits = logTable<AuditEntry>('audits', 'occurredAt')
 scans.load()
 
 // Die Audit-Logs werden erst beim ersten Öffnen ihres Reiters geladen
@@ -116,6 +132,10 @@ function openTab(value: string | number) {
     auditsOpened = true
     audits.load()
   }
+}
+
+function eventLabel(type: AuditEntry['eventType']): string {
+  return EVENT_LABELS[type]
 }
 
 function statusLabel(status: string | null): string {
@@ -151,9 +171,9 @@ function signed(value: number): string {
         <TabPanel value="raw-scans">
           <article class="logs__card">
             <LogFilterForm
-              v-model:from="scans.state.from"
-              v-model:to="scans.state.to"
-              v-model:search="scans.state.search"
+              v-model:from="scans.input.from"
+              v-model:to="scans.input.to"
+              v-model:search="scans.input.search"
               placeholder="Schüler, Klasse oder RFID-UID"
               @submit="scans.filter"
             />
@@ -202,16 +222,16 @@ function signed(value: number): string {
         <TabPanel v-if="auth.isAdmin" value="audits">
           <article class="logs__card">
             <LogFilterForm
-              v-model:from="audits.state.from"
-              v-model:to="audits.state.to"
-              v-model:search="audits.state.search"
+              v-model:from="audits.input.from"
+              v-model:to="audits.input.to"
+              v-model:search="audits.input.search"
               placeholder="Schüler, Klasse, Lehrkraft, Benutzername oder Raum"
               @submit="audits.filter"
             >
               <label>
                 <span>Ereignis</span>
                 <Select
-                  v-model="audits.state.filters.eventType"
+                  v-model="audits.input.eventType"
                   :options="EVENT_OPTIONS"
                   option-label="label"
                   option-value="value"
@@ -243,9 +263,7 @@ function signed(value: number): string {
               </Column>
               <Column field="eventType" header="Ereignis" sortable>
                 <template #body="{ data }">
-                  {{
-                    EVENT_LABELS[data.eventType as keyof typeof EVENT_LABELS]
-                  }}
+                  {{ eventLabel(data.eventType) }}
                 </template>
               </Column>
               <Column field="actor" header="Ausgelöst von" sortable />

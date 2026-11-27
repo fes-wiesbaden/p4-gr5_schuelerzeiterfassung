@@ -134,6 +134,60 @@ describe('LogsView', () => {
     const params = urls().at(-1)!.searchParams
     expect(params.get('sort')).toBe('rfidUid')
     expect(params.get('page')).toBe('0')
+    expect(params.get('search')).toBe('Erika')
+    wrapper.unmount()
+  })
+
+  it('sortiert mit dem abgeschickten Filter, nicht mit einer halb getippten Suche', async () => {
+    const wrapper = await mountAs('lehrkraft')
+    await wrapper
+      .find('.log-filter__search input')
+      .setValue('noch nicht gesendet')
+
+    const header = wrapper
+      .findAll('th')
+      .find((element) => element.text().includes('RFID-UID'))!
+    await header.trigger('click')
+    await flushPromises()
+    expect(urls().at(-1)!.searchParams.has('search')).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('filtert nach Uhrzeit, Bis gilt einschließlich der Minute', async () => {
+    const wrapper = await mountAs('lehrkraft')
+    const [from, to] = wrapper.findAll('input[type="datetime-local"]')
+    await from.setValue('2026-09-14T08:00')
+    await to.setValue('2026-09-14T09:30')
+    await wrapper.find('form').trigger('submit')
+    await flushPromises()
+    const params = urls().at(-1)!.searchParams
+    expect(params.get('from')).toBe('2026-09-14T06:00:00.000Z')
+    expect(params.get('to')).toBe('2026-09-14T07:31:00.000Z')
+    wrapper.unmount()
+  })
+
+  it('zeigt nur die Antwort der neuesten Anfrage', async () => {
+    const wrapper = await mountAs('lehrkraft')
+    let answerSlowRequest: (response: Response) => void = () => {}
+    fetchMock.mockImplementationOnce(
+      () => new Promise<Response>((resolve) => (answerSlowRequest = resolve))
+    )
+    const header = wrapper
+      .findAll('th')
+      .find((element) => element.text().includes('RFID-UID'))!
+    await header.trigger('click')
+    await header.trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('Unbekannte Karte')
+
+    answerSlowRequest(
+      new Response(JSON.stringify({ items: [], total: 0 }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' }
+      })
+    )
+    await flushPromises()
+    expect(wrapper.text()).toContain('Unbekannte Karte')
     wrapper.unmount()
   })
 })

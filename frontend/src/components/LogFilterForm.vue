@@ -14,11 +14,11 @@ const search = defineModel<string>('search', { required: true })
   <form class="log-filter" @submit.prevent="$emit('submit')">
     <label>
       <span>Von</span>
-      <InputText v-model="from" type="date" required />
+      <InputText v-model="from" type="datetime-local" required />
     </label>
     <label>
       <span>Bis</span>
-      <InputText v-model="to" type="date" required />
+      <InputText v-model="to" type="datetime-local" required />
     </label>
     <!-- Zusätzliche Filter des jeweiligen Reiters -->
     <slot />

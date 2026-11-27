@@ -162,6 +162,19 @@ class LogsIntegrationTest {
         .andExpect(jsonPath("$.items[0].eventType").value("SCAN"));
   }
 
+  /**
+   * Ereignisse sortieren nach Anzeigename: Kontenreset vor Scan, anders als die Enum-Reihenfolge
+   */
+  @Test
+  void sortsEventsByDisplayName() throws Exception {
+    jdbc.update(
+        "INSERT INTO attendance_audit (student_id, deletion_date_id, event_type, changed_by_staff_id,"
+            + " occurred_at) VALUES (2, 1, 'ACCOUNT_RESET', 3, '2026-09-14 08:00:00')");
+    mvc.perform(get(AUDITS + "&sort=eventType&direction=asc").session(staffSession("test.admin")))
+        .andExpect(jsonPath("$.items[0].eventType").value("ACCOUNT_RESET"))
+        .andExpect(jsonPath("$.items[1].eventType").value("SCAN"));
+  }
+
   /** Unbekannte Sortierschlüssel, Ereignistypen und Seitengrößen werden abgelehnt */
   @ParameterizedTest
   @ValueSource(

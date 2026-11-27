@@ -25,10 +25,15 @@ public class LogRepository {
 
   private static final Map<String, String> AUDIT_SORT =
       Map.of(
-          "occurredAt", "a.occurred_at",
-          "eventType", "a.event_type",
-          "student", "student_name",
-          "actor", "actor");
+          "occurredAt",
+          "a.occurred_at",
+          // Alphabetisch nach Anzeigename: Kontenreset, Scan, Statuskorrektur, Tagesabschluss
+          "eventType",
+          "FIELD(a.event_type, 'ACCOUNT_RESET', 'SCAN', 'STATUS_CHANGE', 'DAILY_CLOSE')",
+          "student",
+          "student_name",
+          "actor",
+          "actor");
 
   // "Nachname, Vorname Nachname" findet beide Schreibweisen mit einem einzigen LIKE
   private static final String STUDENT_SEARCH =
@@ -193,12 +198,9 @@ public class LogRepository {
     }
   }
 
-  /** Die Spalte stammt aus der Whitelist, die Richtung ist fest */
+  /** Die Spalte stammt aus der Whitelist, der Controller lässt nur deren Schlüssel zu */
   private static String order(Map<String, String> allowed, LogQuery query, String tieBreaker) {
     var column = allowed.get(query.sort());
-    if (column == null) {
-      throw new IllegalArgumentException("Unknown sort key");
-    }
     var direction = query.ascending() ? " ASC" : " DESC";
     return " ORDER BY " + column + direction + ", " + tieBreaker + direction + " LIMIT ? OFFSET ?";
   }
