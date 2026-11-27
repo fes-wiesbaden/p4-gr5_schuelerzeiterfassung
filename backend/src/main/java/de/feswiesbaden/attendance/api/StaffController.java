@@ -12,14 +12,20 @@ import de.feswiesbaden.attendance.service.StudentService;
 import de.feswiesbaden.attendance.service.StudentService.StudentView;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotEmpty;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Positive;
+import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.List;
+import java.util.Map;
+import java.util.StringJoiner;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.CacheControl;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -135,6 +141,65 @@ public class StaffController {
       @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date) {
     return attendance.readDay(classId, date);
   }
+
+  /** Lädt die Anwesenheiten des laufenden Blocks als UTF-8-CSV herunter. */
+  @PostMapping("/attendance/export")
+  public ResponseEntity<byte[]> exportAttendance(@Valid @RequestBody ExportRequest request) {
+    var csv =
+        new StringBuilder(
+            "\uFEFFKlasse;Vorname;Nachname;Unentschuldigtes Konto (min);Entschuldigtes Konto (min);"
+                + "Unentschuldigte Unterrichtsstunden;Entschuldigte Unterrichtsstunden;"
+                + "Unentschuldigte Fehltage;Entschuldigte Fehltage;Tagesdetails (Berliner Datum)\r\n");
+    for (var student : attendance.readExport(request.classes())) {
+      var details = new StringJoiner(" / ");
+      for (var day : student.days()) {
+        details.add(
+            "%s | %s | %d min unentschuldigt | %d min entschuldigt"
+                .formatted(day.date(), day.status(), day.unexcusedMinutes(), day.excusedMinutes()));
+      }
+      csv.append(csvText(student.classCode()))
+          .append(';')
+          .append(csvText(student.firstName()))
+          .append(';')
+          .append(csvText(student.lastName()))
+          .append(';')
+          .append(student.unexcusedMinutes())
+          .append(';')
+          .append(student.excusedMinutes())
+          .append(';')
+          .append(student.unexcusedMinutes() / 45)
+          .append(';')
+          .append(student.excusedMinutes() / 45)
+          .append(';')
+          .append(student.countFullAbsences(AttendanceStatus.ABWESEND))
+          .append(';')
+          .append(student.countFullAbsences(AttendanceStatus.ENTSCHULDIGT))
+          .append(';')
+          .append(csvText(details.toString()))
+          .append("\r\n");
+    }
+    return ResponseEntity.ok()
+        .cacheControl(CacheControl.noStore())
+        .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=anwesenheit.csv")
+        .contentType(new MediaType("text", "csv", StandardCharsets.UTF_8))
+        .body(csv.toString().getBytes(StandardCharsets.UTF_8));
+  }
+
+  /** Schützt Textfelder vor Formelauswertung und maskiert CSV-Anführungszeichen. */
+  private static String csvText(String value) {
+    var stripped = value.stripLeading();
+    if (value.startsWith("\t")
+        || value.startsWith("\r")
+        || value.startsWith("\n")
+        || (!stripped.isEmpty() && "=+-@＝＋－＠".indexOf(stripped.charAt(0)) >= 0)) {
+      value = "'" + value;
+    }
+    return "\"" + value.replace("\"", "\"\"") + "\"";
+  }
+
+  /** Ordnet jeder ausgewählten Klasse ihre Schüler-IDs zu. Leere Listen wählen alle Schüler. */
+  public record ExportRequest(
+      @NotEmpty Map<@Positive Long, @NotNull List<@NotNull @Positive Long>> classes) {}
 
   /** Liefert die nach Stundenplan vorausgewählte Klasse und die aktuelle Serverzeit */
   @GetMapping("/attendance/current-class")

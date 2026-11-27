@@ -25,11 +25,14 @@ import java.time.ZoneOffset;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.stream.Collectors;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.annotation.Transactional;
@@ -209,24 +212,175 @@ public class AttendanceAccountingService {
     var audits = accounting.findDayAudits(classId, date, today);
     List<DailyStudent> result = new ArrayList<>();
     for (var student : students.findAttendanceStudents(classId)) {
-      var dayAudits = audits.getOrDefault(student.id(), List.of());
-      boolean planned = !slots.isEmpty() && !date.isBefore(berlinDate(student.createdAt()));
-      if (!planned && dayAudits.isEmpty()) {
-        continue;
+      var day =
+          readStudentDay(
+              date, now, slots, audits.getOrDefault(student.id(), List.of()), student.createdAt());
+      if (day != null) {
+        result.add(
+            new DailyStudent(
+                student.id(),
+                student.firstName(),
+                student.lastName(),
+                day.status(),
+                day.unexcusedMinutes()));
       }
-      long minutes =
-          planned
-              ? calculate(date, slots, dayAudits, now).unexcused()
-              : dayAudits.stream().mapToLong(Audit::unexcusedDelta).sum();
-      result.add(
-          new DailyStudent(
-              student.id(),
-              student.firstName(),
-              student.lastName(),
-              statusAt(dayAudits, now),
-              minutes));
     }
     return result;
+  }
+
+  /**
+   * Liest die Minutenkonten und Tagesanwesenheiten seit Beginn des laufenden Berliner Blocks. Eine
+   * leere Schülerliste wählt die gesamte Klasse aus.
+   */
+  @Transactional(readOnly = true)
+  public List<StudentExport> readExport(Map<Long, List<Long>> selection) {
+    var actor = authorization.currentStaff();
+    var accessible = classes.findAccessible(actor.id(), actor.administrator());
+    var accessibleIds = accessible.stream().map(c -> c.id()).collect(Collectors.toSet());
+    if (!accessibleIds.containsAll(selection.keySet())) {
+      throw new AccessDeniedException("CLASS_ACCESS_DENIED");
+    }
+    var now = now();
+    var today = berlinDate(now);
+    List<StudentExport> result = new ArrayList<>();
+    for (var schoolClass : accessible) {
+      var selected = selection.get(schoolClass.id());
+      if (selected == null) {
+        continue;
+      }
+      var classId = schoolClass.id();
+      var plan =
+          classes
+              .findPlan(classId, false)
+              .orElseThrow(() -> new IllegalArgumentException("CLASS_NOT_FOUND"));
+      var periods = accounting.findPeriods(classId);
+      requirePlanPeriods(plan, periods);
+      var start =
+          periods.stream()
+              .filter(
+                  period -> !today.isBefore(period.startsOn()) && !today.isAfter(period.endsOn()))
+              .map(Period::startsOn)
+              .min(LocalDate::compareTo)
+              .orElseThrow(() -> new IllegalArgumentException("NO_ACTIVE_EXPORT_BLOCK"));
+      var ids = Set.copyOf(selected);
+      var roster =
+          students.findAttendanceStudents(classId).stream()
+              .filter(student -> ids.isEmpty() || ids.contains(student.id()))
+              .toList();
+      if (!ids.isEmpty() && ids.size() != roster.size()) {
+        throw new IllegalArgumentException("INVALID_EXPORT_SELECTION");
+      }
+      var slots = accounting.findSlots(plan.timetableId());
+      Map<Long, List<ExportDay>> days = new HashMap<>();
+      for (var date = start; !date.isAfter(today); date = date.plusDays(1)) {
+        var daySlots = slotsFor(plan, periods, slots, date);
+        var audits = accounting.findDayAudits(classId, date, today);
+        for (var student : roster) {
+          var day =
+              readStudentDay(
+                  date,
+                  now,
+                  daySlots,
+                  audits.getOrDefault(student.id(), List.of()),
+                  student.createdAt());
+          if (day != null) {
+            days.computeIfAbsent(student.id(), id -> new ArrayList<>()).add(day);
+          }
+        }
+      }
+      for (var student : students.findByClassId(classId)) {
+        if (ids.isEmpty() || ids.contains(student.id())) {
+          result.add(
+              new StudentExport(
+                  schoolClass.classCode(),
+                  student.firstName(),
+                  student.lastName(),
+                  student.unexcusedMinutes(),
+                  student.excusedMinutes(),
+                  days.getOrDefault(student.id(), List.of())));
+        }
+      }
+    }
+    return result;
+  }
+
+  /** Berechnet beide Tagesminutenwerte oder liest die Buchungen eines historischen Tags. */
+  private static ExportDay readStudentDay(
+      LocalDate date,
+      LocalDateTime now,
+      List<Slot> slots,
+      List<Audit> audits,
+      LocalDateTime createdAt) {
+    boolean planned = !slots.isEmpty() && !date.isBefore(berlinDate(createdAt));
+    if (!planned && audits.isEmpty()) {
+      return null;
+    }
+    var status = statusAt(audits, now);
+    if (!planned) {
+      return new ExportDay(
+          date,
+          status,
+          audits.stream().mapToLong(Audit::unexcusedDelta).sum(),
+          audits.stream().mapToLong(Audit::excusedDelta).sum(),
+          null);
+    }
+    var contribution = calculate(date, slots, audits, now);
+    return new ExportDay(
+        date,
+        status,
+        contribution.unexcused(),
+        contribution.excused(),
+        fullAbsenceStatus(date, now, slots, audits, contribution));
+  }
+
+  /** Ordnet einen vollständig versäumten und beendeten Unterrichtstag einem Fehltagszähler zu. */
+  private static AttendanceStatus fullAbsenceStatus(
+      LocalDate date,
+      LocalDateTime now,
+      List<Slot> slots,
+      List<Audit> audits,
+      Contribution contribution) {
+    if (hasOverlappingSlots(slots)
+        || date.atTime(slots.getLast().endsAt())
+            .atZone(BERLIN)
+            .toInstant()
+            .isAfter(now.toInstant(ZoneOffset.UTC))
+        || audits.stream().anyMatch(audit -> audit.status() == AttendanceStatus.ANWESEND)) {
+      return null;
+    }
+    long teachingSeconds =
+        slots.stream()
+            .mapToLong(slot -> Duration.between(slot.startsAt(), slot.endsAt()).getSeconds())
+            .sum();
+    if (contribution.unexcusedSeconds() + contribution.excusedSeconds() != teachingSeconds) {
+      return null;
+    }
+    return contribution.unexcusedSeconds() > 0
+        ? AttendanceStatus.ABWESEND
+        : AttendanceStatus.ENTSCHULDIGT;
+  }
+
+  /** Enthält Status, Minuten und die Einstufung als ganzer Fehltag. */
+  public record ExportDay(
+      LocalDate date,
+      AttendanceStatus status,
+      long unexcusedMinutes,
+      long excusedMinutes,
+      AttendanceStatus fullAbsence) {}
+
+  /** Enthält die Minutenkonten und Blockanwesenheiten eines Schülers. */
+  public record StudentExport(
+      String classCode,
+      String firstName,
+      String lastName,
+      int unexcusedMinutes,
+      int excusedMinutes,
+      List<ExportDay> days) {
+
+    /** Zählt ganze Fehltage im exportierten Blockzeitraum. */
+    public long countFullAbsences(AttendanceStatus status) {
+      return days.stream().filter(day -> day.fullAbsence() == status).count();
+    }
   }
 
   /**
@@ -746,7 +900,7 @@ public class AttendanceAccountingService {
         excused += seconds;
       }
     }
-    return new Contribution(unexcused / 60, excused / 60);
+    return new Contribution(unexcused, excused);
   }
 
   /** Prüft, ob der Status zum entschuldigten Minutenkonto beiträgt */
@@ -767,8 +921,16 @@ public class AttendanceAccountingService {
     return utc.atOffset(ZoneOffset.UTC).atZoneSameInstant(BERLIN).toLocalDate();
   }
 
-  /** Enthält die berechneten unentschuldigten und entschuldigten Tagesminuten */
-  record Contribution(long unexcused, long excused) {}
+  /** Hält die Dauer je Konto für die Fehltagsprüfung sekundengenau. */
+  record Contribution(long unexcusedSeconds, long excusedSeconds) {
+    long unexcused() {
+      return unexcusedSeconds / 60;
+    }
+
+    long excused() {
+      return excusedSeconds / 60;
+    }
+  }
 
   /**
    * Enthält Tagesanwesenheiten, deren Änderungsprotokolle und den Berliner Tag des letzten

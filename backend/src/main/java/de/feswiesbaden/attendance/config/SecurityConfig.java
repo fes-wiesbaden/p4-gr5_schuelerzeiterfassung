@@ -183,6 +183,7 @@ public class SecurityConfig {
                         "/api/classes",
                         "/api/classes/{classId}/students",
                         "/api/classes/{classId}/account-resets",
+                        "/api/attendance/export",
                         "/api/students/{studentId}/attendance/{date}/status-corrections")
                     .authenticated()
                     .requestMatchers(HttpMethod.GET, "/api/planning")
