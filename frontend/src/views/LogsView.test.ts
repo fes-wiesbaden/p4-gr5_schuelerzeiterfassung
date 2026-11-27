@@ -1,0 +1,142 @@
+import { flushPromises, mount } from '@vue/test-utils'
+import { createPinia, setActivePinia } from 'pinia'
+import PrimeVue from 'primevue/config'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+
+import LogsView from './LogsView.vue'
+import { berlinDayStart } from '@/api/logs'
+import { useAuthStore, type Role } from '@/stores/auth'
+
+const scans = {
+  items: [
+    {
+      scanId: 'a',
+      scannedAt: '2026-09-14T06:30:00Z',
+      rfidUid: 'UNBEKANNT-99',
+      student: null,
+      classCode: null
+    }
+  ],
+  total: 1
+}
+
+const audits = {
+  items: [
+    {
+      id: 4,
+      occurredAt: '2026-09-14T07:00:00Z',
+      eventType: 'STATUS_CHANGE',
+      student: 'Beispiel, Erika',
+      classCode: 'KL-A',
+      staffName: 'Kraft, Lena',
+      staffUsername: 'l.kraft',
+      terminalId: null,
+      roomNumber: null,
+      oldStatus: 'ANWESEND',
+      newStatus: 'ENTSCHULDIGT',
+      unexcusedMinutesDelta: -60,
+      excusedMinutesDelta: 60
+    }
+  ],
+  total: 1
+}
+
+describe('LogsView', () => {
+  const fetchMock = vi.fn()
+
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    vi.useFakeTimers({ toFake: ['Date'] })
+    // 08:00 Berliner Sommerzeit
+    vi.setSystemTime(new Date('2026-09-14T06:00:00Z'))
+    vi.stubGlobal('fetch', fetchMock)
+    // jsdom kennt keinen ResizeObserver, den die Reiterleiste für ihre Markierung nutzt
+    vi.stubGlobal(
+      'ResizeObserver',
+      class {
+        observe() {}
+        unobserve() {}
+        disconnect() {}
+      }
+    )
+    fetchMock.mockImplementation(
+      async (url: string) =>
+        new Response(JSON.stringify(url.includes('/audits') ? audits : scans), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' }
+        })
+    )
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+    vi.unstubAllGlobals()
+    fetchMock.mockReset()
+  })
+
+  async function mountAs(role: Role) {
+    useAuthStore().user = { name: 'Test', role }
+    const wrapper = mount(LogsView, { global: { plugins: [PrimeVue] } })
+    await flushPromises()
+    return wrapper
+  }
+
+  function urls() {
+    return fetchMock.mock.calls.map(([url]) => new URL(url, 'http://x'))
+  }
+
+  it('zeigt Lehrkräften nur die RawScans der letzten sieben Berliner Tage', async () => {
+    const wrapper = await mountAs('lehrkraft')
+
+    expect(wrapper.text()).toContain('RawScans')
+    expect(wrapper.text()).not.toContain('Audit-Logs')
+    expect(wrapper.text()).toContain('Unbekannte Karte')
+    expect(urls().map((url) => url.pathname)).toEqual(['/api/logs/raw-scans'])
+    const params = urls()[0].searchParams
+    expect(params.get('from')).toBe('2026-09-07T22:00:00.000Z')
+    expect(params.get('to')).toBe('2026-09-14T22:00:00.000Z')
+    expect(params.get('sort')).toBe('scannedAt')
+    expect(params.get('direction')).toBe('desc')
+    wrapper.unmount()
+  })
+
+  it('zeigt Administratoren, welche Lehrkraft einen Eintrag ausgelöst hat', async () => {
+    const wrapper = await mountAs('admin')
+
+    expect(wrapper.text()).toContain('Audit-Logs')
+    expect(urls().map((url) => url.pathname)).toContain('/api/logs/audits')
+    const tab = wrapper
+      .findAll('[role="tab"]')
+      .find((element) => element.text() === 'Audit-Logs')!
+    await tab.trigger('click')
+    expect(wrapper.text()).toContain('Kraft, Lena (l.kraft)')
+    expect(wrapper.text()).toContain('unentschuldigt -60, entschuldigt +60')
+    wrapper.unmount()
+  })
+
+  it('sendet Suche und Sortierung an das Backend und beginnt wieder bei Seite 1', async () => {
+    const wrapper = await mountAs('lehrkraft')
+    await wrapper.find('.logs__search input').setValue(' Erika ')
+    await wrapper.find('form').trigger('submit')
+    await flushPromises()
+    expect(urls().at(-1)!.searchParams.get('search')).toBe('Erika')
+
+    const header = wrapper
+      .findAll('th')
+      .find((element) => element.text().includes('RFID-UID'))!
+    await header.trigger('click')
+    await flushPromises()
+    const params = urls().at(-1)!.searchParams
+    expect(params.get('sort')).toBe('rfidUid')
+    expect(params.get('page')).toBe('0')
+    wrapper.unmount()
+  })
+
+  it.each([
+    ['2026-01-15', '2026-01-14T23:00:00.000Z'],
+    ['2026-03-29', '2026-03-28T23:00:00.000Z'],
+    ['2026-03-30', '2026-03-29T22:00:00.000Z']
+  ])('berechnet den Beginn des Berliner Tags %s', (day, start) => {
+    expect(berlinDayStart(day)).toBe(start)
+  })
+})

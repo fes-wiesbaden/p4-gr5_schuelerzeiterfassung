@@ -9,6 +9,7 @@ import ClassesView from './views/ClassesView.vue'
 import StudentsView from './views/StudentsView.vue'
 import SchedulePlanningView from './views/SchedulePlanningView.vue'
 import ReportsView from './views/ReportsView.vue'
+import LogsView from './views/LogsView.vue'
 import RoomsView from './views/RoomsView.vue'
 import TerminalsAdminView from './views/TerminalsAdminView.vue'
 import StaffView from './views/StaffView.vue'
@@ -44,6 +45,7 @@ const router = createRouter({
         { path: 'schueler', name: 'schueler', component: StudentsView },
         { path: 'planung', name: 'planung', component: SchedulePlanningView },
         { path: 'auswertungen', name: 'auswertungen', component: ReportsView },
+        { path: 'logs', name: 'logs', component: LogsView },
         {
           path: 'raeume',
           name: 'raeume',
