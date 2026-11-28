@@ -1276,14 +1276,15 @@ public class AttendanceAccountingService {
     if (date.isAfter(today)) {
       return true;
     }
-    // Nur Tage mit vorhandener Buchung brauchen eine Korrektur; alle übrigen rechnet der
-    // Tagesabschluss mit den jetzt gültigen Unterrichtszeiten ab
     var daySlots = slotsFor(plan, periods, slots, accounting.findCancellations(classId), date);
+    // Ein ganz ausgefallener Tag kann beim Tagesabschluss ohne Buchung geblieben sein.
+    boolean bookMissingAttendance = !cancel && lessonsOver(date, daySlots, now);
     for (int index = 0; index < accounts.size(); index++) {
       var account = accounts.get(index);
       var history = histories.get(index);
       var attendance = history.attendances().get(date);
-      if (attendance == null) {
+      if (attendance == null
+          && (!bookMissingAttendance || date.isBefore(berlinDate(account.createdAt())))) {
         continue;
       }
       reconcile(

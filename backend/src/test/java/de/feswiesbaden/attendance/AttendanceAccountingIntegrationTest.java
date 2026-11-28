@@ -1807,6 +1807,45 @@ class AttendanceAccountingIntegrationTest {
         .andExpect(jsonPath("$.code").value("ATTENDANCE_DAY_LOCKED_OR_UNPLANNED"));
   }
 
+  /** Holt bei der Rücknahme eines ausgefallenen Schultags die fehlende Buchung sofort nach */
+  @Test
+  void restoringAFullyCancelledPastDayBooksMissingAttendanceExactlyOnce() throws Exception {
+    var teacher = staffSession("test.teacher.a");
+    var path = "/api/planning/classes/3/lesson-cancellations";
+    write(post(path), teacher, "{\"date\":\"2026-09-21\"}")
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.changed").value(true));
+
+    setTime("2026-09-22T07:00:00Z");
+    accounting.closeDueDays();
+    assertAccount(8, 0, 0);
+    var attendanceCount = "SELECT COUNT(*) FROM attendance WHERE student_id = 8";
+    assertThat(jdbc.queryForObject(attendanceCount, Integer.class)).isZero();
+
+    write(delete(path + "?date=2026-09-21"), teacher, "")
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.changed").value(true));
+    assertAccount(8, 180, 0);
+    mvc.perform(get("/api/students/8").session(teacher))
+        .andExpect(jsonPath("$.unexcusedDays").value(1))
+        .andExpect(jsonPath("$.unexcusedHours").value(0));
+    assertThat(
+            jdbc.queryForMap(
+                """
+                SELECT changed_by_staff_id, unexcused_minutes_delta FROM attendance_audit
+                WHERE student_id = 8 AND event_type = 'LESSON_CANCELLATION'
+                """))
+        .containsEntry("changed_by_staff_id", 1L)
+        .containsEntry("unexcused_minutes_delta", 180);
+
+    write(delete(path + "?date=2026-09-21"), teacher, "")
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.changed").value(false));
+    accounting.closeDueDays();
+    assertAccount(8, 180, 0);
+    assertThat(jdbc.queryForObject(attendanceCount, Integer.class)).isEqualTo(1);
+  }
+
   /** Ein Ausfall gilt weiter, wenn die Stunde danach verschoben wird */
   @Test
   void cancellationFollowsALessonMovedWithinItsTimeSpan() throws Exception {
