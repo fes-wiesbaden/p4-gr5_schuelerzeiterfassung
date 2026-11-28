@@ -200,7 +200,7 @@ onMounted(async () => {
   <p v-if="createHint && !error" class="create-hint">{{ createHint }}</p>
   <details v-if="!classPage && !auth.isAdmin && !loading" class="cards">
     <summary>RFID-Karten deiner Klassen anzeigen</summary>
-    <StudentRfidAssignments :classes="classes" />
+    <StudentRfidAssignments />
   </details>
 </template>
 

@@ -1248,6 +1248,7 @@ class AttendanceAccountingIntegrationTest {
         .andExpect(jsonPath("$.length()").value(6))
         .andExpect(jsonPath("$[*].classCode", everyItem(is("26TEST-A"))))
         .andExpect(jsonPath("$[0].studentName").value("Bereits-Anwesend, Test"))
+        .andExpect(jsonPath("$[0].studentId").value(5))
         .andExpect(jsonPath("$[*].rfidUid", not(hasItem("TEST-UID-007"))));
     mvc.perform(get(endpoint).session(staffSession("test.teacher.b")))
         .andExpect(status().isOk())
@@ -1257,6 +1258,7 @@ class AttendanceAccountingIntegrationTest {
                 .value(
                     hasItem(
                         Map.of(
+                            "studentId", 7,
                             "studentName", "Raum-B, Test",
                             "classCode", "26TEST-B",
                             "rfidUid", "TEST-UID-007"))));

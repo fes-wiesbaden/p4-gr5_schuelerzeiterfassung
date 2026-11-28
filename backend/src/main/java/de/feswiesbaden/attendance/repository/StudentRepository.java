@@ -73,13 +73,15 @@ public class StudentRepository {
    */
   public List<RfidAssignment> findRfidAssignments(Long staffId, boolean administrator) {
     return jdbc.query(
-        "SELECT CONCAT(s.last_name, ', ', s.first_name) AS student_name, c.class_code, s.rfid_uid"
+        "SELECT s.id, CONCAT(s.last_name, ', ', s.first_name) AS student_name,"
+            + " c.class_code, s.rfid_uid"
             + " FROM student s JOIN school_class c ON c.id = s.school_class_id"
             + " WHERE s.rfid_uid IS NOT NULL AND "
             + SchoolClassRepository.CLASS_ACCESS
             + " ORDER BY c.class_code, s.last_name, s.first_name, s.id",
         (row, index) ->
             new RfidAssignment(
+                row.getLong("id"),
                 row.getString("student_name"),
                 row.getString("class_code"),
                 row.getString("rfid_uid")),
@@ -183,7 +185,8 @@ public class StudentRepository {
       Long id, String firstName, String lastName, LocalDate birthDate, LocalDateTime createdAt) {}
 
   /** Enthält die sichtbaren Felder der Kartenzuordnung für Lehrkräfte */
-  public record RfidAssignment(String studentName, String classCode, String rfidUid) {
+  public record RfidAssignment(
+      Long studentId, String studentName, String classCode, String rfidUid) {
     /** Hält Schülerdaten und UID aus der Textdarstellung für technische Logs heraus */
     @Override
     public String toString() {
