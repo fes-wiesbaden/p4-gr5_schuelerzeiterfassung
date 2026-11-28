@@ -2,98 +2,107 @@
 
 .root {
   -fx-font-family: "Noto Sans";
-  -fx-background-color: #f1f3f6;
+  -terminal-paper: #f7f5fa;
+  -terminal-line: #e2dce9;
+  -terminal-ink: #261d34;
+  -terminal-muted: #665b76;
+  -fx-background-color: -terminal-paper;
 }
 
 .header {
-  -fx-background-color: #171b21;
-  -fx-padding: 14 24 14 24;
+  -fx-background-color: white;
+  -fx-border-color: transparent transparent -terminal-line transparent;
+  -fx-padding: 16 28 16 28;
 }
 
 .header-title {
-  -fx-text-fill: white;
+  -fx-text-fill: -terminal-ink;
   -fx-font-size: 16px;
   -fx-font-weight: bold;
 }
 
 .stage-box {
   -fx-alignment: center;
-  -fx-spacing: 12;
-  -fx-padding: 24;
+  -fx-spacing: 14;
+  -fx-padding: 22;
+  -fx-background-color: radial-gradient(center 50% 40%, radius 65%, #ede3f9, -terminal-paper);
+}
+
+.stage-box .symbol,
+.stage-box .badge {
+  -fx-text-fill: -state-ink;
+  -fx-background-color: -state-tint;
 }
 
 .symbol {
   -fx-font-size: 64px;
-  -fx-min-width: 150;
-  -fx-min-height: 150;
-  -fx-max-width: 150;
-  -fx-max-height: 150;
+  -fx-min-width: 136;
+  -fx-min-height: 136;
+  -fx-max-width: 136;
+  -fx-max-height: 136;
   -fx-alignment: center;
-  -fx-background-radius: 28;
-  -fx-border-radius: 28;
-  -fx-border-width: 1;
+  -fx-background-radius: 24;
 }
 
 .headline {
+  -fx-text-fill: -terminal-ink;
   -fx-font-size: 40px;
   -fx-font-weight: bold;
+  -fx-wrap-text: true;
+  -fx-text-alignment: center;
 }
 
 .hint {
-  -fx-font-size: 15px;
-  -fx-text-fill: #45505e;
+  -fx-font-size: 16px;
+  -fx-text-fill: -terminal-muted;
+  -fx-wrap-text: true;
+  -fx-text-alignment: center;
 }
 
 .badge {
-  -fx-padding: 8 18 8 18;
-  -fx-background-radius: 10;
-  -fx-border-radius: 10;
-  -fx-border-width: 1;
+  -fx-padding: 7 14 7 14;
+  -fx-background-radius: 14;
   -fx-font-size: 13px;
 }
 
-/* Bereit */
-.state-ready .symbol   { -fx-background-color: #e7eef9; -fx-border-color: #235eac; -fx-text-fill: #235eac; }
-.state-ready .headline { -fx-text-fill: #232931; }
-.state-ready .badge    { -fx-background-color: #e7eef9; -fx-border-color: #235eac; -fx-text-fill: #235eac; }
+.state-ready {
+  -state-tint: #e4d6f7;
+  -state-ink: #51348e;
+}
 
-/* Erfolgsrückmeldung */
-.state-success .symbol   { -fx-background-color: #dcfce7; -fx-border-color: #15803d; -fx-text-fill: #15803d; }
-.state-success .headline { -fx-text-fill: #15803d; }
-.state-success .badge    { -fx-background-color: #dcfce7; -fx-border-color: #15803d; -fx-text-fill: #15803d; }
+.state-success {
+  -state-tint: #e5f5eb;
+  -state-ink: #16603a;
+}
 
-/* Fehlerrückmeldung */
-.state-error .symbol   { -fx-background-color: #fee2e2; -fx-border-color: #b91c1c; -fx-text-fill: #b91c1c; }
-.state-error .headline { -fx-text-fill: #b91c1c; }
-.state-error .badge    { -fx-background-color: #fee2e2; -fx-border-color: #b91c1c; -fx-text-fill: #b91c1c; }
+.state-error {
+  -state-tint: #fde8ea;
+  -state-ink: #8c3038;
+}
 
-/* Lokal vorgemerkt. Die Zustellung wird später erneut versucht */
-.state-queued .symbol   { -fx-background-color: #fef3c7; -fx-border-color: #b45309; -fx-text-fill: #b45309; }
-.state-queued .headline { -fx-text-fill: #b45309; }
-.state-queued .badge    { -fx-background-color: #fef3c7; -fx-border-color: #b45309; -fx-text-fill: #b45309; }
+.state-queued {
+  -state-tint: #fbedd4;
+  -state-ink: #77490d;
+}
 
-/* Wird gerade verarbeitet */
-.state-processing .symbol,
-.state-already-received .symbol { -fx-background-color: #e2e8f0; -fx-border-color: #45505e; -fx-text-fill: #45505e; }
-.state-processing .headline,
-.state-already-received .headline { -fx-text-fill: #45505e; }
-.state-processing .badge,
-.state-already-received .badge { -fx-background-color: #e2e8f0; -fx-border-color: #45505e; -fx-text-fill: #45505e; }
+.state-processing,
+.state-already-received {
+  -state-tint: #ebe5f2;
+  -state-ink: -terminal-muted;
+}
 
 .footer {
   -fx-background-color: white;
-  -fx-border-color: #cbd1d9 transparent transparent transparent;
-  -fx-border-width: 1 0 0 0;
-  -fx-padding: 10 24 10 24;
+  -fx-border-color: -terminal-line transparent transparent transparent;
+  -fx-padding: 12 28 12 28;
 }
 
-.footer-text {
-  -fx-font-size: 12px;
-  -fx-text-fill: #45505e;
+.footer-text,
+.footer-strong {
+  -fx-font-size: 13px;
+  -fx-text-fill: -terminal-muted;
 }
 
 .footer-strong {
-  -fx-font-size: 12px;
   -fx-font-weight: bold;
-  -fx-text-fill: #45505e;
 }

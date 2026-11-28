@@ -17,8 +17,17 @@ spring:
       ddl-auto: validate
   flyway:
     enabled: true
+  servlet:
+    multipart:
+      # Etwas über der fachlichen Grenze von 8 MB, damit die Anwendung selbst 413 meldet
+      max-file-size: 9MB
+      max-request-size: 10MB
+      resolve-lazily: true
 
 server:
+  tomcat:
+    # Zu große Uploads vollständig lesen, damit die Fehlerantwort den Browser erreicht
+    max-swallow-size: 12MB
   servlet:
     session:
       timeout: 30m

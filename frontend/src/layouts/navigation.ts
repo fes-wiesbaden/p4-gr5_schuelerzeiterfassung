@@ -16,20 +16,10 @@ export const mainNavItems: NavItem[] = [
     label: 'Stunden- und Blockplan',
     routeName: 'planung',
     icon: 'pi-calendar'
-  },
-  { label: 'Auswertungen', routeName: 'auswertungen', icon: 'pi-chart-bar' }
+  }
 ]
 
 export const administrationNavItems: NavItem[] = [
   { label: 'Räume', routeName: 'raeume', icon: 'pi-building' },
-  {
-    label: 'Terminals',
-    routeName: 'terminals',
-    icon: 'pi-desktop'
-  },
-  {
-    label: 'Personal',
-    routeName: 'personal',
-    icon: 'pi-id-card'
-  }
+  { label: 'Lehrkräfte', routeName: 'personal', icon: 'pi-id-card' }
 ]

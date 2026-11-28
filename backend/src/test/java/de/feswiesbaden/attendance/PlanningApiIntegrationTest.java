@@ -2,10 +2,15 @@ package de.feswiesbaden.attendance;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.contains;
+import static org.hamcrest.Matchers.containsString;
+import static org.hamcrest.Matchers.hasItem;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -15,7 +20,9 @@ import de.feswiesbaden.attendance.dtos.RawScanDTO;
 import de.feswiesbaden.attendance.enums.ScanResult;
 import de.feswiesbaden.attendance.login.StaffPrincipal;
 import de.feswiesbaden.attendance.service.AttendanceAccountingService;
+import de.feswiesbaden.attendance.service.CodexRunner;
 import jakarta.servlet.http.Cookie;
+import java.nio.charset.StandardCharsets;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.List;
@@ -30,6 +37,7 @@ import org.springframework.boot.testcontainers.service.connection.ServiceConnect
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.mock.web.MockHttpSession;
+import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.web.context.HttpSessionSecurityContextRepository;
@@ -59,6 +67,8 @@ class PlanningApiIntegrationTest {
   @Autowired AttendanceAccountingService accounting;
 
   @MockitoBean Clock clock;
+
+  @MockitoBean CodexRunner codex;
 
   private MockHttpSession admin;
 
@@ -173,6 +183,395 @@ class PlanningApiIntegrationTest {
                 Integer.class,
                 timetableId))
         .isEqualTo(1);
+  }
+
+  /** Speichert Fach und Lehrkraft eines Slots und übernimmt sie in neue Fassungen */
+  @Test
+  void storesSubjectAndTeacherAndCarriesThemIntoNewSlotVersions() throws Exception {
+    var slot =
+        """
+        {"weekday":"DIENSTAG","startsAt":"08:00","endsAt":"09:00","roomId":1,
+         "subject":" Mathe ","teacherId":1}
+        """;
+    var tuesday = "$.timetables[0].slots[?(@.weekday == 'DIENSTAG')]";
+    write(
+            "/api/planning/timetables/1/slots",
+            admin,
+            slot.replace("\"teacherId\":1", "\"teacherId\":3"))
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.code").value("INVALID_TIMETABLE_SLOT"));
+    write("/api/planning/timetables/1/slots", admin, slot.replace(" Mathe ", "x".repeat(81)))
+        .andExpect(status().isBadRequest());
+    Long slotId = createdId(write("/api/planning/timetables/1/slots", admin, slot));
+
+    mvc.perform(get("/api/planning").session(admin))
+        .andExpect(
+            jsonPath("$.teachers[*].name", contains("Lehrkraft-A, Test", "Lehrkraft-B, Test")))
+        .andExpect(jsonPath("$.teachers[0].id").value(1))
+        .andExpect(jsonPath(tuesday + ".subject", contains("Mathe")))
+        .andExpect(jsonPath(tuesday + ".teacherId", contains(1)))
+        .andExpect(jsonPath(tuesday + ".teacherName", contains("Test Lehrkraft-A")))
+        .andExpect(jsonPath("$.timetables[0].slots[0].subject").isEmpty())
+        .andExpect(jsonPath("$.timetables[0].slots[0].teacherName").isEmpty());
+    mvc.perform(get("/api/planning/classes/1/week?date=2026-09-15").session(teacher))
+        .andExpect(jsonPath("$[0].lessons[0].subject").isEmpty())
+        .andExpect(jsonPath("$[0].lessons[0].teacherName").isEmpty())
+        .andExpect(jsonPath("$[1].lessons[0].subject").value("Mathe"))
+        .andExpect(jsonPath("$[1].lessons[0].teacherName").value("Test Lehrkraft-A"));
+
+    write(
+            put("/api/planning/timetables/1/slots/" + slotId),
+            admin,
+            """
+            {"weekday":"DIENSTAG","startsAt":"08:15","endsAt":"09:00","roomId":1}
+            """)
+        .andExpect(status().isOk());
+    mvc.perform(get("/api/planning").session(admin))
+        .andExpect(jsonPath(tuesday + ".startsAt", contains("08:15:00")))
+        .andExpect(jsonPath(tuesday + ".subject", contains("Mathe")))
+        .andExpect(jsonPath(tuesday + ".teacherId", contains(1)));
+    Long versionId =
+        jdbc.queryForObject(
+            "SELECT id FROM timetable_slot WHERE weekday = 'DIENSTAG' AND valid_until IS NULL",
+            Long.class);
+    write(
+            put("/api/planning/timetables/1/slots/" + versionId),
+            admin,
+            """
+            {"weekday":"DIENSTAG","startsAt":"08:15","endsAt":"09:00","roomId":1,
+             "subject":null,"teacherId":2}
+            """)
+        .andExpect(status().isOk());
+    mvc.perform(get("/api/planning").session(admin))
+        .andExpect(jsonPath(tuesday + ".subject", contains((Object) null)))
+        .andExpect(jsonPath(tuesday + ".teacherName", contains("Test Lehrkraft-B")));
+    jdbc.update("DELETE FROM teacher_class WHERE staff_id = 2");
+    jdbc.update("UPDATE school_class SET class_teacher_id = 1 WHERE class_teacher_id = 2");
+    jdbc.update("DELETE FROM staff WHERE id = 2");
+    mvc.perform(get("/api/planning").session(admin))
+        .andExpect(jsonPath(tuesday + ".teacherId", contains((Object) null)));
+  }
+
+  /** Importiert einen Stundenplan atomar und nennt die Position der fehlerhaften Unterrichtszeit */
+  @Test
+  void importsATimetableAtomicallyAndReportsTheInvalidSlot() throws Exception {
+    var path = "/api/planning/timetables/import";
+    var valid =
+        """
+        {"name":" Import ","slots":[
+          {"weekday":"MONTAG","startsAt":"07:30","endsAt":"09:00","roomId":1,
+           "subject":"LF","teacherId":2},
+          {"weekday":"MONTAG","startsAt":"09:15","endsAt":"10:45","roomId":2}]}
+        """;
+    int timetablesBefore = jdbc.queryForObject("SELECT COUNT(*) FROM timetable", Integer.class);
+    int slotsBefore = jdbc.queryForObject("SELECT COUNT(*) FROM timetable_slot", Integer.class);
+
+    mvc.perform(post(path).contentType(MediaType.APPLICATION_JSON).content(valid))
+        .andExpect(status().isForbidden());
+    write(path, admin, valid.replace("09:15", "08:00"))
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.code").value("OVERLAPPING_TIMETABLE_SLOT"))
+        .andExpect(jsonPath("$.slotIndex").value(1));
+    write(path, admin, valid.replace("\"roomId\":2", "\"roomId\":99"))
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.code").value("INVALID_TIMETABLE_SLOT"))
+        .andExpect(jsonPath("$.slotIndex").value(1));
+    write(path, admin, valid.replace("\"teacherId\":2", "\"teacherId\":3"))
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.slotIndex").value(0));
+    write(path, admin, "{\"name\":\"Leer\",\"slots\":[]}")
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.code").value("INVALID_TIMETABLE_SLOT"))
+        .andExpect(jsonPath("$.slotIndex").isEmpty());
+    write(path, admin, valid.replace(" Import ", " "))
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.code").value("INVALID_TIMETABLE"));
+    assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM timetable", Integer.class))
+        .isEqualTo(timetablesBefore);
+    assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM timetable_slot", Integer.class))
+        .isEqualTo(slotsBefore);
+
+    write(path, teacher, valid)
+        .andExpect(status().isForbidden())
+        .andExpect(jsonPath("$.code").value("ADMINISTRATOR_REQUIRED"));
+    assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM timetable", Integer.class))
+        .isEqualTo(timetablesBefore);
+    Long id = createdIdOk(write(path, admin, valid));
+    assertThat(jdbc.queryForObject("SELECT name FROM timetable WHERE id = ?", String.class, id))
+        .isEqualTo("Import");
+    assertThat(
+            jdbc.queryForList(
+                "SELECT subject, teacher_id, room_id FROM timetable_slot WHERE timetable_id = ?"
+                    + " ORDER BY start_time",
+                id))
+        .extracting(
+            row -> row.get("subject"), row -> row.get("teacher_id"), row -> row.get("room_id"))
+        .containsExactly(
+            org.assertj.core.groups.Tuple.tuple("LF", 2L, 1L),
+            org.assertj.core.groups.Tuple.tuple(null, null, 2L));
+    mvc.perform(get("/api/planning").session(teacher)).andExpect(status().isForbidden());
+  }
+
+  /** Legt beim Import eine neue Klasse mit dem neuen Stundenplan an oder gar nichts */
+  @Test
+  void importsATimetableTogetherWithANewClass() throws Exception {
+    var path = "/api/planning/timetables/import";
+    var body =
+        """
+        {"name":"Neu","slots":[
+          {"weekday":"MONTAG","startsAt":"11:00","endsAt":"12:30","roomId":1}],
+         "schoolClass":{"classCode":"26NEU","classTeacherId":2,"blockPlanId":1}}
+        """;
+    int timetablesBefore = jdbc.queryForObject("SELECT COUNT(*) FROM timetable", Integer.class);
+    write(path, admin, body.replace("\"roomId\":1", "\"roomId\":99"))
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.slotIndex").value(0));
+    write(path, admin, body.replace("26NEU", "26TEST-A"))
+        .andExpect(status().isConflict())
+        .andExpect(jsonPath("$.code").value("CLASS_CODE_ALREADY_EXISTS"))
+        .andExpect(jsonPath("$.slotIndex").isEmpty());
+    write(path, admin, body.replace("\"classTeacherId\":2", "\"classTeacherId\":3"))
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.code").value("INVALID_CLASS"));
+    assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM timetable", Integer.class))
+        .isEqualTo(timetablesBefore);
+    assertThat(
+            jdbc.queryForObject(
+                "SELECT COUNT(*) FROM school_class WHERE class_code = '26NEU'", Integer.class))
+        .isZero();
+
+    var response =
+        write(path, admin, body)
+            .andExpect(status().isOk())
+            .andReturn()
+            .getResponse()
+            .getContentAsString();
+    long id = ((Number) com.jayway.jsonpath.JsonPath.read(response, "$.id")).longValue();
+    long classId = ((Number) com.jayway.jsonpath.JsonPath.read(response, "$.classId")).longValue();
+    assertThat(
+            jdbc.queryForMap(
+                "SELECT class_code, class_teacher_id, timetable_id FROM school_class WHERE id = ?",
+                classId))
+        .containsEntry("class_code", "26NEU")
+        .containsEntry("class_teacher_id", 2L)
+        .containsEntry("timetable_id", id);
+  }
+
+  /** Wechselt den Stundenplan einer Klasse ab einem künftigen Tag, ohne frühere Tage zu ändern */
+  @Test
+  void importsATimetableForAnExistingClassFromAFutureDate() throws Exception {
+    var path = "/api/planning/timetables/import";
+    var cancellation = "/api/planning/classes/1/lesson-cancellations";
+    var week = "/api/planning/classes/1/week?date=2026-09-14";
+    var body =
+        """
+        {"name":"Ab Mittwoch","slots":[
+          {"weekday":"MONTAG","startsAt":"11:00","endsAt":"12:30","roomId":1,"subject":"Neu"},
+          {"weekday":"MITTWOCH","startsAt":"08:00","endsAt":"09:30","roomId":1}],
+         "schoolClass":{"id":1,"validFrom":"2026-09-16"}}
+        """;
+    setTime("2026-09-15T07:00:00Z");
+    accounting.closeDueDays();
+    assertThat(account(1)).isEqualTo(180);
+
+    write(path, admin, body.replace("2026-09-16", "2026-09-15"))
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.code").value("INVALID_TIMETABLE_VALID_FROM"));
+    write(path, admin, body.replace("\"id\":1", "\"id\":99")).andExpect(status().isNotFound());
+    assertThat(
+            jdbc.queryForObject("SELECT timetable_id FROM school_class WHERE id = 1", Long.class))
+        .isEqualTo(1L);
+    var response =
+        write(path, admin, body)
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.classId").value(1))
+            .andReturn()
+            .getResponse()
+            .getContentAsString();
+    long id = ((Number) com.jayway.jsonpath.JsonPath.read(response, "$.id")).longValue();
+    assertThat(
+            jdbc.queryForObject("SELECT timetable_id FROM school_class WHERE id = 1", Long.class))
+        .isEqualTo(id);
+    assertThat(
+            jdbc.queryForObject("SELECT timetable_id FROM school_class WHERE id = 3", Long.class))
+        .isEqualTo(1L);
+
+    mvc.perform(get(week).session(teacher))
+        .andExpect(jsonPath("$[0].lessons[*].startsAt", contains("07:30:00", "09:15:00")))
+        .andExpect(jsonPath("$[2].lessons[*].startsAt", contains("08:00:00")));
+    mvc.perform(get("/api/planning/classes/3/week?date=2026-09-21").session(teacher))
+        .andExpect(jsonPath("$[0].lessons[*].startsAt", contains("07:30:00", "09:15:00")));
+
+    // Ein bereits abgerechneter Tag rechnet auch bei erneuter Abrechnung mit dem alten Plan
+    accounting.closeDueDays();
+    assertThat(account(1)).isEqualTo(180);
+    write(cancellation, admin, "{\"date\":\"2026-09-14\",\"startsAt\":\"09:15\"}")
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.changed").value(true));
+    assertThat(account(1)).isEqualTo(90);
+    write(delete(cancellation + "?date=2026-09-14"), admin, "").andExpect(status().isOk());
+    assertThat(account(1)).isEqualTo(180);
+
+    setTime("2026-09-16T08:00:00Z");
+    accounting.closeDueDays();
+    assertThat(account(1)).isEqualTo(270);
+  }
+
+  /** Ein befristeter Plan gilt nur in seinem Zeitraum; danach setzt der bisherige wieder ein */
+  @Test
+  void importsATemporaryTimetableAndResumesThePreviousOneAfterwards() throws Exception {
+    var path = "/api/planning/timetables/import";
+    var body =
+        """
+        {"name":"Befristet","slots":[
+          {"weekday":"MONTAG","startsAt":"11:00","endsAt":"12:30","roomId":1}],
+         "schoolClass":{"id":3,"validFrom":"2026-09-21","validUntil":"2026-09-25"}}
+        """;
+    jdbc.update(
+        "INSERT INTO block_assignment (id, block_plan_id, starts_on, ends_on)"
+            + " VALUES (9, 1, '2026-09-28', '2026-10-02')");
+    jdbc.update(
+        "INSERT INTO class_block_assignment (school_class_id, block_assignment_id) VALUES (3, 9)");
+    write(path, admin, body.replace("2026-09-25", "2026-09-20"))
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.code").value("INVALID_TIMETABLE_VALID_FROM"));
+    write(path, admin, body).andExpect(status().isOk()).andExpect(jsonPath("$.classId").value(3));
+
+    mvc.perform(get("/api/planning/classes/3/week?date=2026-09-21").session(teacher))
+        .andExpect(jsonPath("$[0].lessons[*].startsAt", contains("11:00:00")));
+    mvc.perform(get("/api/planning/classes/3/week?date=2026-09-28").session(teacher))
+        .andExpect(jsonPath("$[0].lessons[*].startsAt", contains("07:30:00", "09:15:00")));
+    mvc.perform(get("/api/planning/classes/1/week?date=2026-09-14").session(teacher))
+        .andExpect(jsonPath("$[0].lessons[*].startsAt", contains("07:30:00", "09:15:00")));
+
+    // Eine zweite befristete Zuordnung ersetzt die erste im überlappenden Zeitraum
+    write(path, admin, body.replace("11:00", "13:00").replace("12:30", "14:00"))
+        .andExpect(status().isOk());
+    mvc.perform(get("/api/planning/classes/3/week?date=2026-09-21").session(teacher))
+        .andExpect(jsonPath("$[0].lessons[*].startsAt", contains("13:00:00")));
+    mvc.perform(get("/api/planning/classes/3/week?date=2026-09-28").session(teacher))
+        .andExpect(jsonPath("$[0].lessons[*].startsAt", contains("07:30:00", "09:15:00")));
+
+    // Der Schüler ist seit 08:00 Uhr anwesend; im befristeten Plan fehlt er daher nicht
+    setTime("2026-09-22T12:30:00Z");
+    accounting.closeDueDays();
+    assertThat(account(8)).isZero();
+    setTime("2026-09-28T09:00:00Z");
+    accounting.closeDueDays();
+    assertThat(account(8)).isEqualTo(180);
+  }
+
+  private int account(long student) {
+    return jdbc.queryForObject(
+        "SELECT unexcused_minutes_account FROM student WHERE id = ?", Integer.class, student);
+  }
+
+  private Long createdIdOk(ResultActions result) throws Exception {
+    var body = result.andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+    return ((Number) com.jayway.jsonpath.JsonPath.read(body, "$.id")).longValue();
+  }
+
+  /** Prüft das Bild, säubert die gelesenen Einträge und ordnet Lehrkräfte und Räume zu */
+  @Test
+  void readsATimetableDraftFromAnImageWithoutSavingAnything() throws Exception {
+    var path = "/api/assistant/timetable-drafts";
+    byte[] png = {(byte) 0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A, 1, 2, 3};
+    jdbc.update(
+        "INSERT INTO staff (id, first_name, last_name, username, password_hash, role) VALUES"
+            + " (10, '', 'Elborg', 'elborg', 'x', 'LEHRKRAFT'),"
+            + " (11, '', 'Elborg Foerster', 'elborg.f', 'x', 'LEHRKRAFT'),"
+            + " (12, 'Mia', 'Sommerfeld', 'sommerfeld', 'x', 'LEHRKRAFT')");
+    jdbc.update("INSERT INTO room (id, room_number) VALUES (10, 'A 213')");
+    int timetablesBefore = jdbc.queryForObject("SELECT COUNT(*) FROM timetable", Integer.class);
+
+    upload(path, teacher, png)
+        .andExpect(status().isForbidden())
+        .andExpect(jsonPath("$.code").value("ADMINISTRATOR_REQUIRED"));
+    upload(path, admin, png).andExpect(status().isServiceUnavailable());
+    when(codex.enabled()).thenReturn(true);
+    upload(path, admin, new byte[0])
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.code").value("INVALID_TIMETABLE_IMAGE"));
+    upload(path, admin, "GIF89a-kein-erlaubtes-Format".getBytes(StandardCharsets.UTF_8))
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.code").value("INVALID_TIMETABLE_IMAGE"));
+    byte[] large = new byte[8 * 1024 * 1024 + 1];
+    System.arraycopy(png, 0, large, 0, png.length);
+    upload(path, admin, large)
+        .andExpect(status().isPayloadTooLarge())
+        .andExpect(jsonPath("$.code").value("TIMETABLE_IMAGE_TOO_LARGE"));
+    verify(codex, never()).run(any());
+
+    when(codex.run(any()))
+        .thenReturn(
+            """
+            {"recognized":true,"name":"10/11/12BE13 · Stundenplan (aus Bild, 48. KW 2026)",
+             "className":"26 test-a","weekStartsOn":"2026-11-23",
+             "slots":[
+              {"weekday":"MONTAG","startsAt":"7:30","endsAt":"09:00","subject":"LF",
+               "teacherName":"Sommer","roomNumber":"A213"},
+              {"weekday":"DIENSTAG","startsAt":"09:15","endsAt":"12:30","subject":"SPO",
+               "teacherName":"Elborg","roomNumber":"Sport 1"},
+              {"weekday":"MITTWOCH","startsAt":"07:30","endsAt":"09:00","subject":null,
+               "teacherName":"Elborg Fc","roomNumber":null},
+              {"weekday":"DONNERSTAG","startsAt":"07:30","endsAt":"09:00","subject":"X",
+               "teacherName":"Elb","roomNumber":"TEST-R01"},
+              {"weekday":"SAMSTAG","startsAt":"07:30","endsAt":"09:00","subject":"X",
+               "teacherName":null,"roomNumber":null},
+              {"weekday":"FREITAG","startsAt":"10:00","endsAt":"09:00","subject":"X",
+               "teacherName":null,"roomNumber":null}],
+             "notes":["Do 14:45: Fach nur teilweise lesbar (CISCO-A…)"]}
+            """);
+    upload(path, admin, png)
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.name").value("10/11/12BE13 · Stundenplan (aus Bild, 48. KW 2026)"))
+        .andExpect(jsonPath("$.slots.length()").value(4))
+        .andExpect(jsonPath("$.classCode").value("26 test-a"))
+        .andExpect(jsonPath("$.classId").value(1))
+        .andExpect(jsonPath("$.weekStartsOn").value("2026-11-23"))
+        .andExpect(jsonPath("$.classes[0].blocks[0].startsOn").value("2026-09-14"))
+        .andExpect(jsonPath("$.classes[0].blocks[0].endsOn").value("2026-09-18"))
+        .andExpect(jsonPath("$.classes[*].classCode", contains("26TEST-A", "26TEST-B", "26TEST-C")))
+        .andExpect(jsonPath("$.blockPlans[0].id").value(1))
+        .andExpect(jsonPath("$.blockPlans[0].startsOn").value("2026-09-01"))
+        .andExpect(jsonPath("$.slots[0].startsAt").value("07:30"))
+        .andExpect(jsonPath("$.slots[0].teacherId").value(12))
+        .andExpect(jsonPath("$.slots[0].roomId").value(10))
+        .andExpect(jsonPath("$.slots[1].teacherId").value(10))
+        .andExpect(jsonPath("$.slots[1].roomId").isEmpty())
+        .andExpect(jsonPath("$.slots[1].endsAt").value("12:30"))
+        .andExpect(jsonPath("$.slots[2].teacherId").value(11))
+        .andExpect(jsonPath("$.slots[3].teacherId").isEmpty())
+        .andExpect(jsonPath("$.slots[3].roomId").value(1))
+        .andExpect(jsonPath("$.notes", hasItem("Do 14:45: Fach nur teilweise lesbar (CISCO-A…)")))
+        .andExpect(jsonPath("$.notes", hasItem(containsString("„Elb“ ist nicht eindeutig"))))
+        .andExpect(jsonPath("$.notes", hasItem(containsString("Raum „Sport 1“"))))
+        .andExpect(jsonPath("$.notes", hasItem(containsString("2 Einträge"))))
+        .andExpect(jsonPath("$.rooms[*].roomNumber", hasItem("A 213")))
+        .andExpect(jsonPath("$.teachers[*].name", hasItem("Sommerfeld, Mia")))
+        .andExpect(jsonPath("$.teachers[*].name", hasItem("Elborg")));
+    assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM timetable", Integer.class))
+        .isEqualTo(timetablesBefore);
+
+    when(codex.run(any()))
+        .thenReturn(
+            "{\"recognized\":false,\"name\":\"\",\"className\":null,\"slots\":[],\"notes\":[]}");
+    upload(path, admin, png)
+        .andExpect(status().isUnprocessableEntity())
+        .andExpect(jsonPath("$.code").value("TIMETABLE_NOT_RECOGNIZED"));
+    when(codex.run(any())).thenThrow(new IllegalStateException("ASSISTANT_BUSY"));
+    upload(path, admin, png).andExpect(status().isTooManyRequests());
+  }
+
+  private ResultActions upload(String path, MockHttpSession session, byte[] image)
+      throws Exception {
+    String token = "test-csrf-token";
+    return mvc.perform(
+        multipart(path)
+            .file(new MockMultipartFile("image", "plan.png", "image/png", image))
+            .session(session)
+            .cookie(new Cookie("XSRF-TOKEN", token))
+            .header("X-XSRF-TOKEN", token));
   }
 
   @Test

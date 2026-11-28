@@ -1,0 +1,89 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "recognized": {
+      "type": "boolean"
+    },
+    "name": {
+      "type": "string"
+    },
+    "className": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "weekStartsOn": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "slots": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "weekday": {
+            "type": "string",
+            "enum": [
+              "MONTAG",
+              "DIENSTAG",
+              "MITTWOCH",
+              "DONNERSTAG",
+              "FREITAG"
+            ]
+          },
+          "startsAt": {
+            "type": "string"
+          },
+          "endsAt": {
+            "type": "string"
+          },
+          "subject": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "teacherName": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "roomNumber": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "weekday",
+          "startsAt",
+          "endsAt",
+          "subject",
+          "teacherName",
+          "roomNumber"
+        ]
+      }
+    },
+    "notes": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "required": [
+    "recognized",
+    "name",
+    "className",
+    "weekStartsOn",
+    "slots",
+    "notes"
+  ]
+}

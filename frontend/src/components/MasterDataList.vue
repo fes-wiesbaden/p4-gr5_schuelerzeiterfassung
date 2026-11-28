@@ -1,36 +1,115 @@
 <script setup lang="ts" generic="T extends { id: number }">
 import InputText from 'primevue/inputtext'
-import { computed, nextTick, onMounted, ref, shallowRef } from 'vue'
+import {
+  computed,
+  nextTick,
+  onMounted,
+  onUnmounted,
+  ref,
+  shallowRef,
+  watch
+} from 'vue'
 import { changeData, loadData } from '@/api/client'
+import { searchableText, searchKey } from '@/api/students'
+import PageError from '@/components/PageError.vue'
+import { confirmAction } from '@/confirm'
+import { showNotice } from '@/notice'
 const props = defineProps<{
   url: string
   columnTitle?: string
-  columns?: { field: keyof T; title: string }[]
+  columns?: {
+    field: keyof T
+    title: string
+    format?: (row: T) => string
+    // Vergleichswert für die Sortierung per Klick auf die Spaltenüberschrift
+    sortValue?: (row: T) => number | string
+  }[]
+  // Einzahl für Schaltflächen und Überschriften, z. B. „Schüler“
+  entryName?: string
+  // Zusätzlicher Suchtext je Zeile, z. B. die Klasse
+  searchText?: (row: T) => string
+  searchPlaceholder?: string
+  // Überschrift einer Zusatzspalte, die der Slot „extra“ füllt
+  extraTitle?: string
   itemUrl?: string
   editable: boolean
+  // Getrennt von „editable“: Anlegen kann fehlende Auswahldaten brauchen
   canCreate?: boolean
+  createUrl?: string | null
   title: string
   label: (row: T) => string
 }>()
 const emit = defineEmits<{ saved: [] }>()
 const rows = shallowRef<T[]>([])
 const query = ref('')
+const sorting = ref<{ field: string; descending: boolean }>()
+const collator = new Intl.Collator('de', { numeric: true })
+
 const visibleRows = computed(() => {
-  const search = query.value.trim().toLocaleLowerCase('de')
-  return rows.value.filter((row) =>
-    props.label(row).toLocaleLowerCase('de').includes(search)
+  const words = searchKey(query.value)
+    .split(/[\s,]+/)
+    .filter(Boolean)
+  const matches = rows.value.filter((row) => {
+    const text = searchableText(
+      props.label(row) + ' ' + (props.searchText?.(row) ?? '')
+    )
+    return words.every((word) => text.includes(word))
+  })
+  const active = sorting.value
+  const column = props.columns?.find(
+    (entry) => String(entry.field) === active?.field
   )
+  if (!active) return matches
+  const value = (row: T) =>
+    column?.sortValue ? column.sortValue(row) : props.label(row)
+  const sorted = [...matches].sort((a, b) => {
+    const left = value(a)
+    const right = value(b)
+    return typeof left === 'number' && typeof right === 'number'
+      ? left - right
+      : collator.compare(String(left), String(right))
+  })
+  return active.descending ? sorted.reverse() : sorted
 })
+
+function sortBy(field: string) {
+  const active = sorting.value
+  if (active?.field !== field) {
+    // Zahlen zuerst absteigend: die auffälligsten Werte stehen oben
+    sorting.value = { field, descending: field !== 'label' }
+  } else if (active.descending === (field !== 'label')) {
+    sorting.value = { field, descending: !active.descending }
+  } else {
+    sorting.value = undefined
+  }
+}
+
+function sortState(field: string) {
+  const active = sorting.value
+  if (active?.field !== field) return 'none'
+  return active.descending ? 'descending' : 'ascending'
+}
+
+function sortIcon(field: string) {
+  const state = sortState(field)
+  if (state === 'none') return 'pi-sort-alt'
+  return state === 'ascending' ? 'pi-sort-amount-up-alt' : 'pi-sort-amount-down'
+}
 const selected = shallowRef<T>()
 const editing = ref(false)
 const busy = ref(false)
 const error = ref('')
 const loaded = ref(false)
+const loadingList = ref(true)
+let loadedUrl: string | undefined
+let loadVersion = 0
 const list = ref<HTMLElement>()
 const heading = ref<HTMLHeadingElement>()
 const editor = ref<HTMLFieldSetElement>()
 const createButton = ref<HTMLButtonElement>()
 const retryButton = ref<HTMLButtonElement>()
+// Nur ein fehlgeschlagenes Laden lässt sich durch erneutes Laden beheben
+const loadFailed = ref(false)
 
 function focusListAction() {
   const target = retryButton.value ?? createButton.value ?? heading.value
@@ -48,117 +127,181 @@ async function cancelEdit() {
   else focusListAction()
 }
 
-async function reload() {
-  rows.value = await loadData<T[]>(props.url)
-  loaded.value = true
+function isCurrentLoad(url: string, version: number) {
+  return props.url === url && loadVersion === version
 }
+
 async function retryLoad(restoreFocus = false) {
+  const url = props.url
+  const version = ++loadVersion
+  const changed = url !== loadedUrl
   error.value = ''
-  busy.value = true
+  loadFailed.value = false
+  loadingList.value = true
   try {
-    await reload()
+    const result = await loadData<T[]>(url)
+    if (!isCurrentLoad(url, version)) return
+    if (changed) query.value = ''
+    rows.value = result
+    loadedUrl = url
+    loaded.value = true
   } catch {
+    if (!isCurrentLoad(url, version)) return
+    if (changed) {
+      rows.value = []
+      loaded.value = false
+    }
     error.value = 'Liste konnte nicht geladen werden.'
+    loadFailed.value = true
   } finally {
-    busy.value = false
-    if (restoreFocus) {
-      await nextTick()
-      focusListAction()
+    if (isCurrentLoad(url, version)) {
+      loadingList.value = false
+      if (restoreFocus) {
+        await nextTick()
+        if (isCurrentLoad(url, version) && !error.value) focusListAction()
+      }
     }
   }
 }
-onMounted(() => retryLoad())
+
+watch(
+  () => props.url,
+  () => {
+    selected.value = undefined
+    editing.value = false
+    void retryLoad()
+  },
+  { immediate: true }
+)
 async function edit(row?: T) {
   selected.value = row
   editing.value = true
   error.value = ''
+  loadFailed.value = false
   await nextTick()
   editor.value?.querySelector<HTMLInputElement>('input, select')?.focus()
 }
 async function save(event: Event) {
   const body = Object.fromEntries(new FormData(event.target as HTMLFormElement))
-  if (!(await submit(selected.value ? 'PUT' : 'POST', body))) {
-    editor.value
-      ?.querySelector<HTMLButtonElement>('button[type="submit"]')
-      ?.focus()
-  }
+  await submit(selected.value ? 'PUT' : 'POST', body)
 }
 async function remove(row: T) {
-  if (!window.confirm(props.label(row) + ' wirklich löschen?')) return
+  if (
+    !(await confirmAction({
+      title: `${props.label(row)} löschen?`,
+      message: 'Der Eintrag wird dauerhaft gelöscht.',
+      confirmLabel: 'Löschen',
+      danger: true
+    }))
+  )
+    return
   selected.value = row
-  if (!(await submit('DELETE'))) {
-    const deleteButton = list.value?.querySelector<HTMLButtonElement>(
-      `button[data-delete-id="${row.id}"]`
-    )
-    deleteButton?.focus()
-  }
+  await submit('DELETE')
 }
 async function submit(method: 'POST' | 'PUT' | 'DELETE', body?: unknown) {
-  if (busy.value) return false
+  if (busy.value || loadingList.value) return
+  const source = props.url
+  const version = loadVersion
+  const rowId = selected.value?.id
+  const url =
+    method === 'POST'
+      ? props.createUrl
+      : (props.itemUrl ?? source) + '/' + rowId
+  if (url === null) return
   busy.value = true
   error.value = ''
+  loadFailed.value = false
   let saved = false
   try {
-    const url =
-      method === 'POST'
-        ? props.url
-        : (props.itemUrl ?? props.url) + '/' + selected.value!.id
-    await changeData(url, method, body)
+    await changeData(url ?? source, method, body)
     saved = true
+    if (!isCurrentLoad(source, version)) return
     emit('saved')
     editing.value = false
+    showNotice(
+      method === 'DELETE'
+        ? 'Eintrag gelöscht.'
+        : method === 'POST'
+          ? `${props.entryName ?? 'Eintrag'} angelegt.`
+          : 'Änderung gespeichert.'
+    )
     if (method === 'DELETE')
-      rows.value = rows.value.filter((row) => row.id !== selected.value?.id)
+      rows.value = rows.value.filter((row) => row.id !== rowId)
     try {
-      await reload()
+      const result = await loadData<T[]>(source)
+      if (isCurrentLoad(source, version)) rows.value = result
     } catch {
-      error.value =
-        'Änderung gespeichert. Die Liste konnte nicht aktualisiert werden. Bitte erneut laden.'
+      if (isCurrentLoad(source, version)) {
+        error.value =
+          'Änderung gespeichert. Die Liste konnte nicht aktualisiert werden. Bitte erneut laden.'
+        loadFailed.value = true
+      }
     }
   } catch (e) {
-    error.value = e instanceof Error ? e.message : 'Server nicht erreichbar.'
+    if (isCurrentLoad(source, version)) {
+      error.value = e instanceof Error ? e.message : 'Server nicht erreichbar.'
+    }
   } finally {
     busy.value = false
   }
   await nextTick()
-  if (saved) focusListAction()
-  return saved
+  if (saved && isCurrentLoad(source, version) && !error.value) focusListAction()
 }
+function refreshAfterCommand() {
+  if (!editing.value && !busy.value) void retryLoad()
+}
+
+onMounted(() =>
+  window.addEventListener('management:changed', refreshAfterCommand)
+)
+onUnmounted(() =>
+  window.removeEventListener('management:changed', refreshAfterCommand)
+)
 </script>
 <template>
   <section ref="list">
     <header class="list-heading">
       <h1 ref="heading" tabindex="-1">{{ title }}</h1>
       <button
-        v-if="!editing && loaded && (canCreate || editable)"
+        v-if="!editing && loaded && canCreate"
         ref="createButton"
         class="primary"
-        :disabled="busy"
+        :disabled="busy || loadingList"
         @click="edit()"
       >
-        Neu anlegen
+        <i class="pi pi-plus" aria-hidden="true" />
+        {{ entryName ? entryName + ' anlegen' : 'Neu anlegen' }}
       </button>
     </header>
 
-    <div v-if="error" role="alert">
-      <p>{{ error }}</p>
+    <PageError :message="error">
       <button
-        v-if="!editing"
+        v-if="!editing && loadFailed"
         ref="retryButton"
-        :disabled="busy"
+        :disabled="busy || loadingList"
         @click="retryLoad(true)"
       >
-        Erneut laden
+        Erneut versuchen
       </button>
-    </div>
+    </PageError>
     <fieldset v-if="editing" ref="editor" :disabled="busy">
       <legend>
-        {{ selected ? label(selected) + ' bearbeiten' : 'Neuer Eintrag' }}
+        {{
+          selected
+            ? label(selected) + ' bearbeiten'
+            : entryName
+              ? entryName + ' anlegen'
+              : 'Neuer Eintrag'
+        }}
       </legend>
       <form @submit.prevent="save">
         <slot name="form" :row="selected" />
         <div class="form-actions">
-          <button class="primary" type="submit">
+          <button
+            class="primary"
+            type="submit"
+            :disabled="!selected && createUrl === null"
+          >
             {{ busy ? 'Wird gespeichert …' : 'Speichern' }}
           </button>
           <button type="button" @click="cancelEdit">Abbrechen</button>
@@ -167,79 +310,132 @@ async function submit(method: 'POST' | 'PUT' | 'DELETE', body?: unknown) {
     </fieldset>
     <template v-else>
       <div class="toolbar">
-        <slot name="filter" />
+        <slot name="filter" :saving="busy" />
         <label class="search">
           <i class="pi pi-search" aria-hidden="true" />
           <InputText
             v-model="query"
             type="search"
-            aria-label="Liste durchsuchen"
-            placeholder="Liste durchsuchen"
+            :aria-label="searchPlaceholder ?? 'Liste durchsuchen'"
+            :placeholder="searchPlaceholder ?? 'Liste durchsuchen'"
           />
         </label>
       </div>
-      <p v-if="!loaded && !error" role="status">Einträge werden geladen …</p>
-      <p v-if="loaded" class="count" role="status">
-        {{ visibleRows.length }}
-        {{ visibleRows.length === 1 ? 'Eintrag' : 'Einträge' }}
+      <p v-if="!loaded && loadingList" role="status">
+        Einträge werden geladen …
       </p>
-      <p v-if="loaded && !visibleRows.length">
-        {{
-          rows.length
-            ? 'Keine passenden Einträge gefunden.'
-            : 'Keine Einträge vorhanden.'
-        }}
-      </p>
-      <div v-if="visibleRows.length" class="register">
-        <table :aria-label="title">
-          <thead>
-            <tr>
-              <th scope="col">{{ columnTitle ?? 'Bezeichnung' }}</th>
-              <th
-                v-for="column in columns"
-                :key="String(column.field)"
-                scope="col"
-                class="number"
-              >
-                {{ column.title }}
-              </th>
-              <th v-if="editable" scope="col" class="actions">Aktionen</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="row in visibleRows" :key="row.id">
-              <th scope="row">{{ label(row) }}</th>
-              <td
-                v-for="column in columns"
-                :key="String(column.field)"
-                class="number"
-                :data-label="column.title"
-              >
-                {{ row[column.field] }}
-              </td>
-              <td v-if="editable" class="actions">
-                <button
-                  :disabled="busy"
-                  :data-edit-id="row.id"
-                  :aria-label="'Bearbeiten: ' + label(row)"
-                  @click="edit(row)"
-                >
-                  <i class="pi pi-pencil" aria-hidden="true" />
-                  <span>Bearbeiten</span>
-                </button>
-                <button
-                  :disabled="busy"
-                  :data-delete-id="row.id"
-                  :aria-label="'Löschen: ' + label(row)"
-                  @click="remove(row)"
-                >
-                  <i class="pi pi-trash" aria-hidden="true" />
-                  <span>Löschen</span>
-                </button>
-              </td>
-            </tr>
-          </tbody>
-        </table>
+      <div v-if="loaded" class="list-results">
+        <div class="list-results-content" :inert="loadingList || undefined">
+          <p class="count" role="status">
+            {{ visibleRows.length }}
+            {{ visibleRows.length === 1 ? 'Eintrag' : 'Einträge' }}
+          </p>
+          <p v-if="!visibleRows.length">
+            {{
+              rows.length
+                ? 'Keine passenden Einträge gefunden.'
+                : 'Keine Einträge vorhanden.'
+            }}
+          </p>
+          <div v-if="visibleRows.length" class="register">
+            <table :aria-label="title">
+              <thead>
+                <tr>
+                  <th scope="col" :aria-sort="sortState('label')">
+                    <button type="button" class="sort" @click="sortBy('label')">
+                      {{ columnTitle ?? 'Bezeichnung' }}
+                      <i
+                        class="pi"
+                        :class="sortIcon('label')"
+                        aria-hidden="true"
+                      />
+                    </button>
+                  </th>
+                  <th
+                    v-for="column in columns"
+                    :key="String(column.field)"
+                    scope="col"
+                    class="number"
+                    :aria-sort="
+                      column.sortValue
+                        ? sortState(String(column.field))
+                        : undefined
+                    "
+                  >
+                    <button
+                      v-if="column.sortValue"
+                      type="button"
+                      class="sort"
+                      @click="sortBy(String(column.field))"
+                    >
+                      {{ column.title }}
+                      <i
+                        class="pi"
+                        :class="sortIcon(String(column.field))"
+                        aria-hidden="true"
+                      />
+                    </button>
+                    <template v-else>{{ column.title }}</template>
+                  </th>
+                  <th v-if="extraTitle" scope="col" class="actions">
+                    {{ extraTitle }}
+                  </th>
+                  <th v-if="editable" scope="col" class="actions">Aktionen</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="row in visibleRows" :key="row.id">
+                  <component
+                    :is="
+                      columns?.length || editable || extraTitle ? 'th' : 'td'
+                    "
+                    :scope="
+                      columns?.length || editable || extraTitle
+                        ? 'row'
+                        : undefined
+                    "
+                    class="entry-name"
+                  >
+                    <slot name="name" :row="row">{{ label(row) }}</slot>
+                  </component>
+                  <td
+                    v-for="column in columns"
+                    :key="String(column.field)"
+                    class="number"
+                    :data-label="column.title"
+                  >
+                    {{ column.format ? column.format(row) : row[column.field] }}
+                  </td>
+                  <td v-if="extraTitle" class="actions extra">
+                    <slot name="extra" :row="row" />
+                  </td>
+                  <td v-if="editable" class="actions">
+                    <button
+                      :disabled="busy"
+                      :data-edit-id="row.id"
+                      :aria-label="'Bearbeiten: ' + label(row)"
+                      @click="edit(row)"
+                    >
+                      <i class="pi pi-pencil" aria-hidden="true" />
+                      <span>Bearbeiten</span>
+                    </button>
+                    <button
+                      :disabled="busy"
+                      :aria-label="'Löschen: ' + label(row)"
+                      @click="remove(row)"
+                    >
+                      <i class="pi pi-trash" aria-hidden="true" />
+                      <span>Löschen</span>
+                    </button>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+        <p v-if="loadingList" class="list-loading" role="status">
+          Einträge werden geladen …
+        </p>
       </div>
     </template>
   </section>
@@ -250,6 +446,7 @@ section {
   max-width: 68rem;
 }
 .list-heading {
+  min-height: 44px;
   flex-wrap: wrap;
   display: flex;
   align-items: center;
@@ -268,12 +465,12 @@ button {
   cursor: pointer;
   color: var(--accent);
   border: 1px solid var(--line);
-  background: white;
+  background: var(--surface);
   padding: 0.55rem 0.75rem;
   border-radius: 10px;
 }
 button:hover {
-  background: #e7eef9;
+  background: var(--accent-soft);
 }
 button:disabled {
   opacity: 0.6;
@@ -286,17 +483,44 @@ button:disabled {
   font-weight: 600;
 }
 .primary:hover {
-  background: #174884;
+  background: var(--accent-ink);
+}
+.primary i {
+  margin-right: 0.4rem;
+  font-size: 0.85em;
+}
+thead .sort {
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-weight: 600;
+}
+thead .sort:hover {
+  background: transparent;
+  color: var(--accent-ink);
+}
+thead .sort i {
+  margin-left: 0.3rem;
+  font-size: 0.8em;
+}
+.extra :deep(a) {
+  display: inline-block;
+  margin-left: 0.9rem;
+  color: var(--accent-ink);
+  white-space: nowrap;
 }
 .toolbar {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 1rem;
-  border-radius: 14px;
+  border-radius: var(--radius);
   padding: 1rem;
   border: 1px solid var(--line);
-  background: white;
+  background: var(--surface);
 }
 .search {
   min-width: 0;
@@ -308,7 +532,7 @@ button:disabled {
   border: 1px solid var(--line);
   padding: 0.45rem 0.65rem;
   border-radius: 10px;
-  color: #4a5665;
+  color: var(--muted);
 }
 .search :deep(input) {
   border: 0;
@@ -328,11 +552,11 @@ button:disabled {
 }
 .count {
   font-size: 0.85rem;
-  color: #4a5665;
+  color: var(--muted);
   margin: 1rem 0 0.5rem;
 }
 tbody tr:nth-child(even) {
-  background: #f8f9fb;
+  background: var(--paper);
 }
 @media (max-width: 600px) {
   .search {
@@ -343,10 +567,28 @@ tbody tr:nth-child(even) {
     width: 100%;
   }
 }
+.list-results {
+  position: relative;
+}
+.list-loading {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  margin: 0;
+  background: var(--paper);
+  visibility: hidden;
+  animation: show-list-loading 0s 160ms forwards;
+}
+@keyframes show-list-loading {
+  to {
+    visibility: visible;
+  }
+}
 .register {
   overflow-x: auto;
-  border-radius: 14px;
-  background: white;
+  border-radius: var(--radius);
+  background: var(--surface);
   border: 1px solid var(--line);
 }
 table {
@@ -361,11 +603,11 @@ td {
   border-bottom: 1px solid var(--line);
 }
 thead th {
-  background: #f9fafb;
+  background: var(--paper);
   font-size: 0.83rem;
-  color: #45505e;
+  color: var(--muted);
 }
-tbody th {
+tbody .entry-name {
   font-weight: 600;
 }
 .number {
@@ -381,20 +623,20 @@ tbody th {
   background: transparent;
 }
 .actions button:hover {
-  background: #e6effc;
+  background: var(--accent-soft);
 }
 .actions span {
   margin-left: 0.45rem;
 }
 fieldset {
-  border-radius: 14px;
+  border-radius: var(--radius);
   width: 100%;
   min-width: 0;
   max-width: 38rem;
   margin: 1.4rem 0;
   border: 1px solid var(--line);
   padding: 1.25rem;
-  background: white;
+  background: var(--surface);
 }
 legend {
   max-width: 100%;
@@ -410,10 +652,6 @@ form {
   gap: 1rem;
   margin-bottom: 0.5rem;
 }
-[role='alert'] {
-  color: #972f20;
-}
-
 .form-actions {
   display: flex;
   flex-wrap: wrap;
@@ -464,14 +702,14 @@ tbody tr:last-child td {
   tbody tr:last-child {
     border-bottom: 0;
   }
-  tbody th,
+  tbody .entry-name,
   tbody td {
     display: block;
     padding: 0;
     border: 0;
     text-align: left;
   }
-  tbody th {
+  tbody .entry-name {
     font-size: 1.05rem;
   }
   td.number {
@@ -481,7 +719,7 @@ tbody tr:last-child td {
   }
   td.number::before {
     content: attr(data-label);
-    color: #45505e;
+    color: var(--muted);
     font-variant-numeric: normal;
   }
   td.actions {
@@ -491,7 +729,7 @@ tbody tr:last-child td {
     padding-top: 0.25rem;
   }
   .actions button {
-    background: #edf3fb;
+    background: var(--accent-soft);
     padding: 0.5rem 0.75rem;
   }
   .actions span {

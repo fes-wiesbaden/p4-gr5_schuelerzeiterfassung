@@ -203,7 +203,9 @@ class Issue22IntegrationTest {
         .isEqualTo(403);
     assertThat(client.get("/api/logout").statusCode()).isEqualTo(403);
     assertThat(client.get("/api/me").statusCode()).isEqualTo(200);
-    assertThat(client.get("/api/students").statusCode()).isEqualTo(403);
+    assertThat(client.get("/api/students").statusCode()).isEqualTo(200);
+    assertThat(client.post("/api/logout", "{}", "application/json", client.csrf()).statusCode())
+        .isEqualTo(204);
   }
 
   /** Prüft, dass eine neue Anmeldung nur die vorherige Sitzung desselben Nutzers beendet */

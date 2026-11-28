@@ -109,7 +109,9 @@ class ClassAccountsIntegrationTest {
   /** Prüft wiederholte Klassenresets mit einem Audit je Schüler einschließlich leerer Konten */
   @Test
   void resetsTheClassRepeatedlyAndAuditsEveryStudentIncludingEmptyAccounts() {
-    var attendances = jdbc.queryForList("SELECT * FROM attendance ORDER BY id");
+    String attendanceHistory =
+        "SELECT id, student_id, attendance_date, status, created_at, changed_at FROM attendance ORDER BY id";
+    var attendances = jdbc.queryForList(attendanceHistory);
     var deadlines = jdbc.queryForList("SELECT * FROM deletion_date ORDER BY id");
     assertThat(classes.resetAccounts(1L, 1L)).isEqualTo(6);
     assertThat(
@@ -167,7 +169,15 @@ class ClassAccountsIntegrationTest {
             jdbc.queryForObject(
                 "SELECT unexcused_minutes_account FROM student WHERE id = 7", Integer.class))
         .isEqualTo(180);
-    assertThat(jdbc.queryForList("SELECT * FROM attendance ORDER BY id")).isEqualTo(attendances);
+    assertThat(jdbc.queryForList(attendanceHistory)).isEqualTo(attendances);
+    assertThat(
+            jdbc.queryForObject("SELECT full_absence FROM attendance WHERE id = 1", String.class))
+        .isEqualTo("ABWESEND");
+    assertThat(
+            jdbc.queryForObject(
+                "SELECT SUM(unexcused_days_account + excused_days_account) FROM student WHERE school_class_id = 1",
+                Integer.class))
+        .isZero();
     assertThat(jdbc.queryForList("SELECT * FROM deletion_date ORDER BY id")).isEqualTo(deadlines);
     assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM raw_scan", Integer.class)).isEqualTo(7);
   }

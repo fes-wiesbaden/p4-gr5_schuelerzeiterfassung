@@ -33,14 +33,18 @@ public class MasterDataController {
 
   public record RoomRequest(@NotBlank @Size(max = 30) String roomNumber) {}
 
+  /** Der Vorname ist optional; das Passwort prüft der Service */
   public record TeacherRequest(
-      @NotBlank @Size(max = 100) String firstName,
+      @Size(max = 100) String firstName,
       @NotBlank @Size(max = 100) String lastName,
       @NotBlank @Size(max = 120) String username,
       String password) {}
 
+  /** Ohne oder mit leerem Passwort bleibt das bisherige Passwort bestehen */
   public record TeacherUpdate(
-      @NotBlank @Size(max = 100) String firstName, @NotBlank @Size(max = 100) String lastName) {
+      @Size(max = 100) String firstName,
+      @NotBlank @Size(max = 100) String lastName,
+      String password) {
     @JsonAnySetter
     public void rejectField(String field, Object value) {
       throw new IllegalArgumentException("Unexpected field");
@@ -102,7 +106,7 @@ public class MasterDataController {
   @PutMapping("/teachers/{id}")
   @ResponseStatus(HttpStatus.NO_CONTENT)
   public void updateTeacher(@PathVariable Long id, @Valid @RequestBody TeacherUpdate r) {
-    data.saveTeacher(id, r.firstName(), r.lastName(), null, null);
+    data.saveTeacher(id, r.firstName(), r.lastName(), null, r.password());
   }
 
   @DeleteMapping("/teachers/{id}")

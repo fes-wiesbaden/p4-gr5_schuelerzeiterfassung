@@ -16,11 +16,16 @@ public class MasterDataRepository {
   public List<Map<String, Object>> teachers() {
     return jdbc.queryForList(
         "SELECT id,first_name AS firstName,last_name AS lastName,username FROM staff "
-            + "WHERE role='LEHRKRAFT' ORDER BY last_name,first_name");
+            + "WHERE role='LEHRKRAFT' ORDER BY last_name,first_name,id");
   }
 
   public List<Map<String, Object>> rooms() {
-    return jdbc.queryForList("SELECT id,room_number AS roomNumber FROM room ORDER BY room_number");
+    return jdbc.queryForList(
+        """
+        SELECT r.id, r.room_number AS roomNumber, t.terminal_id AS terminalId
+        FROM room r LEFT JOIN terminal t ON t.room_id = r.id
+        ORDER BY r.room_number
+        """);
   }
 
   public void saveRoom(Long id, String number) {
@@ -42,9 +47,11 @@ public class MasterDataRepository {
     } else {
       requireRow(
           jdbc.update(
-              "UPDATE staff SET first_name=?,last_name=? WHERE id=? AND role='LEHRKRAFT'",
+              "UPDATE staff SET first_name=?,last_name=?,password_hash=COALESCE(?,password_hash)"
+                  + " WHERE id=? AND role='LEHRKRAFT'",
               first.strip(),
               last.strip(),
+              password,
               id));
     }
   }

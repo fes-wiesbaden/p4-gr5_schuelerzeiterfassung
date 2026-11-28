@@ -3,6 +3,7 @@ package de.feswiesbaden.attendance;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import de.feswiesbaden.attendance.login.StaffPrincipal;
@@ -101,6 +102,66 @@ class Issue43IntegrationTest {
   @Test
   void requiresAuthentication() throws Exception {
     mvc.perform(get(CURRENT_CLASS)).andExpect(status().isUnauthorized());
+  }
+
+  @Test
+  void readsOnlyAccessibleWeeksAndSelectsTheSlotVersionForThatDate() throws Exception {
+    jdbc.update(
+        "INSERT INTO timetable_period (timetable_id, period_number, starts_at, ends_at)"
+            + " VALUES (1, 1, '07:30:00', '08:15:00'), (1, 2, '08:15:00', '09:00:00')");
+    jdbc.update("UPDATE timetable_slot SET valid_until = '2026-09-16' WHERE id = 1");
+    jdbc.update(
+        """
+        INSERT INTO timetable_slot
+          (timetable_id, room_id, weekday, start_time, end_time, valid_from)
+        VALUES (1, 2, 'MONTAG', '08:15:00', '09:00:00', '2026-09-16')
+        """);
+    var teacher = staffSession("test.teacher.a");
+    mvc.perform(get("/api/planning/classes/1/week?date=2026-09-16"))
+        .andExpect(status().isUnauthorized());
+    mvc.perform(get("/api/planning/classes/2/week?date=2026-09-16").session(teacher))
+        .andExpect(status().isNotFound());
+    mvc.perform(get("/api/planning/classes/1/week?date=2026-09-16").session(teacher))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$[0].date").value("2026-09-14"))
+        .andExpect(jsonPath("$[0].periods[1].number").value(2))
+        .andExpect(jsonPath("$[0].periods[1].startsAt").value("08:15:00"))
+        .andExpect(jsonPath("$[0].lessons[0].startsAt").value("07:30:00"))
+        .andExpect(jsonPath("$[0].lessons[0].roomNumber").value("TEST-R01"))
+        .andExpect(jsonPath("$[1].lessons").isEmpty());
+    mvc.perform(get("/api/planning/classes/3/week?date=2026-09-21").session(teacher))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$[0].lessons[0].startsAt").value("08:15:00"))
+        .andExpect(jsonPath("$[0].lessons[0].roomNumber").value("TEST-R02"));
+  }
+
+  @Test
+  void readsTheSchoolYearAndOnlyTheAssignedBlocks() throws Exception {
+    jdbc.update("UPDATE block_plan SET ends_on = '2027-07-31' WHERE id = 1");
+    jdbc.update(
+        "INSERT INTO block_assignment (id, block_plan_id, starts_on, ends_on)"
+            + " VALUES (3, 1, '2027-06-14', '2027-06-25')");
+    jdbc.update("INSERT INTO class_block_assignment VALUES (1, 3)");
+    var teacher = staffSession("test.teacher.a");
+    mvc.perform(get("/api/planning/classes/1/schedule")).andExpect(status().isUnauthorized());
+    mvc.perform(get("/api/planning/classes/2/schedule").session(teacher))
+        .andExpect(status().isNotFound());
+    mvc.perform(get("/api/planning/classes/1/schedule").session(teacher))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.schoolYear").value(2026))
+        .andExpect(jsonPath("$.regularWeek").doesNotExist())
+        .andExpect(jsonPath("$.periods").doesNotExist())
+        .andExpect(jsonPath("$.blocks.length()").value(2))
+        .andExpect(jsonPath("$.blocks[0].startsOn").value("2026-09-14"))
+        .andExpect(jsonPath("$.blocks[1].startsOn").value("2027-06-14"));
+    for (var day : List.of("2026-09-14", "2027-06-14")) {
+      mvc.perform(get("/api/planning/classes/1/week").param("date", day).session(teacher))
+          .andExpect(status().isOk())
+          .andExpect(jsonPath("$[0].lessons[0].startsAt").value("07:30:00"));
+    }
+    mvc.perform(get("/api/planning/classes/1/week?date=2026-09-21").session(teacher))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$[0].lessons").isEmpty());
   }
 
   /** Erstellt eine Sitzung des angegebenen Testmitarbeiters */

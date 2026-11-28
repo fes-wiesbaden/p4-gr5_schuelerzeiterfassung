@@ -1,4 +1,12 @@
-import { deleteResource, getJson, postJson, putJson } from '@/api/client'
+import {
+  apiErrorMessage,
+  deleteResource,
+  getJson,
+  loadData,
+  postJson,
+  putJson,
+  readProblem
+} from '@/api/client'
 
 export type Weekday =
   'MONTAG' | 'DIENSTAG' | 'MITTWOCH' | 'DONNERSTAG' | 'FREITAG'
@@ -16,11 +24,12 @@ interface SlotInput {
   startsAt: string
   endsAt: string
   roomId: number
+  subject?: string | null
+  teacherId?: number | null
 }
 
-export interface Slot extends SlotInput {
+export interface Slot extends SlotInput, ScheduledLesson {
   id: number
-  roomNumber: string
   validFrom: string | null
 }
 
@@ -28,6 +37,13 @@ export interface Timetable {
   id: number
   name: string
   slots: Slot[]
+  periods?: TimetablePeriod[]
+}
+
+export interface TimetablePeriod {
+  number: number
+  startsAt: string
+  endsAt: string
 }
 
 export interface Block {
@@ -63,74 +79,28 @@ export interface PlanningOverview {
   blockPlans: BlockPlan[]
   rooms: Room[]
   classes: PlanningClass[]
+  teachers?: { id: number; name: string }[]
 }
 
-// Übersetzt die festen Fehlercodes des Backends in verständliche Hinweise
-const ERROR_MESSAGES: Record<string, string> = {
-  INVALID_REQUEST: 'Die Eingaben sind unvollständig oder ungültig.',
-  INVALID_TIMETABLE: 'Bitte einen Namen mit höchstens 150 Zeichen angeben.',
-  INVALID_TIMETABLE_SLOT:
-    'Der Beginn muss vor dem Ende liegen und ein Raum muss gewählt sein.',
-  INVALID_BLOCK_PLAN:
-    'Bitte Namen angeben; der Beginn darf nicht nach dem Ende liegen.',
-  INVALID_BLOCK_ASSIGNMENT:
-    'Der Block muss innerhalb des Blockplans liegen; der Beginn darf nicht nach dem Ende liegen.',
-  OVERLAPPING_TIMETABLE_SLOT:
-    'Der Slot überschneidet sich mit einem vorhandenen Slot dieses Stundenplans.',
-  OVERLAPPING_BLOCK_ASSIGNMENT:
-    'Der Block überschneidet sich mit einem vorhandenen Block dieses Blockplans.',
-  BLOCK_ASSIGNMENT_BELONGS_TO_ANOTHER_PLAN:
-    'Der Block gehört nicht zum aktuellen Blockplan der Klasse.',
-  BLOCK_ALREADY_ASSIGNED: 'Die Klasse ist diesem Block bereits zugeordnet.',
-  ROOM_ALREADY_ASSIGNED:
-    'Ein Raum des Stundenplans ist in diesem Zeitraum bereits durch eine andere Klasse belegt.',
-  TIMETABLE_REUSE_NOT_ALLOWED:
-    'Eine andere Klasse nutzt denselben Stundenplan in einem überschneidenden Block.',
-  CLASS_PLAN_CHANGED:
-    'Der Blockplan der Klasse wurde inzwischen geändert. Bitte die Seite neu laden.',
-  CURRENT_PLAN_NOT_FINISHED:
-    'Der aktuelle Blockplan oder einer seiner Blöcke ist noch nicht beendet.',
-  NEXT_PLAN_OVERLAPS_CURRENT_PLAN:
-    'Der Folgeplan muss nach dem Ende des aktuellen Blockplans beginnen.',
-  NEXT_PLAN_FINISHED: 'Der gewählte Folgeplan ist bereits beendet.',
-  CLASS_HAS_NO_STUDENTS: 'Die Klasse hat keine Schüler.',
-  CLASS_HAS_REMAINING_SLOTS: 'Heute finden für die Klasse noch Slots statt.',
-  CLASS_NOT_FULLY_ACCOUNTED:
-    'Es sind noch nicht alle Tage der Klasse abgerechnet.',
-  CONCURRENT_PLANNING_CHANGE:
-    'Die Planung wurde gleichzeitig geändert. Bitte die Seite neu laden und erneut versuchen.',
-  ADMINISTRATOR_REQUIRED: 'Diese Aktion ist Administratoren vorbehalten.',
-  CLASS_MANAGEMENT_DENIED: 'Nur die Klassenleitung darf den Plan wechseln.',
-  NOT_FOUND: 'Der Datensatz wurde nicht gefunden.',
-  ATTENDANCE_DAY_LOCKED_OR_UNPLANNED:
-    'Für diesen Tag ist keine Änderung möglich: kein Unterricht geplant oder Tag bereits abgeschlossen.',
-  INVALID_STATUS_TIME:
-    'Die Uhrzeit muss am heutigen Tag und nicht in der Zukunft liegen.'
-}
-
+// Hinweistext zu einem Fehlercode aus der gemeinsamen Tabelle
 export function errorMessage(code: string | undefined): string {
-  return (
-    (code && ERROR_MESSAGES[code]) ||
-    'Die Aktion ist fehlgeschlagen. Bitte erneut versuchen.'
+  return apiErrorMessage(
+    code,
+    'Die Aktion ist fehlgeschlagen. Bitte erneut versuchen.',
+    { NOT_FOUND: 'Der Datensatz wurde nicht gefunden.' }
   )
 }
 
 // Wirft bei einer fehlgeschlagenen Antwort einen Fehler mit deutschem Hinweistext
 export async function expectOk(response: Response): Promise<Response> {
-  if (response.ok) {
-    return response
-  }
-  let code: string | undefined
-  try {
-    code = ((await response.json()) as { code?: string }).code
-  } catch {
-    code = undefined
-  }
-  throw new Error(errorMessage(code))
+  if (response.ok) return response
+  throw new Error(errorMessage((await readProblem(response)).code))
 }
 
-export async function loadOverview(): Promise<PlanningOverview> {
-  const response = await expectOk(await getJson('/api/planning'))
+export async function loadOverview(
+  signal?: AbortSignal
+): Promise<PlanningOverview> {
+  const response = await expectOk(await getJson('/api/planning', signal))
   return (await response.json()) as PlanningOverview
 }
 
@@ -233,12 +203,95 @@ export async function resetAccounts(
   return ((await response.json()) as { resetCount: number }).resetCount
 }
 
-// Zeigt ISO-Datumsangaben im deutschen Format an
-export function formatDate(iso: string): string {
-  const [year, month, day] = iso.split('-')
-  return `${day}.${month}.${year}`
+export function formatTime(time: string): string {
+  return time.length === 8 && time.endsWith(':00') ? time.slice(0, 5) : time
 }
 
-export function formatTime(time: string): string {
-  return time.slice(0, 5)
+export interface ScheduledLesson {
+  startsAt: string
+  endsAt: string
+  roomNumber: string
+  subject?: string | null
+  teacherName?: string | null
+  // Für dieses Datum als Ausfall eingetragen
+  cancelled?: boolean
+}
+
+export interface ClassWeekDay {
+  date: string
+  lessons: ScheduledLesson[]
+  periods?: TimetablePeriod[]
+}
+
+export interface TeachingBlock {
+  startsOn: string
+  endsOn: string
+}
+
+export interface ClassSchedule {
+  schoolYear: number
+  blocks: TeachingBlock[]
+}
+
+export function loadClassSchedule(classId: number, signal?: AbortSignal) {
+  return loadData<ClassSchedule>(
+    `/api/planning/classes/${classId}/schedule`,
+    signal
+  )
+}
+
+// Trägt Unterrichtsausfall für ein Datum ein. Ohne Uhrzeit gilt er für alle
+// Unterrichtszeiten des Tages
+export interface ManualAbsenceHint {
+  studentId: number
+  firstName: string
+  lastName: string
+  date: string
+  minutes: number
+}
+
+export async function cancelLessons(
+  classId: number,
+  date: string,
+  startsAt?: string
+): Promise<ManualAbsenceHint[]> {
+  const response = await expectOk(
+    await postJson(`/api/planning/classes/${classId}/lesson-cancellations`, {
+      date,
+      startsAt: startsAt ? formatTime(startsAt) : null
+    })
+  )
+  // Schüler mit händischen Fehlminuten an diesem Tag, damit die Lehrkraft
+  // prüfen kann, ob sie zur ausgefallenen Zeit gehören
+  return (
+    ((await response.json()) as { manualAbsences?: ManualAbsenceHint[] })
+      .manualAbsences ?? []
+  )
+}
+
+// Nimmt eingetragenen Unterrichtsausfall wieder zurück
+export async function restoreLessons(
+  classId: number,
+  date: string,
+  startsAt?: string
+): Promise<boolean> {
+  const query = new URLSearchParams({ date })
+  if (startsAt) query.set('startsAt', formatTime(startsAt))
+  const response = await expectOk(
+    await deleteResource(
+      `/api/planning/classes/${classId}/lesson-cancellations?${query}`
+    )
+  )
+  return ((await response.json()) as { changed: boolean }).changed
+}
+
+export function loadClassWeek(
+  classId: number,
+  date: string,
+  signal?: AbortSignal
+) {
+  return loadData<ClassWeekDay[]>(
+    `/api/planning/classes/${classId}/week?date=${encodeURIComponent(date)}`,
+    signal
+  )
 }

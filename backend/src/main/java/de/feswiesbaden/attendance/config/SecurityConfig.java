@@ -164,6 +164,7 @@ public class SecurityConfig {
                     .permitAll()
                     .requestMatchers(
                         HttpMethod.GET,
+                        "/api/assistant",
                         "/api/me",
                         "/api/class-options",
                         "/api/staff-id",
@@ -172,28 +173,45 @@ public class SecurityConfig {
                         "/api/classes",
                         "/api/classes/{classId}/students",
                         "/api/classes/{classId}/attendance",
+                        "/api/students",
                         "/api/attendance/current-class",
                         "/api/students/rfid-uids",
+                        "/api/students/{studentId}/attendance/week",
+                        "/api/students/{studentId}/attendance/calendar",
                         "/api/students/{studentId}")
                     .authenticated()
                     .requestMatchers(
                         HttpMethod.POST,
+                        "/api/assistant/messages",
+                        "/api/assistant/timetable-drafts",
+                        "/api/assistant/excusals/preview",
+                        "/api/assistant/excusals/{id}/confirm",
                         "/api/teachers",
                         "/api/rooms",
                         "/api/classes",
                         "/api/classes/{classId}/students",
                         "/api/classes/{classId}/account-resets",
-                        "/api/students/{studentId}/attendance/{date}/status-corrections")
+                        "/api/students/{studentId}/attendance/{date}/status-corrections",
+                        "/api/students/{studentId}/attendance/{date}/open-absence-excuses",
+                        "/api/students/{studentId}/attendance/{date}/manual-absence-minutes",
+                        "/api/students/{studentId}/attendance/{date}/status-periods",
+                        "/api/students/{studentId}/attendance/{date}/school-day-excuses")
                     .authenticated()
-                    .requestMatchers(HttpMethod.GET, "/api/planning")
+                    .requestMatchers(
+                        HttpMethod.GET,
+                        "/api/planning",
+                        "/api/planning/classes/{classId}/week",
+                        "/api/planning/classes/{classId}/schedule")
                     .authenticated()
                     .requestMatchers(
                         HttpMethod.POST,
                         "/api/planning/timetables",
+                        "/api/planning/timetables/import",
                         "/api/planning/timetables/{timetableId}/slots",
                         "/api/planning/block-plans",
                         "/api/planning/block-plans/{blockPlanId}/blocks",
                         "/api/planning/classes/{classId}/blocks",
+                        "/api/planning/classes/{classId}/lesson-cancellations",
                         "/api/planning/classes/{classId}/block-plan-change")
                     .authenticated()
                     .requestMatchers(
@@ -208,11 +226,13 @@ public class SecurityConfig {
                     .requestMatchers(
                         HttpMethod.DELETE,
                         "/api/planning/timetables/{timetableId}/slots/{slotId}",
+                        "/api/planning/classes/{classId}/lesson-cancellations",
                         "/api/classes/{id}",
                         "/api/rooms/{id}",
                         "/api/teachers/{id}",
                         "/api/students/{studentId}",
-                        "/api/students/{studentId}/rfid-uid")
+                        "/api/students/{studentId}/rfid-uid",
+                        "/api/students/{studentId}/attendance/{date}/manual-absence-minutes")
                     .authenticated()
                     .anyRequest()
                     .denyAll())

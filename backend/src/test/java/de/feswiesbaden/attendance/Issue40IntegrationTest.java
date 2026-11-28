@@ -92,7 +92,8 @@ class Issue40IntegrationTest {
   void rejectsRoomConflictWhenAssigningABlock() {
     Long timetableId = timetables.create("Konfliktplan");
     // Derselbe Raum (1 = TEST-R01) und derselbe Slot wie bei Klasse 1
-    timetables.addSlot(timetableId, Weekday.MONTAG, LocalTime.of(7, 30), LocalTime.of(9, 0), 1L);
+    timetables.addSlot(
+        timetableId, Weekday.MONTAG, LocalTime.of(7, 30), LocalTime.of(9, 0), 1L, null, null);
     Long classId = classes.create("40-KONFLIKT", 1L, 1L, timetableId);
     // Block 1 der Fixture (2026-09-14 bis 2026-09-18) ist bereits Klasse 1 zugeordnet, die Raum 1
     // im selben Slot nutzt
@@ -114,9 +115,16 @@ class Issue40IntegrationTest {
     assertThatThrownBy(
             () ->
                 timetables.addSlot(
-                    timetableId, Weekday.MONTAG, LocalTime.of(8, 0), LocalTime.of(8, 45), 1L))
+                    timetableId,
+                    Weekday.MONTAG,
+                    LocalTime.of(8, 0),
+                    LocalTime.of(8, 45),
+                    1L,
+                    null,
+                    null))
         .hasMessage("ROOM_ALREADY_ASSIGNED");
-    timetables.addSlot(timetableId, Weekday.MONTAG, LocalTime.of(8, 0), LocalTime.of(8, 45), 90L);
+    timetables.addSlot(
+        timetableId, Weekday.MONTAG, LocalTime.of(8, 0), LocalTime.of(8, 45), 90L, null, null);
     assertThat(
             jdbc.queryForList(
                 "SELECT room_id FROM timetable_slot WHERE timetable_id = ?",
@@ -134,7 +142,13 @@ class Issue40IntegrationTest {
   void rejectsDisallowedTimetableReuseWithOverlappingBlocks() {
     Long sharedTimetableId = timetables.create("Geteilter Stundenplan");
     timetables.addSlot(
-        sharedTimetableId, Weekday.MONTAG, LocalTime.of(7, 30), LocalTime.of(9, 0), 90L);
+        sharedTimetableId,
+        Weekday.MONTAG,
+        LocalTime.of(7, 30),
+        LocalTime.of(9, 0),
+        90L,
+        null,
+        null);
     Long otherPlanId =
         plans.create("Anderer Plan", LocalDate.of(2026, 9, 1), LocalDate.of(2026, 12, 31));
     Long firstClass = classes.create("40-A", 1L, 1L, sharedTimetableId);
@@ -183,7 +197,8 @@ class Issue40IntegrationTest {
     jdbc.update("UPDATE timetable_slot SET start_time = '08:15', end_time = '08:15' WHERE id = 1");
 
     Long slotId =
-        timetables.addSlot(1L, Weekday.MONTAG, LocalTime.of(8, 0), LocalTime.of(8, 45), 1L);
+        timetables.addSlot(
+            1L, Weekday.MONTAG, LocalTime.of(8, 0), LocalTime.of(8, 45), 1L, null, null);
 
     assertThat(
             jdbc.queryForObject(

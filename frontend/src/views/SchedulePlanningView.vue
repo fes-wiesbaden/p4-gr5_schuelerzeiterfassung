@@ -1,8 +1,30 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
+import PageError from '@/components/PageError.vue'
+import {
+  computed,
+  nextTick,
+  onMounted,
+  onUnmounted,
+  reactive,
+  ref,
+  watch
+} from 'vue'
+import { useRoute } from 'vue-router'
 import Button from 'primevue/button'
 import InputText from 'primevue/inputtext'
+import Tab from 'primevue/tab'
+import TabList from 'primevue/tablist'
+import TabPanel from 'primevue/tabpanel'
+import TabPanels from 'primevue/tabpanels'
+import Tabs from 'primevue/tabs'
 
+import ClassTimetableWeek from '@/components/ClassTimetableWeek.vue'
+import TimetableGrid from '@/components/TimetableGrid.vue'
+import GermanDateInput from '@/components/GermanDateInput.vue'
+import GermanTimeInput from '@/components/GermanTimeInput.vue'
+import { formatDate } from '@/dateTime'
+import { confirmAction } from '@/confirm'
+import { showNotice } from '@/notice'
 import { useAuthStore } from '@/stores/auth'
 import {
   WEEKDAYS,
@@ -13,7 +35,6 @@ import {
   createBlockPlan,
   createTimetable,
   deleteSlot,
-  formatDate,
   formatTime,
   loadOverview,
   resetAccounts,
@@ -24,11 +45,16 @@ import {
 } from '@/api/planning'
 
 const auth = useAuthStore()
+const route = useRoute()
+const activeTab = ref('stundenplan')
 
 const overview = ref<PlanningOverview | null>(null)
 const loadError = ref('')
+const actionError = ref('')
+const errorMessage = computed(() => loadError.value || actionError.value)
+const errorRevision = ref(0)
 const busy = ref(false)
-const feedback = reactive({ text: '', error: false })
+let overviewRequest: AbortController | undefined
 
 const selectedTimetableId = ref<number | null>(null)
 const selectedBlockPlanId = ref<number | null>(null)
@@ -41,7 +67,9 @@ const slotForm = reactive({
   weekday: 'MONTAG' as Weekday,
   startsAt: '',
   endsAt: '',
-  roomId: null as number | null
+  roomId: null as number | null,
+  subject: '',
+  teacherId: null as number | null
 })
 const blockPlanForm = reactive({ name: '', startsOn: '', endsOn: '' })
 const blockForm = reactive({ startsOn: '', endsOn: '' })
@@ -50,6 +78,13 @@ const planChangeForm = reactive({ nextBlockPlanId: null as number | null })
 
 const selectedTimetable = computed(() =>
   overview.value?.timetables.find((t) => t.id === selectedTimetableId.value)
+)
+const templateDays = computed(() =>
+  WEEKDAYS.map((day) => ({
+    lessons: (selectedTimetable.value?.slots ?? [])
+      .filter((slot) => slot.weekday === day.value)
+      .map((slot) => ({ ...slot, slot }))
+  }))
 )
 const selectedBlockPlan = computed(() =>
   overview.value?.blockPlans.find((p) => p.id === selectedBlockPlanId.value)
@@ -68,11 +103,40 @@ const classTimetable = computed(() =>
   )
 )
 // Nur Blöcke des aktuellen Blockplans, denen die Klasse noch nicht zugeordnet ist
-const assignableBlocks = computed(
-  () =>
-    classPlan.value?.blocks.filter(
-      (block) => !block.classIds.includes(selectedClassId.value ?? -1)
-    ) ?? []
+const blockOptions = computed(() => {
+  const schoolClass = selectedClass.value
+  const planning = overview.value
+  if (!schoolClass || !planning || !classPlan.value) return []
+
+  const otherClassPlans = new Map(
+    planning.classes
+      .filter(
+        (other) =>
+          other.id !== schoolClass.id &&
+          other.timetableId === schoolClass.timetableId
+      )
+      .map((other) => [other.id, other.blockPlanId])
+  )
+  const occupiedBlocks = planning.blockPlans.flatMap((plan) =>
+    plan.blocks.filter((block) =>
+      block.classIds.some((id) => otherClassPlans.get(id) === plan.id)
+    )
+  )
+
+  return classPlan.value.blocks
+    .filter((block) => !block.classIds.includes(schoolClass.id))
+    .map((block) => ({
+      ...block,
+      timetableConflict: occupiedBlocks.some(
+        (other) =>
+          other.startsOn <= block.endsOn && other.endsOn >= block.startsOn
+      )
+    }))
+})
+const selectedBlock = computed(() =>
+  blockOptions.value.find(
+    (block) => block.id === assignmentForm.blockId && !block.timetableConflict
+  )
 )
 // Folgepläne müssen nach dem Ende des aktuellen Blockplans beginnen
 const nextPlanCandidates = computed(
@@ -94,33 +158,40 @@ function weekdayLabel(weekday: Weekday): string {
 }
 
 async function refresh() {
+  overviewRequest?.abort()
+  const request = new AbortController()
+  overviewRequest = request
   try {
-    overview.value = await loadOverview()
+    const result = await loadOverview(request.signal)
+    if (request.signal.aborted) return
+    overview.value = result
     loadError.value = ''
     selectedTimetableId.value ??= overview.value.timetables[0]?.id ?? null
     selectedBlockPlanId.value ??= overview.value.blockPlans[0]?.id ?? null
     selectedClassId.value ??= overview.value.classes[0]?.id ?? null
   } catch (error) {
+    if (request.signal.aborted) return
     loadError.value =
       error instanceof Error
         ? error.message
         : 'Die Planung konnte nicht geladen werden.'
+    errorRevision.value += 1
   }
 }
 
 // Führt eine Änderung aus, lädt danach die Übersicht neu und zeigt das Ergebnis an
 async function run(action: () => Promise<string>): Promise<boolean> {
   busy.value = true
-  feedback.text = ''
+  actionError.value = ''
   try {
-    feedback.text = await action()
-    feedback.error = false
+    showNotice(await action())
     await refresh()
+    window.dispatchEvent(new Event('planning:changed'))
     return true
   } catch (error) {
-    feedback.text =
+    actionError.value =
       error instanceof Error ? error.message : 'Die Aktion ist fehlgeschlagen.'
-    feedback.error = true
+    errorRevision.value += 1
     return false
   } finally {
     busy.value = false
@@ -151,7 +222,9 @@ async function submitSlot() {
         weekday: slotForm.weekday,
         startsAt: slotForm.startsAt,
         endsAt: slotForm.endsAt,
-        roomId
+        roomId,
+        subject: slotForm.subject.trim() || null,
+        teacherId: slotForm.teacherId
       }
       if (editingSlotId.value !== null) {
         const effectiveOn = await updateSlot(
@@ -159,10 +232,10 @@ async function submitSlot() {
           editingSlotId.value,
           slot
         )
-        return `Slot geändert ab ${formatDate(effectiveOn)}.`
+        return `Unterrichtszeit geändert ab ${formatDate(effectiveOn)}.`
       }
       await addSlot(timetableId, slot)
-      return 'Slot hinzugefügt.'
+      return 'Unterrichtszeit hinzugefügt.'
     })
   ) {
     resetSlotForm()
@@ -173,9 +246,11 @@ async function editSlot(slot: Slot) {
   editingSlotId.value = slot.id
   Object.assign(slotForm, {
     weekday: slot.weekday,
-    startsAt: slot.startsAt,
-    endsAt: slot.endsAt,
-    roomId: slot.roomId
+    startsAt: formatTime(slot.startsAt),
+    endsAt: formatTime(slot.endsAt),
+    roomId: slot.roomId,
+    subject: slot.subject ?? '',
+    teacherId: slot.teacherId ?? null
   })
   await nextTick()
   slotWeekday.value?.focus()
@@ -185,21 +260,26 @@ function resetSlotForm() {
   editingSlotId.value = null
   slotForm.startsAt = ''
   slotForm.endsAt = ''
+  slotForm.subject = ''
+  slotForm.teacherId = null
 }
 
 async function removeSlot(slot: Slot) {
   const timetableId = selectedTimetableId.value
   if (
     timetableId === null ||
-    !window.confirm(
-      `Alle zukünftigen Termine dieses Slots löschen (geplant für ${weekdayLabel(slot.weekday)} um ${formatTime(slot.startsAt)} Uhr)?`
-    )
+    !(await confirmAction({
+      title: 'Unterrichtszeit löschen?',
+      message: `Die Unterrichtszeit am ${weekdayLabel(slot.weekday)} um ${formatTime(slot.startsAt)} Uhr wird für alle zukünftigen Termine gelöscht.`,
+      confirmLabel: 'Löschen',
+      danger: true
+    }))
   ) {
     return
   }
   const removed = await run(async () => {
     const effectiveOn = await deleteSlot(timetableId, slot.id)
-    return `Slot entfällt ab ${formatDate(effectiveOn)}.`
+    return `Unterrichtszeit entfällt ab ${formatDate(effectiveOn)}.`
   })
   if (removed && editingSlotId.value === slot.id) {
     resetSlotForm()
@@ -238,13 +318,13 @@ async function submitBlock() {
 
 async function submitAssignment() {
   const schoolClass = selectedClass.value
-  const blockId = assignmentForm.blockId
-  if (!schoolClass || blockId === null) {
+  const block = selectedBlock.value
+  if (!schoolClass || !block) {
     return
   }
   if (
     await run(async () => {
-      await assignBlock(schoolClass.id, blockId)
+      await assignBlock(schoolClass.id, block.id)
       return `Klasse ${schoolClass.classCode} dem Block zugeordnet.`
     })
   ) {
@@ -256,15 +336,20 @@ async function submitReset() {
   const schoolClass = selectedClass.value
   if (
     !schoolClass ||
-    !window.confirm(
-      `Fehlminutenkonten aller Schüler der Klasse ${schoolClass.classCode} zurücksetzen?`
-    )
+    !(await confirmAction({
+      title: 'Fehlzeitenkonten zurücksetzen?',
+      message: `Die Fehlzeitenkonten aller Schüler der Klasse ${schoolClass.classCode} werden auf null gesetzt. Das lässt sich nicht rückgängig machen.`,
+      confirmLabel: 'Zurücksetzen',
+      danger: true
+    }))
   ) {
     return
   }
   await run(async () => {
     const count = await resetAccounts(schoolClass.id, schoolClass.blockPlanId)
-    return `Konten von ${count} Schülern zurückgesetzt.`
+    return count === 1
+      ? 'Konto von 1 Schüler zurückgesetzt.'
+      : `Konten von ${count} Schülern zurückgesetzt.`
   })
 }
 
@@ -274,9 +359,12 @@ async function submitPlanChange() {
   if (
     !schoolClass ||
     nextPlanId === null ||
-    !window.confirm(
-      `Für ${schoolClass.classCode} werden alle Konten abschließend zurückgesetzt und der Folgeplan aktiviert. Fortfahren?`
-    )
+    !(await confirmAction({
+      title: 'Blockplan wechseln?',
+      message: `Für ${schoolClass.classCode} werden alle Fehlzeitenkonten abschließend zurückgesetzt und der Folgeplan aktiviert. Das lässt sich nicht rückgängig machen.`,
+      confirmLabel: 'Plan wechseln',
+      danger: true
+    }))
   ) {
     return
   }
@@ -290,6 +378,10 @@ async function submitPlanChange() {
   }
 }
 
+watch([() => route.query.klasse, () => route.query.datum], () => {
+  activeTab.value = 'stundenplan'
+})
+
 watch(selectedTimetableId, resetSlotForm)
 
 watch(selectedClassId, () => {
@@ -299,8 +391,13 @@ watch(selectedClassId, () => {
 
 onMounted(() => {
   if (auth.isAdmin) {
-    refresh()
+    void refresh()
+    window.addEventListener('management:changed', refresh)
   }
+})
+onUnmounted(() => {
+  overviewRequest?.abort()
+  window.removeEventListener('management:changed', refresh)
 })
 </script>
 
@@ -308,420 +405,447 @@ onMounted(() => {
   <section class="planning">
     <h1>Stunden- und Blockplan</h1>
 
-    <p v-if="!auth.isAdmin" class="planning__hint">
-      Die Stunden- und Blockplanung wird von Administratoren gepflegt.
-    </p>
-
-    <p
-      v-else-if="loadError"
-      class="planning__message planning__message--error"
-      role="alert"
+    <Tabs
+      v-if="auth.isAdmin"
+      v-model:value="activeTab"
+      class="planning__tabs"
+      scrollable
+      :show-navigators="false"
     >
-      {{ loadError }}
-    </p>
+      <TabList :pt="{ tabList: { 'aria-label': 'Planungsbereiche' } }">
+        <Tab value="stundenplan">Stundenplan</Tab>
+        <Tab value="blockplan">Blockplan</Tab>
+        <Tab value="klassenplanung">Klassenplanung</Tab>
+      </TabList>
 
-    <template v-else-if="overview">
-      <p
-        v-if="feedback.text"
-        class="planning__message"
-        :class="{ 'planning__message--error': feedback.error }"
-        :role="feedback.error ? 'alert' : 'status'"
+      <PageError
+        v-if="errorMessage"
+        :key="errorRevision"
+        :message="errorMessage"
       >
-        {{ feedback.text }}
+        <Button
+          v-if="loadError"
+          type="button"
+          label="Erneut versuchen"
+          outlined
+          @click="refresh"
+        />
+      </PageError>
+      <p v-else-if="!overview" class="planning__hint" role="status">
+        Planung wird geladen …
       </p>
 
-      <!-- Stundenpläne mit festen Slots -->
-      <article class="planning__card">
-        <header class="planning__card-header">
-          <h2>Stundenpläne</h2>
-          <label class="planning__inline">
-            <span>Stundenplan</span>
-            <select
-              v-model="selectedTimetableId"
-              :disabled="busy || !overview.timetables.length"
-            >
-              <option
-                v-for="timetable in overview.timetables"
-                :key="timetable.id"
-                :value="timetable.id"
-              >
-                {{ timetable.name }}
-              </option>
-            </select>
-          </label>
-        </header>
+      <TabPanels class="planning__panels">
+        <TabPanel value="stundenplan" class="planning__panel">
+          <ClassTimetableWeek :active="activeTab === 'stundenplan'" />
 
-        <div class="planning__table-scroll">
-          <table class="planning__table">
-            <caption class="planning__sr-only">
-              Slots des gewählten Stundenplans
-            </caption>
-            <thead>
-              <tr>
-                <th scope="col">Wochentag</th>
-                <th scope="col">Beginn</th>
-                <th scope="col">Ende</th>
-                <th scope="col">Raum</th>
-                <th scope="col">Gültig ab</th>
-                <th scope="col">Aktionen</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-for="slot in selectedTimetable?.slots ?? []" :key="slot.id">
-                <td>{{ weekdayLabel(slot.weekday) }}</td>
-                <td>{{ formatTime(slot.startsAt) }}</td>
-                <td>{{ formatTime(slot.endsAt) }}</td>
-                <td>{{ slot.roomNumber }}</td>
-                <td>{{ slot.validFrom ? formatDate(slot.validFrom) : '—' }}</td>
-                <td>
-                  <Button
-                    type="button"
-                    label="Bearbeiten"
-                    severity="secondary"
-                    size="small"
-                    :aria-label="`Slot ${weekdayLabel(slot.weekday)} ${formatTime(slot.startsAt)} bearbeiten`"
-                    :disabled="busy"
-                    @click="editSlot(slot)"
-                  />
-                  <Button
-                    type="button"
-                    label="Löschen"
-                    severity="danger"
-                    size="small"
-                    :aria-label="`Slot ${weekdayLabel(slot.weekday)} ${formatTime(slot.startsAt)} löschen`"
-                    :disabled="busy"
-                    @click="removeSlot(slot)"
-                  />
-                </td>
-              </tr>
-              <tr v-if="!selectedTimetable?.slots.length">
-                <td colspan="6" class="planning__empty">
-                  Noch keine Slots vorhanden.
-                </td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-
-        <div class="planning__forms">
-          <form class="planning__form" @submit.prevent="submitSlot">
-            <h3>
-              {{
-                editingSlotId === null ? 'Slot hinzufügen' : 'Slot bearbeiten'
-              }}
-            </h3>
-            <p v-if="editingSlotId !== null" class="planning__hint">
-              Änderungen gelten ab einem Termin, der noch nicht begonnen hat.
-            </p>
-            <label>
-              <span>Wochentag</span>
-              <select ref="slotWeekday" v-model="slotForm.weekday" required>
-                <option
-                  v-for="day in WEEKDAYS"
-                  :key="day.value"
-                  :value="day.value"
-                >
-                  {{ day.label }}
-                </option>
-              </select>
-            </label>
-            <div class="planning__pair">
-              <label>
-                <span>Beginn</span>
-                <InputText
-                  v-model="slotForm.startsAt"
-                  type="time"
-                  step="1"
-                  required
-                />
-              </label>
-              <label>
-                <span>Ende</span>
-                <InputText
-                  v-model="slotForm.endsAt"
-                  type="time"
-                  step="1"
-                  required
-                />
-              </label>
-            </div>
-            <label>
-              <span>Raum</span>
-              <select v-model="slotForm.roomId" required>
-                <option
-                  v-for="room in overview.rooms"
-                  :key="room.id"
-                  :value="room.id"
-                >
-                  {{ room.roomNumber }}
-                </option>
-              </select>
-            </label>
-            <Button
-              type="submit"
-              label="Slot speichern"
-              :disabled="busy || selectedTimetableId === null"
-            />
-            <Button
-              v-if="editingSlotId !== null"
-              type="button"
-              label="Abbrechen"
-              severity="secondary"
-              :disabled="busy"
-              @click="resetSlotForm"
-            />
-          </form>
-
-          <form class="planning__form" @submit.prevent="submitTimetable">
-            <h3>Neuer Stundenplan</h3>
-            <label>
-              <span>Name</span>
-              <InputText
-                v-model="timetableForm.name"
-                maxlength="150"
-                required
-              />
-            </label>
-            <Button
-              type="submit"
-              label="Stundenplan anlegen"
-              severity="secondary"
-              :disabled="busy"
-            />
-          </form>
-        </div>
-      </article>
-
-      <!-- Blockpläne mit Blöcken und zugeordneten Klassen -->
-      <article class="planning__card">
-        <header class="planning__card-header">
-          <h2>Blockpläne</h2>
-          <label class="planning__inline">
-            <span>Blockplan</span>
-            <select
-              v-model="selectedBlockPlanId"
-              :disabled="!overview.blockPlans.length"
-            >
-              <option
-                v-for="plan in overview.blockPlans"
-                :key="plan.id"
-                :value="plan.id"
-              >
-                {{ plan.name }}
-              </option>
-            </select>
-          </label>
-        </header>
-
-        <dl v-if="selectedBlockPlan" class="planning__facts">
-          <div>
-            <dt>Zeitraum</dt>
-            <dd>
-              {{ formatDate(selectedBlockPlan.startsOn) }} –
-              {{ formatDate(selectedBlockPlan.endsOn) }}
-            </dd>
-          </div>
-          <div>
-            <dt>Löschung der Anwesenheitsdaten ab</dt>
-            <dd>{{ formatDate(selectedBlockPlan.deleteAfter) }}</dd>
-          </div>
-        </dl>
-
-        <div class="planning__table-scroll">
-          <table class="planning__table">
-            <caption class="planning__sr-only">
-              Blöcke des gewählten Blockplans
-            </caption>
-            <thead>
-              <tr>
-                <th scope="col">Beginn</th>
-                <th scope="col">Ende</th>
-                <th scope="col">Klassen</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr
-                v-for="block in selectedBlockPlan?.blocks ?? []"
-                :key="block.id"
-              >
-                <td>{{ formatDate(block.startsOn) }}</td>
-                <td>{{ formatDate(block.endsOn) }}</td>
-                <td>{{ classCodes(block.classIds) }}</td>
-              </tr>
-              <tr v-if="!selectedBlockPlan?.blocks.length">
-                <td colspan="3" class="planning__empty">
-                  Noch keine Blöcke vorhanden.
-                </td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-
-        <div class="planning__forms">
-          <form class="planning__form" @submit.prevent="submitBlock">
-            <h3>Block hinzufügen</h3>
-            <div class="planning__pair">
-              <label>
-                <span>Beginn</span>
-                <InputText v-model="blockForm.startsOn" type="date" required />
-              </label>
-              <label>
-                <span>Ende</span>
-                <InputText v-model="blockForm.endsOn" type="date" required />
-              </label>
-            </div>
-            <Button
-              type="submit"
-              label="Block speichern"
-              :disabled="busy || selectedBlockPlanId === null"
-            />
-          </form>
-
-          <form class="planning__form" @submit.prevent="submitBlockPlan">
-            <h3>Neuer Blockplan</h3>
-            <label>
-              <span>Name</span>
-              <InputText
-                v-model="blockPlanForm.name"
-                maxlength="150"
-                required
-              />
-            </label>
-            <div class="planning__pair">
-              <label>
-                <span>Beginn</span>
-                <InputText
-                  v-model="blockPlanForm.startsOn"
-                  type="date"
-                  required
-                />
-              </label>
-              <label>
-                <span>Ende</span>
-                <InputText
-                  v-model="blockPlanForm.endsOn"
-                  type="date"
-                  required
-                />
-              </label>
-            </div>
-            <Button
-              type="submit"
-              label="Blockplan anlegen"
-              severity="secondary"
-              :disabled="busy"
-            />
-          </form>
-        </div>
-      </article>
-
-      <!-- Zuordnung einer Klasse zu Blöcken, Kontenreset und Planwechsel -->
-      <article class="planning__card">
-        <header class="planning__card-header">
-          <h2>Klassenplanung</h2>
-          <label class="planning__inline">
-            <span>Klasse</span>
-            <select
-              v-model="selectedClassId"
-              :disabled="!overview.classes.length"
-            >
-              <option
-                v-for="schoolClass in overview.classes"
-                :key="schoolClass.id"
-                :value="schoolClass.id"
-              >
-                {{ schoolClass.classCode }}
-              </option>
-            </select>
-          </label>
-        </header>
-
-        <template v-if="selectedClass && classPlan">
-          <dl class="planning__facts">
-            <div>
-              <dt>Aktueller Blockplan</dt>
-              <dd>
-                {{ classPlan.name }} ({{ formatDate(classPlan.startsOn) }} –
-                {{ formatDate(classPlan.endsOn) }})
-              </dd>
-            </div>
-            <div>
-              <dt>Stundenplan</dt>
-              <dd>{{ classTimetable?.name ?? '—' }}</dd>
-            </div>
-          </dl>
-
-          <div class="planning__forms">
-            <form class="planning__form" @submit.prevent="submitAssignment">
-              <h3>Block zuordnen</h3>
-              <label>
-                <span>Block des aktuellen Blockplans</span>
+          <!-- Stundenpläne mit festen Slots -->
+          <article v-if="overview && !loadError" class="planning__card">
+            <header class="planning__card-header">
+              <h2>Stundenpläne bearbeiten</h2>
+              <label class="planning__inline">
+                <span>Stundenplan</span>
                 <select
-                  v-model="assignmentForm.blockId"
-                  required
-                  :disabled="!assignableBlocks.length"
+                  v-model="selectedTimetableId"
+                  :disabled="busy || !overview.timetables.length"
                 >
                   <option
-                    v-for="block in assignableBlocks"
-                    :key="block.id"
-                    :value="block.id"
+                    v-for="timetable in overview.timetables"
+                    :key="timetable.id"
+                    :value="timetable.id"
                   >
-                    {{ formatDate(block.startsOn) }} –
-                    {{ formatDate(block.endsOn) }}
+                    {{ timetable.name }}
                   </option>
                 </select>
               </label>
-              <Button
-                type="submit"
-                label="Zuordnen"
-                :disabled="busy || assignmentForm.blockId === null"
-              />
-            </form>
+            </header>
 
-            <form class="planning__form" @submit.prevent="submitPlanChange">
-              <h3>Blockplan wechseln</h3>
-              <p class="planning__note">
-                Erst nach Ende aller Blöcke möglich. Die Konten werden dabei
-                abschließend zurückgesetzt; Klasse und Schüler bleiben erhalten.
-              </p>
-              <label>
-                <span>Folgeplan</span>
+            <p class="planning__hint">
+              Das Wochenraster gilt in allen Unterrichtsblöcken der zugeordneten
+              Klassen.
+            </p>
+            <TimetableGrid
+              :days="templateDays"
+              :periods="selectedTimetable?.periods"
+              :caption="selectedTimetable?.name ?? 'Stundenplan'"
+              :busy="busy"
+              @edit="editSlot"
+              @remove="removeSlot"
+            />
+
+            <div class="planning__forms">
+              <form class="planning__form" @submit.prevent="submitSlot">
+                <h3>
+                  {{
+                    editingSlotId === null
+                      ? 'Unterrichtszeit hinzufügen'
+                      : 'Unterrichtszeit bearbeiten'
+                  }}
+                </h3>
+                <p v-if="editingSlotId !== null" class="planning__hint">
+                  Änderungen gelten ab einem Termin, der noch nicht begonnen
+                  hat.
+                </p>
+                <label>
+                  <span>Wochentag</span>
+                  <select ref="slotWeekday" v-model="slotForm.weekday" required>
+                    <option
+                      v-for="day in WEEKDAYS"
+                      :key="day.value"
+                      :value="day.value"
+                    >
+                      {{ day.label }}
+                    </option>
+                  </select>
+                </label>
+                <div class="planning__pair">
+                  <label>
+                    <span>Beginn</span>
+                    <GermanTimeInput
+                      v-model="slotForm.startsAt"
+                      label="Beginn"
+                      required
+                    />
+                  </label>
+                  <label>
+                    <span>Ende</span>
+                    <GermanTimeInput
+                      v-model="slotForm.endsAt"
+                      label="Ende"
+                      required
+                    />
+                  </label>
+                </div>
+                <label>
+                  <span>Fach oder Lernfeld (optional)</span>
+                  <InputText
+                    v-model="slotForm.subject"
+                    maxlength="80"
+                    placeholder="z. B. LF 8 oder Deutsch"
+                  />
+                </label>
+                <label>
+                  <span>Lehrkraft (optional)</span>
+                  <select v-model="slotForm.teacherId">
+                    <option :value="null">Keine Angabe</option>
+                    <option
+                      v-for="teacher in overview.teachers ?? []"
+                      :key="teacher.id"
+                      :value="teacher.id"
+                    >
+                      {{ teacher.name }}
+                    </option>
+                  </select>
+                </label>
+                <label>
+                  <span>Raum</span>
+                  <select v-model="slotForm.roomId" required>
+                    <option
+                      v-for="room in overview.rooms"
+                      :key="room.id"
+                      :value="room.id"
+                    >
+                      {{ room.roomNumber }}
+                    </option>
+                  </select>
+                </label>
+                <Button
+                  type="submit"
+                  label="Unterrichtszeit speichern"
+                  :disabled="busy || selectedTimetableId === null"
+                />
+                <Button
+                  v-if="editingSlotId !== null"
+                  type="button"
+                  label="Abbrechen"
+                  severity="secondary"
+                  :disabled="busy"
+                  @click="resetSlotForm"
+                />
+              </form>
+
+              <form class="planning__form" @submit.prevent="submitTimetable">
+                <h3>Neuer Stundenplan</h3>
+                <label>
+                  <span>Name</span>
+                  <InputText
+                    v-model="timetableForm.name"
+                    maxlength="150"
+                    required
+                  />
+                </label>
+                <Button
+                  type="submit"
+                  label="Stundenplan anlegen"
+                  severity="secondary"
+                  :disabled="busy"
+                />
+              </form>
+            </div>
+          </article>
+        </TabPanel>
+
+        <TabPanel value="blockplan" class="planning__panel">
+          <!-- Blockpläne mit Blöcken und zugeordneten Klassen -->
+          <article v-if="overview && !loadError" class="planning__card">
+            <header class="planning__card-header">
+              <h2>Blockpläne</h2>
+              <label class="planning__inline">
+                <span>Blockplan</span>
                 <select
-                  v-model="planChangeForm.nextBlockPlanId"
-                  required
-                  :disabled="!nextPlanCandidates.length"
+                  v-model="selectedBlockPlanId"
+                  :disabled="!overview.blockPlans.length"
                 >
                   <option
-                    v-for="plan in nextPlanCandidates"
+                    v-for="plan in overview.blockPlans"
                     :key="plan.id"
                     :value="plan.id"
                   >
-                    {{ plan.name }} (ab {{ formatDate(plan.startsOn) }})
+                    {{ plan.name }}
                   </option>
                 </select>
               </label>
-              <div class="planning__actions">
+            </header>
+
+            <dl v-if="selectedBlockPlan" class="planning__facts">
+              <div>
+                <dt>Zeitraum</dt>
+                <dd>
+                  {{ formatDate(selectedBlockPlan.startsOn) }} –
+                  {{ formatDate(selectedBlockPlan.endsOn) }}
+                </dd>
+              </div>
+              <div>
+                <dt>Löschung der Anwesenheitsdaten ab</dt>
+                <dd>{{ formatDate(selectedBlockPlan.deleteAfter) }}</dd>
+              </div>
+            </dl>
+
+            <div class="planning__table-scroll">
+              <table class="planning__table">
+                <caption class="visually-hidden">
+                  Blöcke des gewählten Blockplans
+                </caption>
+                <thead>
+                  <tr>
+                    <th scope="col">Beginn</th>
+                    <th scope="col">Ende</th>
+                    <th scope="col">Klassen</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr
+                    v-for="block in selectedBlockPlan?.blocks ?? []"
+                    :key="block.id"
+                  >
+                    <td>{{ formatDate(block.startsOn) }}</td>
+                    <td>{{ formatDate(block.endsOn) }}</td>
+                    <td>{{ classCodes(block.classIds) }}</td>
+                  </tr>
+                  <tr v-if="!selectedBlockPlan?.blocks.length">
+                    <td colspan="3" class="planning__empty">
+                      Noch keine Blöcke vorhanden.
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+
+            <div class="planning__forms">
+              <form class="planning__form" @submit.prevent="submitBlock">
+                <h3>Block hinzufügen</h3>
+                <div class="planning__pair">
+                  <label>
+                    <span>Beginn</span>
+                    <GermanDateInput
+                      v-model="blockForm.startsOn"
+                      label="Beginn"
+                      required
+                    />
+                  </label>
+                  <label>
+                    <span>Ende</span>
+                    <GermanDateInput
+                      v-model="blockForm.endsOn"
+                      label="Ende"
+                      required
+                    />
+                  </label>
+                </div>
                 <Button
                   type="submit"
-                  label="Plan wechseln"
-                  :disabled="busy || planChangeForm.nextBlockPlanId === null"
+                  label="Block speichern"
+                  :disabled="busy || selectedBlockPlanId === null"
                 />
+              </form>
+
+              <form class="planning__form" @submit.prevent="submitBlockPlan">
+                <h3>Neuer Blockplan</h3>
+                <label>
+                  <span>Name</span>
+                  <InputText
+                    v-model="blockPlanForm.name"
+                    maxlength="150"
+                    required
+                  />
+                </label>
+                <div class="planning__pair">
+                  <label>
+                    <span>Beginn</span>
+                    <GermanDateInput
+                      v-model="blockPlanForm.startsOn"
+                      label="Beginn"
+                      required
+                    />
+                  </label>
+                  <label>
+                    <span>Ende</span>
+                    <GermanDateInput
+                      v-model="blockPlanForm.endsOn"
+                      label="Ende"
+                      required
+                    />
+                  </label>
+                </div>
                 <Button
-                  type="button"
-                  label="Nur Konten zurücksetzen"
+                  type="submit"
+                  label="Blockplan anlegen"
                   severity="secondary"
                   :disabled="busy"
-                  @click="submitReset"
                 />
-              </div>
-            </form>
-          </div>
-        </template>
-        <p v-else class="planning__empty">Noch keine Klassen vorhanden.</p>
-      </article>
-    </template>
+              </form>
+            </div>
+          </article>
+        </TabPanel>
 
-    <p v-else class="planning__hint">Planung wird geladen …</p>
+        <TabPanel value="klassenplanung" class="planning__panel">
+          <!-- Zuordnung einer Klasse zu Blöcken, Kontenreset und Planwechsel -->
+          <article v-if="overview && !loadError" class="planning__card">
+            <header class="planning__card-header">
+              <h2>Klassenplanung</h2>
+              <label class="planning__inline">
+                <span>Klasse</span>
+                <select
+                  v-model="selectedClassId"
+                  :disabled="!overview.classes.length"
+                >
+                  <option
+                    v-for="schoolClass in overview.classes"
+                    :key="schoolClass.id"
+                    :value="schoolClass.id"
+                  >
+                    {{ schoolClass.classCode }}
+                  </option>
+                </select>
+              </label>
+            </header>
+
+            <template v-if="selectedClass && classPlan">
+              <dl class="planning__facts">
+                <div>
+                  <dt>Aktueller Blockplan</dt>
+                  <dd>
+                    {{ classPlan.name }} ({{ formatDate(classPlan.startsOn) }} –
+                    {{ formatDate(classPlan.endsOn) }})
+                  </dd>
+                </div>
+                <div>
+                  <dt>Stundenplan</dt>
+                  <dd>{{ classTimetable?.name ?? '—' }}</dd>
+                </div>
+              </dl>
+
+              <div class="planning__forms">
+                <form class="planning__form" @submit.prevent="submitAssignment">
+                  <h3>Block zuordnen</h3>
+                  <label>
+                    <span>Block des aktuellen Blockplans</span>
+                    <select
+                      v-model="assignmentForm.blockId"
+                      required
+                      :disabled="!blockOptions.length"
+                    >
+                      <option
+                        v-for="block in blockOptions"
+                        :key="block.id"
+                        :value="block.id"
+                        :disabled="block.timetableConflict"
+                      >
+                        {{ formatDate(block.startsOn) }} –
+                        {{ formatDate(block.endsOn) }}
+                        {{
+                          block.timetableConflict ? '· Stundenplan belegt' : ''
+                        }}
+                      </option>
+                    </select>
+                  </label>
+                  <p v-if="!blockOptions.length" class="planning__note">
+                    {{
+                      classPlan.blocks.length
+                        ? 'Die Klasse ist bereits allen Blöcken dieses Blockplans zugeordnet.'
+                        : 'Dieser Blockplan hat noch keine Blöcke. Lege sie im Reiter „Blockplan“ an.'
+                    }}
+                  </p>
+                  <Button
+                    type="submit"
+                    label="Zuordnen"
+                    :disabled="busy || !selectedBlock"
+                  />
+                </form>
+
+                <form class="planning__form" @submit.prevent="submitPlanChange">
+                  <h3>Blockplan wechseln</h3>
+                  <p class="planning__note">
+                    Erst nach Ende aller Blöcke möglich. Die Fehlzeitenkonten
+                    werden dabei abschließend zurückgesetzt; Klasse und Schüler
+                    bleiben erhalten.
+                  </p>
+                  <label>
+                    <span>Folgeplan</span>
+                    <select
+                      v-model="planChangeForm.nextBlockPlanId"
+                      required
+                      :disabled="!nextPlanCandidates.length"
+                    >
+                      <option
+                        v-for="plan in nextPlanCandidates"
+                        :key="plan.id"
+                        :value="plan.id"
+                      >
+                        {{ plan.name }} (ab {{ formatDate(plan.startsOn) }})
+                      </option>
+                    </select>
+                  </label>
+                  <p v-if="!nextPlanCandidates.length" class="planning__note">
+                    Es gibt noch keinen Blockplan, der nach dem
+                    {{ formatDate(classPlan.endsOn) }} beginnt. Lege ihn im
+                    Reiter „Blockplan“ an.
+                  </p>
+                  <div class="planning__actions">
+                    <Button
+                      type="submit"
+                      label="Plan wechseln"
+                      :disabled="
+                        busy || planChangeForm.nextBlockPlanId === null
+                      "
+                    />
+                    <Button
+                      type="button"
+                      label="Nur Fehlzeitenkonten zurücksetzen"
+                      severity="secondary"
+                      :disabled="busy"
+                      @click="submitReset"
+                    />
+                  </div>
+                </form>
+              </div>
+            </template>
+            <p v-else class="planning__empty">Noch keine Klassen vorhanden.</p>
+          </article>
+        </TabPanel>
+      </TabPanels>
+    </Tabs>
+    <ClassTimetableWeek v-else />
   </section>
 </template>
 
@@ -736,14 +860,38 @@ onMounted(() => {
   margin: 0;
 }
 
+.planning__tabs {
+  display: grid;
+  gap: 16px;
+  min-width: 0;
+  --p-tabs-tablist-background: transparent;
+  --p-tabs-tablist-border-color: var(--line);
+  --p-tabs-tab-padding: 0.75rem clamp(0.375rem, 2vw, 1.25rem);
+}
+
+.planning__tabs :deep(.p-tab) {
+  min-height: 44px;
+}
+
+.planning__panels {
+  --p-tabs-tabpanel-background: transparent;
+  --p-tabs-tabpanel-padding: 0;
+}
+
+.planning__panel {
+  display: grid;
+  gap: 20px;
+  min-width: 0;
+}
+
 .planning__card {
   display: flex;
   flex-direction: column;
   gap: 16px;
   padding: 20px;
-  background: white;
+  background: var(--surface);
   border: 1px solid var(--line);
-  border-radius: 14px;
+  border-radius: var(--radius);
 }
 
 .planning__card-header {
@@ -768,7 +916,7 @@ onMounted(() => {
 
 .planning__forms {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr));
   gap: 16px;
 }
 
@@ -777,7 +925,7 @@ onMounted(() => {
   flex-direction: column;
   gap: 12px;
   padding: 16px;
-  background: #f7f8fa;
+  background: var(--paper);
   border-radius: 8px;
 }
 
@@ -826,7 +974,7 @@ onMounted(() => {
 
 .planning__facts dt {
   font-size: 0.8rem;
-  color: #6b7688;
+  color: var(--muted);
 }
 
 .planning__facts dd {
@@ -853,7 +1001,7 @@ onMounted(() => {
 }
 
 .planning__table th {
-  color: #4a5568;
+  color: var(--muted);
   font-size: 0.8rem;
   font-weight: 600;
   text-transform: uppercase;
@@ -864,37 +1012,12 @@ onMounted(() => {
 .planning__hint,
 .planning__note {
   margin: 0;
-  color: #6b7688;
+  color: var(--muted);
   font-size: 0.9rem;
 }
 
 .planning__note {
   font-size: 0.8rem;
-}
-
-.planning__message {
-  margin: 0;
-  padding: 10px 12px;
-  border: 1px solid #b6d7c0;
-  border-radius: 6px;
-  background: #f1f9f3;
-  font-size: 0.9rem;
-  color: #1f6a37;
-}
-
-.planning__message--error {
-  border-color: #f0b4b4;
-  background: #fdf2f2;
-  color: #a12525;
-}
-
-.planning__sr-only {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  overflow: hidden;
-  clip: rect(0 0 0 0);
-  white-space: nowrap;
 }
 
 @media (max-width: 480px) {

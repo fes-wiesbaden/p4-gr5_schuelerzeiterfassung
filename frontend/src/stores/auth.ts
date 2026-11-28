@@ -2,6 +2,7 @@ import { computed, ref } from 'vue'
 import { defineStore } from 'pinia'
 
 import { getJson, postJson } from '@/api/client'
+import { timetableDraft } from '@/api/timetableImport'
 
 export type Role = 'admin' | 'lehrkraft'
 
@@ -12,9 +13,10 @@ export interface AuthUser {
 
 // Abgelehnte Anmeldungen erhalten denselben Text, damit kein Rückschluss auf
 // vorhandene Benutzernamen möglich ist. Verbindungsfehler haben einen eigenen Hinweis
-const LOGIN_FAILED = 'Anmeldung fehlgeschlagen. Bitte Eingaben pruefen.'
+const LOGIN_FAILED =
+  'Benutzername oder Passwort stimmen nicht. Bitte prüfe beide Eingaben.'
 const SERVER_UNREACHABLE =
-  'Server nicht erreichbar. Bitte spaeter erneut versuchen.'
+  'Server nicht erreichbar. Bitte später erneut versuchen.'
 
 export const useAuthStore = defineStore('auth', () => {
   const user = ref<AuthUser | null>(null)
@@ -46,8 +48,9 @@ export const useAuthStore = defineStore('auth', () => {
         return false
       }
 
-      user.value = (await response.json()) as AuthUser
-      sessionChecked.value = true
+      const authenticatedUser = (await response.json()) as AuthUser
+      clearSession()
+      user.value = authenticatedUser
       return true
     } catch {
       errorMessage.value = SERVER_UNREACHABLE
@@ -58,6 +61,7 @@ export const useAuthStore = defineStore('auth', () => {
   }
 
   function clearSession() {
+    timetableDraft.value = undefined
     user.value = null
     sessionChecked.value = true
     errorMessage.value = ''

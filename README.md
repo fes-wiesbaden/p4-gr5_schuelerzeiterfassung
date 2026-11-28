@@ -70,6 +70,30 @@ Vite leitet `/api/` an `http://127.0.0.1:8080` weiter. Nach dem
 [CA-Import](#tls-und-terminal) die Weboberfläche auf `https://<TLS_HOST>:5173/`
 öffnen, standardmäßig `https://127.0.0.1:5173/`.
 
+### Codex-Demo
+
+Die Schaltfläche für den Chat-Assistenten Klassenlotse erscheint unten rechts im
+angemeldeten Webbereich. Ohne Codex stehen dort die Formulare für Aufträge und
+für „Fehlzeit entschuldigen“ bereit: Sie zeigen zuerst eine Vorschau und
+speichern erst nach Bestätigung.
+
+Für den Chat und für „Stundenplan aus Bild“ (nur Verwaltung) das Backend auf dem
+Entwicklungsrechner mit einer Datenbank für fiktive Testdaten starten. Das
+Backend benötigt `codex` im `PATH` und eine bestehende ChatGPT-Anmeldung,
+sichtbar mit `codex login status`.
+
+```sh
+ATTENDANCE_ASSISTANT_DEMO=true mvn -pl backend spring-boot:run
+```
+
+Im Chat ausschließlich fiktive Angaben verwenden. Codex erhält die Chat-Anfrage,
+einen begrenzten Verlauf und beim Bildimport das Bild; eine Antwort dauert bis
+zu 40 Sekunden, das Auslesen eines Bildes bis zu 90 Sekunden. Klassen- und
+Schülerlisten lädt der Browser selbst über die API; das Backend prüft jede
+Buchung mit den Rechten der angemeldeten Person. Bei Bedarf lässt sich das
+verfügbare Codex-Modell mit `ATTENDANCE_ASSISTANT_MODEL` vorgeben. Funktionen,
+Datenfluss und Grenzen beschreibt [docs/klassenlotse.md](docs/klassenlotse.md).
+
 ## Lokal debuggen
 
 Für IntelliJ IDEA die Root-`pom.xml` importieren; sie enthält `backend` und
@@ -82,6 +106,7 @@ starten oder debuggen.
 | --- | --- | --- |
 | `backend/` | Datenmodell, Dienste und Login | [Login und Sitzungen](backend/src/main/java/de/feswiesbaden/attendance/login/login.md) |
 | `frontend/` | Vue 3 / TypeScript für Lehrkraft- und Verwaltungsansichten | [Lokaler Start](#backend-und-frontend) |
+| `docs/` | Chat-Assistent Klassenlotse: Funktionen, Daten und Rechte, Grenzen | [Klassenlotse](docs/klassenlotse.md) |
 | `terminal/` | JavaFX, USB-Scans und persistente Zustellwarteschlange | [Terminal-Anleitung](terminal/README.md) |
 | `terminal/firmware/` | ESP32-RFID-Leser mit USB-Serial | [ESP32-Einrichtung](terminal/README.md#mit-echtem-esp32) |
 | `infra/` | TLS-Erzeugung und nginx | [TLS und Terminal](#tls-und-terminal) |

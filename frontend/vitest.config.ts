@@ -8,5 +8,11 @@ export default defineConfig({
   resolve: {
     alias: { '@': fileURLToPath(new URL('./src', import.meta.url)) }
   },
-  test: { environment: 'jsdom' }
+  test: {
+    environment: 'jsdom',
+    setupFiles: ['./test/setup.ts'],
+    // Jeder Test beginnt ohne Ersatz-Globals und mit echten Methoden statt Spies
+    unstubGlobals: true,
+    restoreMocks: true
+  }
 })

@@ -15,7 +15,7 @@ import org.springframework.stereotype.Repository;
  */
 @Repository
 public class SchoolClassRepository {
-  private static final String CLASS_ACCESS =
+  static final String CLASS_ACCESS =
       """
       (? OR c.class_teacher_id = ? OR EXISTS
         (SELECT 1 FROM teacher_class tc WHERE tc.school_class_id = c.id AND tc.staff_id = ?))
@@ -28,15 +28,15 @@ public class SchoolClassRepository {
   }
 
   /**
-   * Liefert eigene und zugeordnete Klassen des Mitarbeiters. Bei administrator=true werden alle
-   * Klassen zurückgegeben
+   * Liefert eigene und zugeordnete Klassen des Mitarbeiters nach Klassenkürzel sortiert. Bei
+   * administrator=true werden alle Klassen zurückgegeben
    */
   public List<ClassData> findAccessible(Long staffId, boolean administrator) {
     return jdbc.query(
         "SELECT c.id, c.class_code, c.class_teacher_id, c.block_plan_id, c.timetable_id"
             + " FROM school_class c WHERE "
             + CLASS_ACCESS
-            + " ORDER BY c.id",
+            + " ORDER BY c.class_code, c.id",
         (row, index) ->
             new ClassData(
                 row.getLong("id"),
@@ -183,6 +183,11 @@ public class SchoolClassRepository {
                 row.getDate("starts_on").toLocalDate(),
                 row.getDate("ends_on").toLocalDate()),
         timetableId);
+  }
+
+  /** Weist der Klasse einen anderen Stundenplan zu */
+  public void updateTimetable(Long classId, Long timetableId) {
+    jdbc.update("UPDATE school_class SET timetable_id = ? WHERE id = ?", timetableId, classId);
   }
 
   /** Ordnet der Klasse den Blockzeitraum zu */

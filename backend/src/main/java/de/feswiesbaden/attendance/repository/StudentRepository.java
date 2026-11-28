@@ -2,6 +2,7 @@ package de.feswiesbaden.attendance.repository;
 
 import de.feswiesbaden.attendance.entities.SchoolClass;
 import de.feswiesbaden.attendance.entities.Student;
+import de.feswiesbaden.attendance.service.StudentService.StudentView;
 import jakarta.persistence.EntityManager;
 import java.sql.ResultSet;
 import java.sql.SQLException;
@@ -20,7 +21,12 @@ import org.springframework.stereotype.Repository;
 public class StudentRepository {
   private static final String STUDENT_COLUMNS =
       "SELECT id, first_name, last_name, birth_date, school_class_id,"
-          + " unexcused_minutes_account, excused_minutes_account FROM student";
+          + " unexcused_minutes_account, excused_minutes_account,"
+          + " unexcused_days_account, excused_days_account,"
+          + " unexcused_minutes_account - full_unexcused_minutes_account AS unexcused_partial,"
+          + " excused_minutes_account - full_excused_minutes_account AS excused_partial,"
+          + " (unexcused_minutes_account - full_unexcused_minutes_account) DIV 45 AS unexcused_hours,"
+          + " (excused_minutes_account - full_excused_minutes_account) DIV 45 AS excused_hours FROM student";
 
   private final JdbcTemplate jdbc;
 
@@ -31,10 +37,25 @@ public class StudentRepository {
     this.entityManager = entityManager;
   }
 
-  /** Liefert die Schüler einer Klasse ohne Kartenkennungen nach ID sortiert */
-  public List<StudentData> findByClassId(Long classId) {
+  /** Liefert die Schüler einer Klasse ohne Kartenkennungen nach Nachname und Vorname sortiert */
+  public List<StudentView> findByClassId(Long classId) {
     return jdbc.query(
-        STUDENT_COLUMNS + " WHERE school_class_id = ? ORDER BY id", this::data, classId);
+        STUDENT_COLUMNS + " WHERE school_class_id = ? ORDER BY last_name, first_name, id",
+        this::data,
+        classId);
+  }
+
+  /** Liefert sämtliche Schüler der für den Mitarbeiter sichtbaren Klassen */
+  public List<StudentView> findAccessible(Long staffId, boolean administrator) {
+    return jdbc.query(
+        STUDENT_COLUMNS
+            + " WHERE school_class_id IN (SELECT c.id FROM school_class c WHERE "
+            + SchoolClassRepository.CLASS_ACCESS
+            + ") ORDER BY last_name, first_name, id",
+        this::data,
+        administrator,
+        staffId,
+        staffId);
   }
 
   /** Liefert die Schüler-ID zur RFID-Kennung */
@@ -45,38 +66,57 @@ public class StudentRepository {
         rs -> rs.next() ? Optional.of(rs.getLong("id")) : Optional.empty());
   }
 
-  /** Liefert die Zuordnungen vorhandener Karten mit Schülername und Klassenkürzel */
-  public List<RfidAssignment> findRfidAssignments() {
+  /**
+   * Liefert die Zuordnungen vorhandener Karten mit Schülername und Klassenkürzel. Enthalten sind
+   * nur Schüler der Klassen, die der Mitarbeiter als Klassenleitung oder über eine Lehrzuordnung
+   * sehen darf
+   */
+  public List<RfidAssignment> findRfidAssignments(Long staffId, boolean administrator) {
     return jdbc.query(
-        """
-        SELECT CONCAT(s.last_name, ', ', s.first_name) AS student_name, c.class_code, s.rfid_uid
-        FROM student s
-        JOIN school_class c ON c.id = s.school_class_id
-        WHERE s.rfid_uid IS NOT NULL
-        ORDER BY c.class_code, s.last_name, s.first_name, s.id
-        """,
+        "SELECT s.id, CONCAT(s.last_name, ', ', s.first_name) AS student_name,"
+            + " c.class_code, s.rfid_uid"
+            + " FROM student s JOIN school_class c ON c.id = s.school_class_id"
+            + " WHERE s.rfid_uid IS NOT NULL AND "
+            + SchoolClassRepository.CLASS_ACCESS
+            + " ORDER BY c.class_code, s.last_name, s.first_name, s.id",
         (row, index) ->
             new RfidAssignment(
+                row.getLong("id"),
                 row.getString("student_name"),
                 row.getString("class_code"),
-                row.getString("rfid_uid")));
+                row.getString("rfid_uid")),
+        administrator,
+        staffId,
+        staffId);
   }
 
   /** Liest Namen und Anlagezeitpunkt der Schüler für die Anwesenheitsliste */
   public List<AttendanceStudent> findAttendanceStudents(Long classId) {
     return jdbc.query(
-        "SELECT id, first_name, last_name, created_at FROM student WHERE school_class_id = ? ORDER BY id",
+        "SELECT id, first_name, last_name, birth_date, created_at FROM student WHERE school_class_id = ?"
+            + " ORDER BY last_name, first_name, id",
         (row, index) ->
             new AttendanceStudent(
                 row.getLong("id"),
                 row.getString("first_name"),
                 row.getString("last_name"),
+                row.getObject("birth_date", LocalDate.class),
                 row.getObject("created_at", LocalDateTime.class)),
         classId);
   }
 
+  /** Liefert den Anlagezeitpunkt für die Abgrenzung der Anwesenheitshistorie */
+  public Optional<LocalDateTime> findCreatedAt(Long studentId, Long classId) {
+    return jdbc.query(
+        "SELECT created_at FROM student WHERE id = ? AND school_class_id = ?",
+        rows ->
+            rows.next() ? Optional.of(rows.getObject(1, LocalDateTime.class)) : Optional.empty(),
+        studentId,
+        classId);
+  }
+
   /** Lädt die Daten eines vorhandenen Schülers ohne Kartenkennung */
-  public StudentData findById(Long studentId) {
+  public StudentView findById(Long studentId) {
     return jdbc.query(STUDENT_COLUMNS + " WHERE id = ?", this::data, studentId).getFirst();
   }
 
@@ -123,33 +163,30 @@ public class StudentRepository {
   }
 
   /** Liest Stammdaten, Klassen-ID und beide Fehlminutenkonten aus dem SQL-Abfrageergebnis */
-  private StudentData data(ResultSet row, int index) throws SQLException {
-    return new StudentData(
+  private StudentView data(ResultSet row, int index) throws SQLException {
+    return new StudentView(
         row.getLong("id"),
         row.getString("first_name"),
         row.getString("last_name"),
         row.getDate("birth_date").toLocalDate(),
         row.getLong("school_class_id"),
         row.getInt("unexcused_minutes_account"),
-        row.getInt("excused_minutes_account"));
+        row.getInt("excused_minutes_account"),
+        row.getInt("unexcused_days_account"),
+        row.getInt("excused_days_account"),
+        row.getInt("unexcused_hours"),
+        row.getInt("excused_hours"),
+        row.getInt("unexcused_partial"),
+        row.getInt("excused_partial"));
   }
-
-  /** Enthält Schülerstammdaten, Klasse und Minutenkonten ohne Kartenkennung */
-  public record StudentData(
-      Long id,
-      String firstName,
-      String lastName,
-      LocalDate birthDate,
-      Long classId,
-      int unexcusedMinutes,
-      int excusedMinutes) {}
 
   /** Enthält die Schülerdaten für die Zuordnung zur Tagesanwesenheit */
   public record AttendanceStudent(
-      Long id, String firstName, String lastName, LocalDateTime createdAt) {}
+      Long id, String firstName, String lastName, LocalDate birthDate, LocalDateTime createdAt) {}
 
   /** Enthält die sichtbaren Felder der Kartenzuordnung für Lehrkräfte */
-  public record RfidAssignment(String studentName, String classCode, String rfidUid) {
+  public record RfidAssignment(
+      Long studentId, String studentName, String classCode, String rfidUid) {
     /** Hält Schülerdaten und UID aus der Textdarstellung für technische Logs heraus */
     @Override
     public String toString() {

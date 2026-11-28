@@ -10,7 +10,6 @@ import LoginView from '@/views/LoginView.vue'
 
 describe('AppLayout Navigation', () => {
   afterEach(() => {
-    vi.unstubAllGlobals()
     document.cookie = 'XSRF-TOKEN=; Max-Age=0'
   })
   beforeEach(async () => {
@@ -26,50 +25,37 @@ describe('AppLayout Navigation', () => {
     await router.isReady()
   })
 
-  it('zeigt den Administration-Bereich für Administratoren', () => {
-    const auth = useAuthStore()
-    auth.user = { name: 'A. Muster', role: 'admin' }
+  it.each([
+    ['admin', true],
+    ['lehrkraft', false]
+  ] as const)(
+    'zeigt %s die Hauptnavigation und den Verwaltungsbereich nur der Verwaltung',
+    (role, administration) => {
+      useAuthStore().user = { name: 'Test', role }
+      const wrapper = mount(AppLayout, {
+        global: { plugins: [router, PrimeVue], stubs: ['RouterView'] }
+      })
 
-    const wrapper = mount(AppLayout, {
-      global: { plugins: [router, PrimeVue] }
-    })
+      expect(wrapper.text()).toContain('Live-Anwesenheit')
+      expect(wrapper.get('a[href="/schueler"]').text()).toBe('Schüler')
+      expect(wrapper.find('.app-nav__section-label').exists()).toBe(
+        administration
+      )
+      expect(wrapper.find('a[href="/personal"]').exists()).toBe(administration)
+      wrapper.unmount()
+    }
+  )
 
-    expect(wrapper.text()).toContain('Administration')
-    expect(wrapper.text()).toContain('Räume')
-    expect(wrapper.find('a[href="/personal"]').exists()).toBe(true)
-    wrapper.unmount()
-  })
-
-  it('blendet den Administration-Bereich für Lehrkräfte aus', () => {
-    const auth = useAuthStore()
-    auth.user = { name: 'L. Kraft', role: 'lehrkraft' }
-
-    const wrapper = mount(AppLayout, {
-      global: { plugins: [router, PrimeVue] }
-    })
-
-    expect(wrapper.text()).not.toContain('Administration')
-    expect(wrapper.find('a[href="/personal"]').exists()).toBe(false)
-    wrapper.unmount()
-  })
-
-  it('zeigt die Hauptnavigation unabhängig von der Rolle', () => {
-    const auth = useAuthStore()
-    auth.user = { name: 'L. Kraft', role: 'lehrkraft' }
-
-    const wrapper = mount(AppLayout, {
-      global: { plugins: [router, PrimeVue] }
-    })
-
-    expect(wrapper.text()).toContain('Live-Anwesenheit')
-    expect(wrapper.text()).toContain('Klassen')
-    wrapper.unmount()
+  it('leitet Lehrkräfte von Verwaltungsseiten auf „Kein Zugriff“ um', async () => {
+    useAuthStore().user = { name: 'Test', role: 'lehrkraft' }
+    await router.push('/planung/entwurf')
+    expect(router.currentRoute.value.name).toBe('kein-zugriff')
   })
 
   it.each([
     ['/klassen?seite=2', '/klassen?seite=2'],
-    ['/unbekannt', '/live-anwesenheit'],
-    ['/personal', '/live-anwesenheit']
+    ['/unbekannt', '/unbekannt'],
+    ['/personal', '/kein-zugriff']
   ])(
     'holt das CSRF-Cookie nach und leitet von %s zu %s weiter',
     async (weiter, target) => {

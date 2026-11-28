@@ -1,105 +1,236 @@
 <script setup lang="ts">
-import InputText from 'primevue/inputtext'
+import PageError from '@/components/PageError.vue'
+import { computed, onMounted, ref } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import MasterDataList from '@/components/MasterDataList.vue'
-import StudentRfidCards from '@/components/StudentRfidCards.vue'
-import { ref, onMounted, computed } from 'vue'
+import StudentFormFields from '@/components/StudentFormFields.vue'
+import StudentRfidAssignments from '@/components/StudentRfidAssignments.vue'
 import { loadData } from '@/api/client'
+import {
+  formatAbsenceTotals,
+  studentLabel,
+  type Student,
+  type StudentClass
+} from '@/api/students'
 import { useAuthStore } from '@/stores/auth'
+
+const props = defineProps<{ classId?: number }>()
 const auth = useAuthStore()
+const route = useRoute()
+const router = useRouter()
+const classes = ref<StudentClass[]>([])
 const staffId = ref<number>()
 const error = ref('')
-const classes = ref<
-  { id: number; classCode: string; classTeacherId: number }[]
->([])
-const selected = ref<number>()
-const cardFormVersion = ref(0)
-const own = computed(
-  () =>
-    classes.value.find((c) => c.id === selected.value)?.classTeacherId ===
-    staffId.value
-)
-onMounted(async () => {
-  try {
-    staffId.value = await loadData('/api/staff-id')
-    classes.value = await loadData('/api/classes')
-    selected.value = classes.value[0]?.id
-  } catch {
-    error.value = 'Klassen konnten nicht geladen werden.'
+const loading = ref(true)
+const selection = computed({
+  get: () =>
+    classes.value.find(
+      (entry) =>
+        String(entry.id) === (props.classId?.toString() ?? route.query.klasse)
+    ),
+  set: (entry: StudentClass | undefined) => {
+    void router.replace({
+      name: 'schueler',
+      query: entry ? { klasse: entry.id } : {}
+    })
   }
 })
-type Row = {
-  id: number
-  firstName: string
-  lastName: string
-  birthDate: string
-  excusedMinutes: number
-  unexcusedMinutes: number
+const rosterUrl = computed(() =>
+  selection.value
+    ? `/api/classes/${selection.value.id}/students`
+    : '/api/students'
+)
+const managedClasses = computed(() =>
+  classes.value.filter(
+    (entry) => auth.isAdmin || entry.classTeacherId === staffId.value
+  )
+)
+const canCreate = computed(() =>
+  selection.value
+    ? managedClasses.value.some((entry) => entry.id === selection.value?.id)
+    : managedClasses.value.length > 0
+)
+const createClassId = ref<number>()
+const createUrl = computed(() => {
+  const classId = selection.value?.id ?? createClassId.value
+  return managedClasses.value.some((entry) => entry.id === classId)
+    ? `/api/classes/${classId}/students`
+    : null
+})
+const classPage = computed(() => props.classId !== undefined)
+const title = computed(() =>
+  classPage.value && selection.value ? selection.value.classCode : 'Schüler'
+)
+const columns = computed(() => [
+  ...(!classPage.value
+    ? [
+        {
+          field: 'classId' as const,
+          title: 'Klasse',
+          format: (row: Student) => classCode(row) || '—'
+        }
+      ]
+    : []),
+  {
+    field: 'unexcusedDays' as const,
+    title: 'Unentschuldigt',
+    format: (row: Student) =>
+      formatAbsenceTotals(row.unexcusedDays, row.unexcusedHours),
+    sortValue: (row: Student) =>
+      absenceOrder(row.unexcusedDays, row.unexcusedPartialMinutes)
+  },
+  {
+    field: 'excusedDays' as const,
+    title: 'Entschuldigt',
+    format: (row: Student) =>
+      formatAbsenceTotals(row.excusedDays, row.excusedHours),
+    sortValue: (row: Student) =>
+      absenceOrder(row.excusedDays, row.excusedPartialMinutes)
+  }
+])
+// Sortiert wie angezeigt: erst ganze Fehltage, dann die Minuten der Fehlstunden
+function absenceOrder(days: number, partialMinutes = 0) {
+  return days * 1_000_000 + partialMinutes
 }
-function label(r: Row) {
-  return r.lastName + ', ' + r.firstName
+function classCode(row: Student) {
+  return (
+    classes.value.find((entry) => entry.id === row.classId)?.classCode ?? ''
+  )
 }
-</script>
-<template>
-  <h1 v-if="!selected">Schüler</h1>
-  <p v-if="error" role="alert">{{ error }}</p>
+// Lehrkräfte legen Schüler nur in Klassen an, die sie selbst leiten
+const createHint = computed(() => {
+  if (auth.isAdmin || loading.value) return ''
+  if (!managedClasses.value.length)
+    return 'Neue Schüler legt die Klassenleitung oder die Verwaltung an.'
+  if (managedClasses.value.length < classes.value.length)
+    return `Neue Schüler kannst du in deiner eigenen Klasse anlegen (${managedClasses.value
+      .map((entry) => entry.classCode)
+      .join(', ')}).`
+  return ''
+})
+const profileContext = computed(() =>
+  classPage.value
+    ? { von: 'klasse' }
+    : selection.value
+      ? { klasse: selection.value.id }
+      : {}
+)
 
-  <p v-if="staffId && !classes.length && !error">Keine Klasse verfügbar.</p>
+onMounted(async () => {
+  try {
+    const [available, currentStaffId] = await Promise.all([
+      loadData<StudentClass[]>('/api/classes'),
+      loadData<number>('/api/staff-id')
+    ])
+    classes.value = available
+    staffId.value = currentStaffId
+  } catch {
+    error.value = 'Klassen konnten nicht geladen werden.'
+  } finally {
+    loading.value = false
+  }
+})
+</script>
+
+<template>
+  <RouterLink v-if="classPage" class="back" :to="{ name: 'klassen' }">
+    <i class="pi pi-arrow-left" aria-hidden="true" /> Zur Klassenliste
+  </RouterLink>
+  <h1 v-if="loading || error || (classPage && !selection)">{{ title }}</h1>
+  <PageError v-if="error" :message="error" />
+  <p v-else-if="loading" role="status">Klassen werden geladen …</p>
+  <PageError
+    v-else-if="classPage && !selection"
+    message="Klasse nicht gefunden oder kein Zugriff."
+  />
   <MasterDataList
-    v-if="selected"
-    :key="selected"
-    :url="'/api/classes/' + selected + '/students'"
-    item-url="/api/students"
-    :editable="auth.isAdmin || own"
-    title="Schüler"
+    v-else
+    :url="rosterUrl"
+    :editable="false"
+    :can-create="canCreate"
+    :create-url="createUrl"
+    :title="title"
     column-title="Name"
-    :columns="[
-      { field: 'unexcusedMinutes', title: 'Unentschuldigt (min)' },
-      { field: 'excusedMinutes', title: 'Entschuldigt (min)' }
-    ]"
-    :label="label"
-    @saved="cardFormVersion++"
+    entry-name="Schüler"
+    search-placeholder="Name oder Klasse suchen"
+    :search-text="classCode"
+    :columns="columns"
+    :label="studentLabel"
+    @saved="createClassId = undefined"
   >
-    <template #filter>
-      <label class="class-filter">
+    <template #filter="{ saving }">
+      <div v-if="!classPage" class="class-filter">
+        <label for="student-list-class">Klasse</label>
+        <select id="student-list-class" v-model="selection" :disabled="saving">
+          <option :value="undefined">Alle Klassen</option>
+          <option v-for="entry in classes" :key="entry.id" :value="entry">
+            {{ entry.classCode }}
+          </option>
+        </select>
+      </div>
+    </template>
+    <template #name="{ row }">
+      <RouterLink
+        :to="{
+          name: 'schueler-detail',
+          params: { studentId: row.id },
+          query: profileContext
+        }"
+      >
+        {{ studentLabel(row) }}
+      </RouterLink>
+    </template>
+    <template #form>
+      <label v-if="!selection">
         Klasse
-        <select v-model="selected">
-          <option v-for="c in classes" :key="c.id" :value="c.id">
-            {{ c.classCode }}
+        <select v-model="createClassId" required>
+          <option :value="undefined" disabled>Klasse auswählen</option>
+          <option
+            v-for="entry in managedClasses"
+            :key="entry.id"
+            :value="entry.id"
+          >
+            {{ entry.classCode }}
           </option>
         </select>
       </label>
-    </template>
-    <template #form="{ row }">
-      <label>
-        Vorname
-        <InputText
-          name="firstName"
-          type="text"
-          :default-value="row?.firstName"
-          maxlength="100"
-          required
-        />
-      </label>
-      <label>
-        Nachname
-        <InputText
-          name="lastName"
-          type="text"
-          :default-value="row?.lastName"
-          maxlength="100"
-          required
-        />
-      </label>
-      <label>
-        Geburtsdatum
-        <InputText
-          name="birthDate"
-          type="date"
-          :default-value="row?.birthDate"
-          required
-        />
-      </label>
+      <StudentFormFields />
     </template>
   </MasterDataList>
-  <StudentRfidCards :key="cardFormVersion" :classes="classes" />
+  <p v-if="createHint && !error" class="create-hint">{{ createHint }}</p>
+  <details v-if="!classPage && !auth.isAdmin && !loading" class="cards">
+    <summary>RFID-Karten deiner Klassen anzeigen</summary>
+    <StudentRfidAssignments />
+  </details>
 </template>
+
+<style scoped>
+a {
+  color: var(--accent);
+}
+
+.back {
+  display: inline-block;
+  margin-bottom: 1rem;
+}
+
+.create-hint {
+  margin: 0.9rem 0 0;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.cards {
+  max-width: 68rem;
+  margin-top: 1.5rem;
+}
+
+.cards summary {
+  width: fit-content;
+  min-height: 44px;
+  padding: 0.6rem 0;
+  color: var(--accent-ink);
+  font-weight: 600;
+  cursor: pointer;
+}
+</style>

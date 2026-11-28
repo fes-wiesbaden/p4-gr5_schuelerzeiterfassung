@@ -14,22 +14,27 @@ defineProps<{
 
 <template>
   <div class="app-table-scroll">
-    <table class="app-table">
-      <caption class="app-table__caption">
+    <table class="app-table" role="table">
+      <caption class="visually-hidden">
         {{
           caption
         }}
       </caption>
-      <thead>
-        <tr>
-          <th v-for="column in columns" :key="column.field" scope="col">
+      <thead role="rowgroup">
+        <tr role="row">
+          <th
+            v-for="column in columns"
+            :key="column.field"
+            scope="col"
+            role="columnheader"
+          >
             {{ column.header }}
           </th>
         </tr>
       </thead>
-      <tbody>
-        <tr v-for="row in rows" :key="String(row[rowKey])">
-          <td v-for="column in columns" :key="column.field">
+      <tbody role="rowgroup">
+        <tr v-for="row in rows" :key="String(row[rowKey])" role="row">
+          <td v-for="column in columns" :key="column.field" role="cell">
             <slot
               :name="`cell-${column.field}`"
               :value="row[column.field]"
@@ -55,25 +60,16 @@ defineProps<{
   font-size: 0.9rem;
 }
 
-.app-table__caption {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  overflow: hidden;
-  clip: rect(0 0 0 0);
-  white-space: nowrap;
-}
-
 .app-table th,
 .app-table td {
   text-align: left;
   padding: 12px 16px;
-  border-bottom: 1px solid #e2e5ea;
+  border-bottom: 1px solid var(--line);
   white-space: nowrap;
 }
 
 .app-table th {
-  color: #4a5568;
+  color: var(--muted);
   font-weight: 600;
   font-size: 0.8rem;
   text-transform: uppercase;

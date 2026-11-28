@@ -3,6 +3,7 @@ package de.feswiesbaden.attendance.repository;
 import de.feswiesbaden.attendance.enums.AttendanceStatus;
 import de.feswiesbaden.attendance.enums.AuditEventType;
 import de.feswiesbaden.attendance.enums.Weekday;
+import de.feswiesbaden.attendance.service.AttendanceAccountingService.ManualAbsenceEntry;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
@@ -15,7 +16,9 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.UUID;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.core.ResultSetExtractor;
 import org.springframework.jdbc.support.GeneratedKeyHolder;
 import org.springframework.stereotype.Repository;
 
@@ -27,6 +30,12 @@ import org.springframework.stereotype.Repository;
  */
 @Repository
 public class AttendanceAccountingRepository {
+  /** Spalten eines Audits mit dem Tabellenalias h, passend zu {@link #audit(ResultSet)} */
+  private static final String AUDIT_COLUMNS =
+      " h.id, h.attendance_id, h.deletion_date_id, h.event_type, h.occurred_at,"
+          + " h.excusal_ends_at, h.excusal_status, h.excusal_reason, h.old_status, h.new_status,"
+          + " h.unexcused_minutes_delta, h.excused_minutes_delta";
+
   private final JdbcTemplate jdbc;
 
   public AttendanceAccountingRepository(JdbcTemplate jdbc) {
@@ -45,12 +54,13 @@ public class AttendanceAccountingRepository {
         classId);
   }
 
-  /** Lädt die Fehlminutenkonten und sperrt den Schüler, sofern er zur angegebenen Klasse gehört */
-  public Optional<Account> lockAccount(Long studentId, Long classId) {
+  /** Lädt die Fehlminutenkonten und sperrt den Schüler bei Bedarf, sofern er zur Klasse gehört */
+  public Optional<Account> findAccount(Long studentId, Long classId, boolean lock) {
     return jdbc
         .query(
             "SELECT id, unexcused_minutes_account, excused_minutes_account, created_at"
-                + " FROM student WHERE id = ? AND school_class_id = ? FOR UPDATE",
+                + " FROM student WHERE id = ? AND school_class_id = ?"
+                + (lock ? " FOR UPDATE" : ""),
             this::account,
             studentId,
             classId)
@@ -70,11 +80,6 @@ public class AttendanceAccountingRepository {
         today);
   }
 
-  /** Lädt die zugeordneten Blockzeiträume der Klasse mit Lesesperre */
-  public List<Period> findPeriods(Long classId) {
-    return findPeriods(classId, true);
-  }
-
   /** Lädt die Blockzeiträume der Klasse und verwendet bei Bedarf eine Lesesperre */
   public List<Period> findPeriods(Long classId, boolean lock) {
     return jdbc.query(
@@ -89,18 +94,11 @@ public class AttendanceAccountingRepository {
         classId);
   }
 
-  /**
-   * Lädt alle Slots mit positiver Dauer aus dem Stundenplan, nach Beginn sortiert und mit
-   * Lesesperre
-   */
-  public List<Slot> findSlots(Long timetableId) {
-    return findSlots(timetableId, true);
-  }
-
   /** Lädt die Unterrichtszeiten nach Beginn sortiert und verwendet bei Bedarf eine Lesesperre */
   public List<Slot> findSlots(Long timetableId, boolean lock) {
     return jdbc.query(
-        "SELECT weekday, start_time, end_time, room_id, valid_from, valid_until FROM timetable_slot"
+        "SELECT weekday, start_time, end_time, room_id, valid_from, valid_until, subject, teacher_id"
+            + " FROM timetable_slot"
             + " WHERE timetable_id = ? AND start_time < end_time ORDER BY start_time, id"
             + (lock ? " FOR SHARE" : ""),
         (row, index) ->
@@ -110,9 +108,56 @@ public class AttendanceAccountingRepository {
                 row.getTime("end_time").toLocalTime(),
                 row.getLong("room_id"),
                 row.getObject("valid_from", LocalDate.class),
-                row.getObject("valid_until", LocalDate.class)),
+                row.getObject("valid_until", LocalDate.class),
+                row.getString("subject"),
+                row.getObject("teacher_id", Long.class)),
         timetableId);
   }
+
+  /** Lädt die als ausgefallen markierten Unterrichtszeiten der Klasse */
+  public List<Cancellation> findCancellations(Long classId) {
+    return jdbc.query(
+        "SELECT lesson_date, start_time, end_time FROM lesson_cancellation WHERE class_id = ?"
+            + " ORDER BY lesson_date, start_time",
+        (row, index) ->
+            new Cancellation(
+                row.getObject("lesson_date", LocalDate.class),
+                row.getTime("start_time").toLocalTime(),
+                row.getTime("end_time").toLocalTime()),
+        classId);
+  }
+
+  /** Speichert einen Unterrichtsausfall mit einer Kopie der Unterrichtszeit */
+  public void insertCancellation(
+      Long classId,
+      LocalDate date,
+      LocalTime startsAt,
+      LocalTime endsAt,
+      Long staffId,
+      LocalDateTime now) {
+    jdbc.update(
+        "INSERT INTO lesson_cancellation"
+            + " (class_id, lesson_date, start_time, end_time, created_by, created_at)"
+            + " VALUES (?, ?, ?, ?, ?, ?)",
+        classId,
+        date,
+        startsAt,
+        endsAt,
+        staffId,
+        now);
+  }
+
+  /** Entfernt den gespeicherten Ausfall, der am Datum um startsAt beginnt */
+  public void deleteCancellation(Long classId, LocalDate date, LocalTime startsAt) {
+    jdbc.update(
+        "DELETE FROM lesson_cancellation WHERE class_id = ? AND lesson_date = ? AND start_time = ?",
+        classId,
+        date,
+        startsAt);
+  }
+
+  /** Enthält Datum und kopierte Uhrzeiten einer ausgefallenen Unterrichtszeit */
+  public record Cancellation(LocalDate date, LocalTime startsAt, LocalTime endsAt) {}
 
   /**
    * Prüft, ob am angegebenen Tag eine andere Klasse denselben Raum in einem überlappenden Zeitraum
@@ -149,24 +194,31 @@ public class AttendanceAccountingRepository {
         date);
   }
 
-  /** Lädt und sperrt alle Tagesanwesenheiten eines Schülers, nach Datum sortiert */
-  public List<DayAttendance> findAttendances(Long studentId) {
+  /** Lädt die Tagesanwesenheiten eines Schülers, bei Bedarf mit Sperre */
+  public List<DayAttendance> findAttendances(Long studentId, boolean lock) {
     return jdbc.query(
-        "SELECT id, attendance_date, status FROM attendance WHERE student_id = ? ORDER BY attendance_date FOR UPDATE",
+        "SELECT id, attendance_date, status, full_absence, full_unexcused_minutes, full_excused_minutes"
+            + " FROM attendance WHERE student_id = ? ORDER BY attendance_date"
+            + (lock ? " FOR UPDATE" : ""),
         (row, index) ->
             new DayAttendance(
                 row.getLong("id"),
                 row.getDate("attendance_date").toLocalDate(),
-                AttendanceStatus.valueOf(row.getString("status"))),
+                AttendanceStatus.valueOf(row.getString("status")),
+                new FullDay(
+                    nullableStatus(row.getString("full_absence")),
+                    row.getInt("full_unexcused_minutes"),
+                    row.getInt("full_excused_minutes"))),
         studentId);
   }
 
-  /** Lädt und sperrt alle Änderungsprotokolle eines Schülers, nach Ereigniszeit und ID sortiert */
-  public List<Audit> findAudits(Long studentId) {
+  /** Lädt die Änderungsprotokolle eines Schülers, bei Bedarf mit Sperre */
+  public List<Audit> findAudits(Long studentId, boolean lock) {
     return jdbc.query(
-        "SELECT id, attendance_id, deletion_date_id, event_type, occurred_at, old_status, new_status,"
-            + " unexcused_minutes_delta, excused_minutes_delta"
-            + " FROM attendance_audit WHERE student_id = ? ORDER BY occurred_at, id FOR UPDATE",
+        "SELECT"
+            + AUDIT_COLUMNS
+            + " FROM attendance_audit h WHERE h.student_id = ? ORDER BY h.occurred_at, h.id"
+            + (lock ? " FOR UPDATE" : ""),
         (row, index) -> audit(row),
         studentId);
   }
@@ -174,27 +226,80 @@ public class AttendanceAccountingRepository {
   /** Liest die noch aufbewahrten Audits eines Klassentags nach Schüler gruppiert */
   public Map<Long, List<Audit>> findDayAudits(Long classId, LocalDate date, LocalDate today) {
     return jdbc.query(
-        """
-        SELECT h.id, h.student_id, h.attendance_id, h.deletion_date_id, h.event_type, h.occurred_at,
-               h.old_status, h.new_status, h.unexcused_minutes_delta, h.excused_minutes_delta
+        "SELECT h.student_id,"
+            + AUDIT_COLUMNS
+            + """
+
         FROM attendance_audit h
         JOIN attendance a ON a.id = h.attendance_id AND a.student_id = h.student_id
         JOIN student s ON s.id = a.student_id
         JOIN deletion_date d ON d.id = h.deletion_date_id
         WHERE s.school_class_id = ? AND a.attendance_date = ? AND d.delete_after > ?
         """,
-        rows -> {
-          Map<Long, List<Audit>> audits = new HashMap<>();
-          while (rows.next()) {
-            audits
-                .computeIfAbsent(rows.getLong("student_id"), id -> new ArrayList<>())
-                .add(audit(rows));
-          }
-          return audits;
-        },
+        grouped(row -> row.getLong("student_id"), this::audit),
         classId,
         date,
         today);
+  }
+
+  /** Liest die aufbewahrten Tagesaudits eines Schülers aus dem gewählten Datumsbereich */
+  public Map<LocalDate, List<Audit>> findStudentDayAudits(
+      Long studentId, LocalDate from, LocalDate through, LocalDate today) {
+    return jdbc.query(
+        "SELECT a.attendance_date,"
+            + AUDIT_COLUMNS
+            + """
+
+        FROM attendance_audit h
+        JOIN attendance a ON a.id = h.attendance_id AND a.student_id = h.student_id
+        JOIN deletion_date d ON d.id = h.deletion_date_id
+        WHERE h.student_id = ? AND a.attendance_date BETWEEN ? AND ? AND d.delete_after > ?
+        """,
+        grouped(row -> row.getObject("attendance_date", LocalDate.class), this::audit),
+        studentId,
+        from,
+        through,
+        today);
+  }
+
+  /** Liest bereits abgerechnete ganze Fehltage aus aufbewahrten Anwesenheiten. */
+  public Map<LocalDate, AttendanceStatus> findFullAbsences(
+      Long studentId, LocalDate from, LocalDate through, LocalDate today) {
+    return jdbc.query(
+        """
+        SELECT a.attendance_date, a.full_absence
+        FROM attendance a
+        WHERE a.student_id = ? AND a.attendance_date BETWEEN ? AND ? AND a.full_absence IS NOT NULL
+          AND EXISTS (SELECT 1 FROM attendance_audit h
+                      JOIN deletion_date d ON d.id = h.deletion_date_id
+                      WHERE h.attendance_id = a.id AND d.delete_after > ?)
+        """,
+        rows -> {
+          Map<LocalDate, AttendanceStatus> days = new HashMap<>();
+          while (rows.next()) {
+            days.put(
+                rows.getObject("attendance_date", LocalDate.class),
+                AttendanceStatus.valueOf(rows.getString("full_absence")));
+          }
+          return days;
+        },
+        studentId,
+        from,
+        through,
+        today);
+  }
+
+  /** Liefert den Zeitpunkt des letzten Kontenresets für die Anzeige der Korrektursperre */
+  public Optional<LocalDateTime> latestResetAt(Long studentId) {
+    return jdbc.query(
+        """
+        SELECT occurred_at FROM attendance_audit
+        WHERE student_id = ? AND event_type = 'ACCOUNT_RESET'
+        ORDER BY id DESC LIMIT 1
+        """,
+        rows ->
+            rows.next() ? Optional.of(rows.getObject(1, LocalDateTime.class)) : Optional.empty(),
+        studentId);
   }
 
   /** Liest ein Audit mit Statuswechsel und beiden Minutendeltas */
@@ -207,10 +312,34 @@ public class AttendanceAccountingRepository {
         row.getLong("deletion_date_id"),
         AuditEventType.valueOf(row.getString("event_type")),
         row.getObject("occurred_at", LocalDateTime.class),
+        row.getObject("excusal_ends_at", LocalDateTime.class),
+        nullableStatus(row.getString("excusal_status")),
+        row.getString("excusal_reason"),
         newStatus == null ? null : AttendanceStatus.valueOf(newStatus),
         row.getInt("unexcused_minutes_delta"),
         row.getInt("excused_minutes_delta"),
         oldStatus == null ? null : AttendanceStatus.valueOf(oldStatus));
+  }
+
+  /** Liest eine Spalte oder ein Objekt aus der aktuellen Zeile */
+  private interface RowReader<T> {
+    T read(ResultSet row) throws SQLException;
+  }
+
+  /** Gruppiert die Zeilen in Lesereihenfolge nach dem gelesenen Schlüssel */
+  private static <K, V> ResultSetExtractor<Map<K, List<V>>> grouped(
+      RowReader<K> key, RowReader<V> value) {
+    return rows -> {
+      Map<K, List<V>> groups = new HashMap<>();
+      while (rows.next()) {
+        groups.computeIfAbsent(key.read(rows), ignored -> new ArrayList<>()).add(value.read(rows));
+      }
+      return groups;
+    };
+  }
+
+  private static AttendanceStatus nullableStatus(String status) {
+    return status == null ? null : AttendanceStatus.valueOf(status);
   }
 
   /** Legt eine Tagesanwesenheit an und liefert ihre erzeugte ID */
@@ -235,35 +364,91 @@ public class AttendanceAccountingRepository {
     return key.getKey().longValue();
   }
 
-  /**
-   * Fügt ein Änderungsprotokoll ein und speichert die übergebenen Fehlminutenkonten und den
-   * Tagesstatus
-   */
-  public void book(
-      Account account,
-      Long attendanceId,
-      AttendanceStatus status,
-      Audit audit,
-      Long staffId,
-      Integer terminalId,
-      LocalDateTime now) {
+  /** Liest die aufbewahrten Vormerkungen eines Schülers für den angegebenen Zeitraum */
+  public List<PlannedStatus> findPlannedStatuses(
+      Long studentId, LocalDate from, LocalDate through, LocalDate today, boolean lock) {
+    return jdbc.query(
+        """
+        SELECT p.student_id, p.attendance_date, p.starts_at, p.ends_at, p.status
+        FROM planned_attendance_status p JOIN deletion_date d ON d.id = p.deletion_date_id
+        WHERE p.student_id = ? AND p.attendance_date BETWEEN ? AND ? AND d.delete_after > ?
+        ORDER BY p.starts_at
+        """
+            + (lock ? " FOR UPDATE" : ""),
+        this::plannedStatus,
+        studentId,
+        from,
+        through,
+        today);
+  }
+
+  /** Liest die Vormerkungen aller Schüler eines Klassentags */
+  public List<PlannedStatus> findClassPlannedStatuses(
+      Long classId, LocalDate date, LocalDate today) {
+    return jdbc.query(
+        """
+        SELECT p.student_id, p.attendance_date, p.starts_at, p.ends_at, p.status
+        FROM planned_attendance_status p JOIN deletion_date d ON d.id = p.deletion_date_id
+        JOIN student s ON s.id = p.student_id
+        WHERE s.school_class_id = ? AND p.attendance_date = ? AND d.delete_after > ?
+        ORDER BY p.starts_at
+        """,
+        this::plannedStatus,
+        classId,
+        date,
+        today);
+  }
+
+  /** Protokolliert die Vormerkung mit ihrem Erstellungszeitpunkt, Akteur und Löschdatum */
+  public void insertPlannedStatus(
+      PlannedStatus period, Long staffId, Long deletionDateId, LocalDateTime now) {
     jdbc.update(
-        "INSERT INTO attendance_audit (student_id, attendance_id, deletion_date_id, event_type,"
-            + " changed_by_staff_id, terminal_id, old_status, new_status, occurred_at,"
-            + " unexcused_minutes_delta, excused_minutes_delta, created_at)"
-            + " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        account.id(),
-        attendanceId,
-        audit.deletionDateId(),
-        audit.type().name(),
+        """
+        INSERT INTO planned_attendance_status
+            (student_id, attendance_date, starts_at, ends_at, status, changed_by_staff_id,
+             deletion_date_id, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        period.studentId(),
+        period.date(),
+        period.start(),
+        period.end(),
+        period.status().name(),
         staffId,
-        terminalId,
-        audit.oldStatus() == null ? null : audit.oldStatus().name(),
-        audit.status() == null ? null : audit.status().name(),
-        audit.occurredAt(),
-        audit.unexcusedDelta(),
-        audit.excusedDelta(),
+        deletionDateId,
         now);
+  }
+
+  private PlannedStatus plannedStatus(ResultSet row, int index) throws SQLException {
+    return new PlannedStatus(
+        row.getLong("student_id"),
+        row.getObject("attendance_date", LocalDate.class),
+        row.getObject("starts_at", LocalDateTime.class),
+        row.getObject("ends_at", LocalDateTime.class),
+        AttendanceStatus.valueOf(row.getString("status")));
+  }
+
+  /** Enthält den ausgewählten Berliner Tag und den Zeitraum als UTC-Zeit */
+  public record PlannedStatus(
+      Long studentId,
+      LocalDate date,
+      LocalDateTime start,
+      LocalDateTime end,
+      AttendanceStatus status) {}
+
+  /** Prüft einen bereits verarbeiteten Buchungsauftrag der Tagesanwesenheit */
+  public Optional<Integer> findManualBooking(Long attendanceId, UUID requestId) {
+    return jdbc.query(
+        "SELECT unexcused_minutes_delta FROM attendance_audit"
+            + " WHERE attendance_id = ? AND request_id = ? AND event_type = 'MANUAL_ABSENCE_MINUTES' FOR UPDATE",
+        rows -> rows.next() ? Optional.of(rows.getInt(1)) : Optional.empty(),
+        attendanceId,
+        requestId.toString());
+  }
+
+  /** Speichert die berechneten Fehlminutenkonten und den Tagesstatus */
+  public void updateTotals(
+      Account account, Long attendanceId, AttendanceStatus status, LocalDateTime now) {
     jdbc.update(
         "UPDATE student SET unexcused_minutes_account = ?, excused_minutes_account = ? WHERE id = ?",
         account.unexcused(),
@@ -275,6 +460,127 @@ public class AttendanceAccountingRepository {
         now,
         attendanceId);
   }
+
+  /** Übernimmt die Änderungen der Tageszählung getrennt vom unveränderten Minutenkonto. */
+  public void updateFullDay(Long studentId, Long attendanceId, FullDay previous, FullDay current) {
+    jdbc.update(
+        """
+        UPDATE student
+        SET unexcused_days_account = unexcused_days_account + ?,
+            excused_days_account = excused_days_account + ?,
+            full_unexcused_minutes_account = full_unexcused_minutes_account + ?,
+            full_excused_minutes_account = full_excused_minutes_account + ?
+        WHERE id = ?
+        """,
+        current.unexcusedDays() - previous.unexcusedDays(),
+        current.excusedDays() - previous.excusedDays(),
+        current.unexcusedMinutes() - previous.unexcusedMinutes(),
+        current.excusedMinutes() - previous.excusedMinutes(),
+        studentId);
+    jdbc.update(
+        """
+        UPDATE attendance
+        SET full_absence = ?, full_unexcused_minutes = ?, full_excused_minutes = ?, changed_at = changed_at
+        WHERE id = ?
+        """,
+        current.status() == null ? null : current.status().name(),
+        current.unexcusedMinutes(),
+        current.excusedMinutes(),
+        attendanceId);
+  }
+
+  /** Fügt ein unveränderliches Änderungsprotokoll ein */
+  public void insertAudit(
+      Long studentId,
+      Long attendanceId,
+      Audit audit,
+      Long staffId,
+      Integer terminalId,
+      LocalDateTime now,
+      UUID requestId,
+      String note) {
+    jdbc.update(
+        "INSERT INTO attendance_audit (student_id, attendance_id, deletion_date_id, event_type,"
+            + " changed_by_staff_id, terminal_id, old_status, new_status, occurred_at,"
+            + " excusal_ends_at, excusal_status, excusal_reason,"
+            + " unexcused_minutes_delta, excused_minutes_delta, created_at, request_id, note)"
+            + " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        studentId,
+        attendanceId,
+        audit.deletionDateId(),
+        audit.type().name(),
+        staffId,
+        terminalId,
+        audit.oldStatus() == null ? null : audit.oldStatus().name(),
+        audit.status() == null ? null : audit.status().name(),
+        audit.occurredAt(),
+        audit.excusalEndsAt(),
+        audit.excusalStatus() == null ? null : audit.excusalStatus().name(),
+        audit.excusalReason(),
+        audit.unexcusedDelta(),
+        audit.excusedDelta(),
+        now,
+        requestId == null ? null : requestId.toString(),
+        note);
+  }
+
+  /**
+   * Liest die händischen Fehlminutenbuchungen und ihre Rücknahmen (negative Minuten) eines Schülers
+   * je Tag in der Reihenfolge ihrer Erfassung
+   */
+  public Map<LocalDate, List<ManualAbsenceEntry>> findManualEntries(
+      Long studentId, LocalDate from, LocalDate through, LocalDate today) {
+    return jdbc.query(
+        """
+        SELECT a.attendance_date, h.unexcused_minutes_delta, h.note
+        FROM attendance_audit h
+        JOIN attendance a ON a.id = h.attendance_id AND a.student_id = h.student_id
+        JOIN deletion_date d ON d.id = h.deletion_date_id
+        WHERE h.student_id = ? AND a.attendance_date BETWEEN ? AND ? AND d.delete_after > ?
+          AND h.event_type = 'MANUAL_ABSENCE_MINUTES'
+        ORDER BY h.id
+        """,
+        grouped(
+            row -> row.getObject("attendance_date", LocalDate.class),
+            row ->
+                new ManualAbsenceEntry(
+                    row.getInt("unexcused_minutes_delta"), row.getString("note"))),
+        studentId,
+        from,
+        through,
+        today);
+  }
+
+  /** Liefert die Schüler der Klasse, deren händische Fehlminuten des Tages in Summe positiv sind */
+  public List<ManualAbsence> findManualAbsences(Long classId, LocalDate date, LocalDate today) {
+    return jdbc.query(
+        """
+        SELECT s.id, s.first_name, s.last_name, SUM(h.unexcused_minutes_delta) AS minutes
+        FROM attendance_audit h
+        JOIN attendance a ON a.id = h.attendance_id AND a.student_id = h.student_id
+        JOIN student s ON s.id = a.student_id
+        JOIN deletion_date d ON d.id = h.deletion_date_id
+        WHERE s.school_class_id = ? AND a.attendance_date = ? AND d.delete_after > ?
+          AND h.event_type = 'MANUAL_ABSENCE_MINUTES'
+        GROUP BY s.id, s.first_name, s.last_name
+        HAVING SUM(h.unexcused_minutes_delta) > 0
+        ORDER BY s.last_name, s.first_name, s.id
+        """,
+        (row, index) ->
+            new ManualAbsence(
+                row.getLong("id"),
+                row.getString("first_name"),
+                row.getString("last_name"),
+                date,
+                row.getLong("minutes")),
+        classId,
+        date,
+        today);
+  }
+
+  /** Enthält einen Schüler mit seinen wirksamen händischen Fehlminuten eines Tages */
+  public record ManualAbsence(
+      Long studentId, String firstName, String lastName, LocalDate date, long minutes) {}
 
   /** Liest Schüler-ID, Fehlminutenkonten und Erstellungszeitpunkt aus dem SQL-Abfrageergebnis */
   private Account account(ResultSet row, int index) throws SQLException {
@@ -301,7 +607,9 @@ public class AttendanceAccountingRepository {
         -account.unexcused(),
         -account.excused());
     jdbc.update(
-        "UPDATE student SET unexcused_minutes_account = 0, excused_minutes_account = 0 WHERE id = ?",
+        "UPDATE student SET unexcused_minutes_account = 0, excused_minutes_account = 0,"
+            + " unexcused_days_account = 0, excused_days_account = 0,"
+            + " full_unexcused_minutes_account = 0, full_excused_minutes_account = 0 WHERE id = ?",
         account.id());
   }
 
@@ -313,14 +621,19 @@ public class AttendanceAccountingRepository {
   /** Enthält einen zugeordneten Blockzeitraum mit seiner Blockplan-ID */
   public record Period(Long planId, LocalDate startsOn, LocalDate endsOn) {}
 
-  /** Enthält Wochentag, Beginn, Ende und Raum einer geplanten Unterrichtszeit */
+  /**
+   * Enthält Wochentag, Beginn, Ende und Raum einer geplanten Unterrichtszeit sowie optional Fach
+   * und Lehrkraft
+   */
   public record Slot(
       DayOfWeek weekday,
       LocalTime startsAt,
       LocalTime endsAt,
       long roomId,
       LocalDate validFrom,
-      LocalDate validUntil) {
+      LocalDate validUntil,
+      String subject,
+      Long teacherId) {
     /** Prüft Wochentag und Gültigkeit dieser Fassung für einen Kalendertag */
     public boolean occursOn(LocalDate date) {
       return weekday == date.getDayOfWeek()
@@ -330,7 +643,26 @@ public class AttendanceAccountingRepository {
   }
 
   /** Enthält ID, Datum und aktuellen Status einer Tagesanwesenheit */
-  public record DayAttendance(Long id, LocalDate date, AttendanceStatus status) {}
+  public record DayAttendance(Long id, LocalDate date, AttendanceStatus status, FullDay fullDay) {}
+
+  /** Ein ganzer Fehltag und die Minuten, die bereits in seiner Tageszählung enthalten sind. */
+  public record FullDay(AttendanceStatus status, int unexcusedMinutes, int excusedMinutes) {
+    public static final FullDay NONE = new FullDay(null, 0, 0);
+
+    public FullDay includingManualMinutes(long minutes) {
+      return status == null || minutes == 0
+          ? this
+          : new FullDay(status, Math.toIntExact(unexcusedMinutes + minutes), excusedMinutes);
+    }
+
+    public int unexcusedDays() {
+      return status == AttendanceStatus.ABWESEND ? 1 : 0;
+    }
+
+    public int excusedDays() {
+      return status == AttendanceStatus.ENTSCHULDIGT ? 1 : 0;
+    }
+  }
 
   /**
    * Enthält ein Änderungsprotokoll mit UTC-Ereigniszeit, optionalem Statuswechsel und
@@ -343,8 +675,36 @@ public class AttendanceAccountingRepository {
       Long deletionDateId,
       AuditEventType type,
       LocalDateTime occurredAt,
+      LocalDateTime excusalEndsAt,
+      AttendanceStatus excusalStatus,
+      String excusalReason,
       AttendanceStatus status,
       int unexcusedDelta,
       int excusedDelta,
-      AttendanceStatus oldStatus) {}
+      AttendanceStatus oldStatus) {
+    public Audit(
+        Long id,
+        Long attendanceId,
+        Long deletionDateId,
+        AuditEventType type,
+        LocalDateTime occurredAt,
+        AttendanceStatus status,
+        int unexcusedDelta,
+        int excusedDelta,
+        AttendanceStatus oldStatus) {
+      this(
+          id,
+          attendanceId,
+          deletionDateId,
+          type,
+          occurredAt,
+          null,
+          null,
+          null,
+          status,
+          unexcusedDelta,
+          excusedDelta,
+          oldStatus);
+    }
+  }
 }

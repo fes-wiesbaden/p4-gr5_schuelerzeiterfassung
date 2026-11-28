@@ -43,6 +43,7 @@ public class RetentionService {
     retention.lockDueDeletionDates(today);
     var attendanceIds = retention.findDueAttendanceIds(today);
     int audits = retention.deleteDueAudits(today);
+    retention.deleteDuePlannedStatuses(today);
     for (Long id : attendanceIds) {
       retention.deleteAttendance(id);
     }

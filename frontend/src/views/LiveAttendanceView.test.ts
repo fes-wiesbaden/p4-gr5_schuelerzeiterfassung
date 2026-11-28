@@ -1,8 +1,10 @@
-import { flushPromises, mount } from '@vue/test-utils'
+import { flushPromises, mount, RouterLinkStub } from '@vue/test-utils'
 import PrimeVue from 'primevue/config'
+import { routeLocationKey } from 'vue-router'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import LiveAttendanceView from './LiveAttendanceView.vue'
+import { notice } from '@/notice'
 
 const classes = [
   { id: 1, classCode: 'KL-A' },
@@ -51,13 +53,16 @@ describe('LiveAttendanceView', () => {
 
   afterEach(() => {
     vi.useRealTimers()
-    vi.unstubAllGlobals()
     fetchMock.mockReset()
   })
 
   async function mountView() {
     const wrapper = mount(LiveAttendanceView, {
-      global: { plugins: [PrimeVue] }
+      global: {
+        plugins: [PrimeVue],
+        provide: { [routeLocationKey as symbol]: { query: {} } },
+        stubs: { RouterLink: RouterLinkStub }
+      }
     })
     await flushPromises()
     return wrapper
@@ -72,7 +77,13 @@ describe('LiveAttendanceView', () => {
     expect(attendanceCalls(fetchMock)).toEqual([
       '/api/classes/2/attendance?date=2026-09-14'
     ])
-    expect(wrapper.text()).toContain('Beispiel, Erika')
+    const profileLink = wrapper.getComponent(RouterLinkStub)
+    expect(profileLink.text()).toBe('Beispiel, Erika')
+    expect(profileLink.props('to')).toEqual({
+      name: 'schueler-detail',
+      params: { studentId: 7 },
+      query: { klasse: 2, datum: '2026-09-14' }
+    })
     expect(wrapper.text()).toContain('Abwesend')
     expect(wrapper.text()).toContain('30')
   })
@@ -111,15 +122,19 @@ describe('LiveAttendanceView', () => {
       respond(200, [{ ...day[0], status: 'ANWESEND' }])
     )
 
-    await vi.advanceTimersByTimeAsync(30 * 60_000)
+    // Eine einzige Abfragerunde um 08:30 statt 60 Runden: schnell und eindeutig
+    vi.setSystemTime(new Date('2026-09-14T06:29:30Z'))
+    await vi.advanceTimersByTimeAsync(30_000)
+    await flushPromises()
 
     const form = wrapper.find('form.correction')
     expect((form.find('select').element as HTMLSelectElement).value).toBe(
       'ANWESEND'
     )
     expect(
-      (form.find('input[type="time"]').element as HTMLInputElement).value
+      (form.find('input.german-time').element as HTMLInputElement).value
     ).toBe('08:30')
+    expect(form.find('option[value="ABWESEND"]').exists()).toBe(false)
   })
 
   it.each([
@@ -130,7 +145,9 @@ describe('LiveAttendanceView', () => {
     const input = wrapper.find(`form.correction ${field}`)
     await input.setValue(value)
 
-    await vi.advanceTimersByTimeAsync(30 * 60_000)
+    await vi.advanceTimersByTimeAsync(30_000)
+    await flushPromises()
+    expect(attendanceCalls(fetchMock)).toHaveLength(2)
 
     expect((input.element as HTMLInputElement).value).toBe(value)
   })
@@ -188,7 +205,11 @@ describe('LiveAttendanceView', () => {
       () => new Promise<Response>((resolve) => (finishClasses = resolve))
     )
     const wrapper = mount(LiveAttendanceView, {
-      global: { plugins: [PrimeVue] }
+      global: {
+        plugins: [PrimeVue],
+        provide: { [routeLocationKey as symbol]: { query: {} } },
+        stubs: { RouterLink: RouterLinkStub }
+      }
     })
 
     wrapper.unmount()
@@ -247,7 +268,7 @@ describe('LiveAttendanceView', () => {
 
     const form = wrapper.find('form.correction')
     await form.find('select').setValue('ENTSCHULDIGT')
-    await form.find('input[type="time"]').setValue('07:45')
+    await form.find('input.german-time').setValue('07:45')
     await form.trigger('submit')
     await flushPromises()
 
@@ -263,8 +284,10 @@ describe('LiveAttendanceView', () => {
     })
     const cells = wrapper.findAll('tbody td').map((cell) => cell.text())
     expect(cells[1]).toBe('Entschuldigt')
-    expect(cells[2]).toBe('15')
-    expect(wrapper.text()).toContain('Status von Beispiel, Erika gespeichert.')
+    expect(cells[2]).toBe('15 Min.')
+    expect(notice.value).toBe(
+      'Beispiel, Erika: Entschuldigt ab 07:45 Uhr gespeichert.'
+    )
   })
 
   it('meldet eine Statusänderung ohne Wirkung nicht als gespeichert', async () => {
@@ -276,8 +299,8 @@ describe('LiveAttendanceView', () => {
     await wrapper.find('form.correction').trigger('submit')
     await flushPromises()
 
-    expect(wrapper.text()).toContain('Keine Änderung')
-    expect(wrapper.text()).not.toContain('gespeichert')
+    expect(notice.value).toContain('Keine Änderung')
+    expect(notice.value).not.toContain('gespeichert')
   })
 
   it('behält beim fehlgeschlagenen Polling die letzte Anzeige und meldet den Fehler', async () => {

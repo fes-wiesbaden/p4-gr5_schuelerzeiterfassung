@@ -103,7 +103,8 @@ public class TimetableRepository {
     return jdbc
         .query(
             """
-            SELECT id, series_id, weekday, start_time, valid_from, valid_until FROM timetable_slot
+            SELECT id, series_id, weekday, start_time, valid_from, valid_until, subject, teacher_id
+            FROM timetable_slot
             WHERE id = ? AND timetable_id = ? AND valid_until IS NULL FOR UPDATE
             """,
             this::slotVersion,
@@ -117,7 +118,8 @@ public class TimetableRepository {
   public List<SlotVersion> lockPredecessors(Long timetableId, Long seriesId, LocalDate today) {
     return jdbc.query(
         """
-        SELECT id, series_id, weekday, start_time, valid_from, valid_until FROM timetable_slot
+        SELECT id, series_id, weekday, start_time, valid_from, valid_until, subject, teacher_id
+        FROM timetable_slot
         WHERE timetable_id = ? AND (id = ? OR series_id = ?) AND valid_until > ?
         ORDER BY id FOR UPDATE
         """,
@@ -137,7 +139,57 @@ public class TimetableRepository {
         Weekday.valueOf(row.getString("weekday")),
         row.getObject("start_time", LocalTime.class),
         row.getObject("valid_from", LocalDate.class),
-        row.getObject("valid_until", LocalDate.class));
+        row.getObject("valid_until", LocalDate.class),
+        row.getString("subject"),
+        row.getObject("teacher_id", Long.class));
+  }
+
+  /**
+   * Kopiert die Slotfassungen und das Stundenraster eines Stundenplans in einen neuen. Die Kopien
+   * gelten nur bis ausschließlich until und erhalten keine Serienzuordnung
+   */
+  public void copyHistory(Long sourceId, Long targetId, LocalDate until) {
+    jdbc.update(
+        """
+        INSERT INTO timetable_slot
+            (timetable_id, room_id, weekday, start_time, end_time, valid_from, valid_until,
+             subject, teacher_id)
+        SELECT ?, room_id, weekday, start_time, end_time, valid_from,
+               LEAST(COALESCE(valid_until, ?), ?), subject, teacher_id
+        FROM timetable_slot
+        WHERE timetable_id = ? AND (valid_from IS NULL OR valid_from < ?)
+        """,
+        targetId,
+        until,
+        until,
+        sourceId,
+        until);
+    jdbc.update(
+        """
+        INSERT INTO timetable_period (timetable_id, period_number, starts_at, ends_at)
+        SELECT ?, period_number, starts_at, ends_at FROM timetable_period WHERE timetable_id = ?
+        """,
+        targetId,
+        sourceId);
+  }
+
+  /** Kopiert die Slotfassungen eines Stundenplans für die Zeit ab from in einen anderen */
+  public void copyContinuation(Long sourceId, Long targetId, LocalDate from) {
+    jdbc.update(
+        """
+        INSERT INTO timetable_slot
+            (timetable_id, room_id, weekday, start_time, end_time, valid_from, valid_until,
+             subject, teacher_id)
+        SELECT ?, room_id, weekday, start_time, end_time,
+               GREATEST(COALESCE(valid_from, ?), ?), valid_until, subject, teacher_id
+        FROM timetable_slot
+        WHERE timetable_id = ? AND (valid_until IS NULL OR valid_until > ?)
+        """,
+        targetId,
+        from,
+        from,
+        sourceId,
+        from);
   }
 
   /** Entfernt die angegebene Slotfassung */
@@ -161,15 +213,18 @@ public class TimetableRepository {
       LocalTime startsAt,
       LocalTime endsAt,
       LocalDate validFrom,
-      Long seriesId) {
+      Long seriesId,
+      String subject,
+      Long teacherId) {
     var key = new GeneratedKeyHolder();
     jdbc.update(
         connection -> {
           var insert =
               connection.prepareStatement(
                   "INSERT INTO timetable_slot"
-                      + " (timetable_id, room_id, weekday, start_time, end_time, valid_from, series_id)"
-                      + " VALUES (?, ?, ?, ?, ?, ?, ?)",
+                      + " (timetable_id, room_id, weekday, start_time, end_time, valid_from, series_id,"
+                      + " subject, teacher_id)"
+                      + " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                   Statement.RETURN_GENERATED_KEYS);
           insert.setLong(1, timetableId);
           insert.setLong(2, roomId);
@@ -178,6 +233,8 @@ public class TimetableRepository {
           insert.setObject(5, endsAt);
           insert.setObject(6, validFrom);
           insert.setObject(7, seriesId);
+          insert.setString(8, subject);
+          insert.setObject(9, teacherId);
           return insert;
         },
         key);
@@ -191,7 +248,9 @@ public class TimetableRepository {
       Weekday weekday,
       LocalTime startsAt,
       LocalDate validFrom,
-      LocalDate validUntil) {}
+      LocalDate validUntil,
+      String subject,
+      Long teacherId) {}
 
   /** Enthält die Terminmerkmale einer möglichen Raumüberschneidung */
   public record RoomOverlap(Weekday weekday, LocalDate startsOn, LocalDate endsOn) {}
