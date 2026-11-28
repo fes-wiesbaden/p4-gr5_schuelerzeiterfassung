@@ -14,9 +14,9 @@ export interface HistoryDay {
   canPlanStatus: boolean
   fullAbsence?: 'ABWESEND' | 'ENTSCHULDIGT' | null
   wasPresent?: boolean
-  canBookMinutes?: boolean
+  canBookMinutes: boolean
   // Geplante Unterrichtsminuten des Tages
-  plannedMinutes?: number
+  plannedMinutes: number
   // Noch zulässige händische Fehlminuten: geplanter Unterricht abzüglich der
   // bereits berechneten und händischen Fehlminuten
   manualAbsenceLimit?: number

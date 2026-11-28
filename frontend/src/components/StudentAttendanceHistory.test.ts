@@ -34,6 +34,8 @@ it('zeigt die Woche eines Schülers und entschuldigt alle offenen Fehlzeiten des
     didNotArrive: false,
     absenceLevel: 'PARTIAL',
     editable: true,
+    canBookMinutes: false,
+    plannedMinutes: 90,
     manualAbsenceMinutes: 0,
     canExcuseOpenAbsences: true
   }
@@ -100,6 +102,7 @@ it('zeigt die Woche eines Schülers und entschuldigt alle offenen Fehlzeiten des
 
   expect(wrapper.find('[role="status"]').exists()).toBe(false)
   expect(wrapper.find('option[value="excuse"]').exists()).toBe(false)
+  expect(wrapper.find('option[value="minutes"]').exists()).toBe(false)
   expect(wrapper.text()).not.toContain('Fehlzeitabschnitte')
   expect(wrapper.find('tr.history-partial').exists()).toBe(false)
   expect(
@@ -122,6 +125,8 @@ it('blättert zwei Kalenderwochen vor und merkt nur die erlaubten Status vor', a
     didNotArrive: false,
     absenceLevel: null,
     editable: false,
+    canBookMinutes: false,
+    plannedMinutes: 90,
     canExcuseOpenAbsences: false,
     manualAbsenceMinutes: 0,
     canCorrectStatus: false,

@@ -142,15 +142,11 @@ const statuses = Object.entries(STATUS_LABELS).map(([value, label]) => ({
   label
 }))
 
-function canAddMinutes(entry?: HistoryDay) {
-  return Boolean(entry?.canBookMinutes ?? entry?.editable)
-}
-
 function availableActions(entry: HistoryDay): DayAction[] {
   const actions: DayAction[] = []
   if (entry.canExcuseOpenAbsences) actions.push('excuse')
   if (entry.canCorrectStatus || entry.canPlanStatus) actions.push('status')
-  if (canAddMinutes(entry)) actions.push('minutes')
+  if (entry.canBookMinutes) actions.push('minutes')
   // Auch an einem ganz ausgefallenen Tag lassen sich Minuten wieder entfernen
   if (entry.manualAbsenceMinutes > 0) actions.push('removeMinutes')
   return actions.length ? actions : ['status']
@@ -278,16 +274,8 @@ function showCurrentWeek() {
 }
 
 function noPlannedLessons(entry: HistoryDay) {
-  if (entry.plannedMinutes !== undefined) {
-    return (
-      entry.plannedMinutes === 0 &&
-      !entry.plannedStatuses?.length &&
-      !entry.excusals?.length
-    )
-  }
   return (
-    entry.date > toIsoDate(today) &&
-    !entry.canPlanStatus &&
+    entry.plannedMinutes === 0 &&
     !entry.plannedStatuses?.length &&
     !entry.excusals?.length
   )
@@ -432,7 +420,7 @@ async function submitDay() {
   let requestKey: string | undefined
   let success = 'Änderung gespeichert.'
   if (action.value === 'minutes') {
-    if (!canAddMinutes(entry)) return
+    if (!entry.canBookMinutes) return
     const count = Number(minutes.value)
     const limit = minutesLimit.value
     if (!Number.isInteger(count) || count < 1) {
