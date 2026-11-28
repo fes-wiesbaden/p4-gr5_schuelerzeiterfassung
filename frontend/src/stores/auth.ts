@@ -48,8 +48,9 @@ export const useAuthStore = defineStore('auth', () => {
         return false
       }
 
-      user.value = (await response.json()) as AuthUser
-      sessionChecked.value = true
+      const authenticatedUser = (await response.json()) as AuthUser
+      clearSession()
+      user.value = authenticatedUser
       return true
     } catch {
       errorMessage.value = SERVER_UNREACHABLE
@@ -60,6 +61,7 @@ export const useAuthStore = defineStore('auth', () => {
   }
 
   function clearSession() {
+    timetableDraft.value = undefined
     user.value = null
     sessionChecked.value = true
     errorMessage.value = ''
@@ -75,8 +77,6 @@ export const useAuthStore = defineStore('auth', () => {
         return false
       }
       clearSession()
-      // Ein offener Stundenplan-Entwurf gehört nicht in die nächste Anmeldung
-      timetableDraft.value = undefined
       // Nach der Abmeldung muss /api/me erneut aufgerufen werden, damit vor
       // der nächsten Anmeldung wieder ein CSRF-Token-Cookie vorhanden ist
       sessionChecked.value = false

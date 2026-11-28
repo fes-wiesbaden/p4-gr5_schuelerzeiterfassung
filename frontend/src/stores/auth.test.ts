@@ -9,28 +9,36 @@ afterEach(() => {
   timetableDraft.value = undefined
 })
 
-it('verwirft beim Abmelden einen offenen Stundenplan-Entwurf', async () => {
-  setActivePinia(createPinia())
-  vi.stubGlobal(
-    'fetch',
-    vi.fn(async () => new Response(null, { status: 204 }))
-  )
-  const auth = useAuthStore()
-  auth.user = { name: 'Verwaltung', role: 'admin' }
-  timetableDraft.value = {
-    name: 'Plan',
-    slots: [],
-    notes: [],
-    rooms: [],
-    teachers: [],
-    classCode: null,
-    classId: null,
-    classes: [],
-    blockPlans: []
-  }
+it.each(['Abmelden', 'Sitzungsablauf'])(
+  'verwirft bei %s einen offenen Stundenplan-Entwurf',
+  async (action) => {
+    setActivePinia(createPinia())
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response(null, { status: 204 }))
+    )
+    const auth = useAuthStore()
+    auth.user = { name: 'Verwaltung', role: 'admin' }
+    timetableDraft.value = {
+      name: 'Plan',
+      slots: [],
+      notes: [],
+      rooms: [],
+      teachers: [],
+      classCode: null,
+      classId: null,
+      classes: [],
+      blockPlans: []
+    }
 
-  expect(await auth.logout()).toBe(true)
-  expect(timetableDraft.value).toBeUndefined()
-  await nextTick()
-  expect(sessionStorage.getItem('stundenplan-entwurf')).toBeNull()
-})
+    await nextTick()
+    expect(sessionStorage.getItem('stundenplan-entwurf')).not.toBeNull()
+
+    if (action === 'Abmelden') expect(await auth.logout()).toBe(true)
+    else auth.clearSession()
+
+    expect(timetableDraft.value).toBeUndefined()
+    await nextTick()
+    expect(sessionStorage.getItem('stundenplan-entwurf')).toBeNull()
+  }
+)
